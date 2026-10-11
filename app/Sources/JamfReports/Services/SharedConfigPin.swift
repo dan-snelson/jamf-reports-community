@@ -40,6 +40,10 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     /// leaves config.yaml; `notifyURLHash` is its SHA-256, so a changed path or token drifts too.
     var notifyURLHost: String
     var notifyURLHash: String = ""
+    /// `html.history_file` as typed, tilde expanded: a file the HTML report appends to.
+    var htmlHistoryFile: String = ""
+    /// `branding.logo_path` as typed, tilde expanded: a file the workbook embeds.
+    var brandingLogoPath: String = ""
 
     /// One pinned key, named as it is written in config.yaml.
     enum Key: String, CaseIterable, Sendable {
@@ -55,16 +59,19 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         case protectProfile = "protect.profile"
         case notifyDetail = "notify.detail"
         case notifyURL = "notify.url"
+        case htmlHistoryFile = "html.history_file"
+        case brandingLogoPath = "branding.logo_path"
 
         /// `text(of:)` with everything a comparison needs: the webhook's full URL hash.
         fileprivate func token(of pin: SharedConfigPin) -> String {
             self == .notifyURL ? "\(pin.notifyURLHost) \(pin.notifyURLHash)" : text(of: pin)
         }
 
-        /// The keys that name a folder the app reads or writes.
+        /// The keys that name a folder or file the app reads or writes.
         var isFolder: Bool {
             switch self {
-            case .outputDir, .archiveDir, .dataDir, .historicalDir, .retentionArchiveDir: true
+            case .outputDir, .archiveDir, .dataDir, .historicalDir, .retentionArchiveDir,
+                 .htmlHistoryFile, .brandingLogoPath: true
             default: false
             }
         }
@@ -85,6 +92,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             case .historicalDir: pin.historicalDir
             case .protectProfile: pin.protectProfile
             case .notifyDetail: pin.notifyDetail
+            case .htmlHistoryFile: pin.htmlHistoryFile
+            case .brandingLogoPath: pin.brandingLogoPath
             case .notifyURL:
                 pin.notifyURLHash.isEmpty
                     ? pin.notifyURLHost
@@ -105,6 +114,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             case .historicalDir: pin.historicalDir = source.historicalDir
             case .protectProfile: pin.protectProfile = source.protectProfile
             case .notifyDetail: pin.notifyDetail = source.notifyDetail
+            case .htmlHistoryFile: pin.htmlHistoryFile = source.htmlHistoryFile
+            case .brandingLogoPath: pin.brandingLogoPath = source.brandingLogoPath
             case .notifyURL:
                 pin.notifyURLHost = source.notifyURLHost
                 pin.notifyURLHash = source.notifyURLHash
@@ -176,6 +187,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             (.outputDir, current.outputDir), (.archiveDir, current.archiveDir),
             (.dataDir, current.dataDir), (.historicalDir, current.historicalDir),
             (.retentionArchiveDir, current.retentionArchiveDir),
+            (.htmlHistoryFile, current.htmlHistoryFile),
         ]
         var waiting = folders.filter { outside($0.1) }.map(\.0)
         if current.retentionMode == RetentionConfig.Mode.delete.rawValue {
@@ -237,7 +249,9 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
                 .trimmingCharacters(in: .whitespaces),
             notifyDetail: notifyDetail,
             notifyURLHost: webhookHost(typedURL),
-            notifyURLHash: typedURL.isEmpty ? "" : SharedConfigPin.sha256Hex(typedURL)
+            notifyURLHash: typedURL.isEmpty ? "" : SharedConfigPin.sha256Hex(typedURL),
+            htmlHistoryFile: path("html", "history_file"),
+            brandingLogoPath: path("branding", "logo_path")
         )
     }
 
@@ -474,6 +488,14 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         return keys
     }
 
+    /// `branding.logo_path` when a save changed it against what the screen loaded.
+    static func changedBrandingKeys(before: String?, after: String) -> Set<Key> {
+        guard let before else { return [] }
+        let differs = before.trimmingCharacters(in: .whitespacesAndNewlines)
+            != after.trimmingCharacters(in: .whitespacesAndNewlines)
+        return differs ? [.brandingLogoPath] : []
+    }
+
     /// The notification keys a save changed against what config.yaml held.
     static func changedNotifyKeys(
         previousURL: String, newURL: String, previousDetail: String?, newDetail: String
@@ -594,6 +616,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         var dataDir = false
         var historicalDir = false
         var absolutePaths = false
+        var historyFile = false
+        var logoPath = false
         var isEmpty: Bool { self == PathOverrides() }
 
         func union(_ other: PathOverrides) -> PathOverrides {
@@ -603,6 +627,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             merged.dataDir = dataDir || other.dataDir
             merged.historicalDir = historicalDir || other.historicalDir
             merged.absolutePaths = absolutePaths || other.absolutePaths
+            merged.historyFile = historyFile || other.historyFile
+            merged.logoPath = logoPath || other.logoPath
             return merged
         }
 
@@ -614,6 +640,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             dataDir = check.isDrifted(.dataDir)
             historicalDir = check.isDrifted(.historicalDir)
             absolutePaths = check.isDrifted(.allowAbsolutePaths)
+            historyFile = check.isDrifted(.htmlHistoryFile)
+            logoPath = check.isDrifted(.brandingLogoPath)
         }
     }
 
@@ -781,6 +809,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         case ("jamf_cli", "data_dir") where overrides.dataDir: return ""
         case ("charts", "historical_csv_dir") where overrides.historicalDir: return ""
         case ("output", "allow_absolute_paths") where overrides.absolutePaths: return false
+        case ("html", "history_file") where overrides.historyFile: return ""
+        case ("branding", "logo_path") where overrides.logoPath: return ""
         default: return nil
         }
     }
@@ -814,11 +844,14 @@ extension SharedConfigPin {
             (.retentionEnabled, .retentionEnabled), (.retentionMode, .retentionMode),
             (.retentionArchiveDir, .retentionArchiveDir), (.sharedEnabled, .sharedEnabled),
             (.protectProfile, .protectProfile), (.notifyDetail, .notifyDetail),
-            (.notifyURL, .notifyURLHash),
+            (.notifyURL, .notifyURLHash), (.htmlHistoryFile, .htmlHistoryFile),
+            (.brandingLogoPath, .brandingLogoPath),
         ]
         pinnedKeys = try c.decodeIfPresent([String].self, forKey: .pinnedKeys)
             ?? held.filter { c.contains($0.1) }.map(\.0.rawValue)
         notifyURLHost = try c.decodeIfPresent(String.self, forKey: .notifyURLHost) ?? ""
         notifyURLHash = try c.decodeIfPresent(String.self, forKey: .notifyURLHash) ?? ""
+        htmlHistoryFile = try c.decodeIfPresent(String.self, forKey: .htmlHistoryFile) ?? ""
+        brandingLogoPath = try c.decodeIfPresent(String.self, forKey: .brandingLogoPath) ?? ""
     }
 }

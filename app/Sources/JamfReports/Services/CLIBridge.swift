@@ -552,7 +552,7 @@ final class CLIBridge {
                          text: "[error] could not resolve data_dir for \(profile)"))
             throw CLIBridgeError.workspaceMissing(profile: profile)
         }
-        let engine = ReportEngine(config: config, dataDir: dataDir)
+        let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
         let csvURL = csvPath.map { URL(fileURLWithPath: $0) }
         let defaultURL = engine.resolveOutputURL(
             stem: ExportNaming.reportKind(for: .xlsx, schoolMode: false), profile: profile,
@@ -1385,6 +1385,7 @@ final class CLIBridge {
                 config: config,
                 dataDir: dataDir,
                 outputURL: outputURL,
+                profile: profile,
                 template: template,
                 aiNarrative: aiNarrative,
                 onLine: onLine

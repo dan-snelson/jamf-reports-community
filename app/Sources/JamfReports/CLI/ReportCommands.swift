@@ -39,7 +39,7 @@ struct Generate: AsyncParsableCommand {
     private func write(
         config: ReportConfig, dataDir: URL, template resolved: any ReportTemplate
     ) async throws -> Int {
-        let engine = ReportEngine(config: config, dataDir: dataDir)
+        let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
         // Trust signals (Run History record + webhook digest) — best-effort,
         // additive, and mode-consistent with a scheduled jamf-cli-only run.
         // generate does not collect, so it never evaluates metric alerts.
@@ -131,7 +131,7 @@ struct Html: AsyncParsableCommand {
         let outputURL = output.map { URL(fileURLWithPath: $0) } ?? defaultURL
         try await CLIRun.exclusively {
             _ = try await ReportEngine.generateHTML(
-                config: config, dataDir: dataDir, outputURL: outputURL,
+                config: config, dataDir: dataDir, outputURL: outputURL, profile: profile,
                 onLine: CLIRun.printLogLine)
         }
         print(outputURL.path)

@@ -20,6 +20,10 @@ struct ReportEngine: Sendable {
     let config: ReportConfig
     /// Directory containing cached jamf-cli JSON snapshots (`jamf_cli.data_dir`).
     let dataDir: URL
+    /// The profile this run is for, from the caller (the one the user or schedule named). The
+    /// pinned logo and HTML history file look the profile's workspace up by it; the profile in
+    /// config.yaml is not used for that, since a peer on a shared workspace can edit it.
+    var profile: String? = nil
 
     /// The trend-chart tab, the one tab no sheet plan writes.
     static let chartsSheetName = "Charts"
@@ -153,7 +157,7 @@ struct ReportEngine: Sendable {
     private func csvDashboard(at csvURL: URL, workbook: Workbook) throws -> CSVDashboard {
         let csvData = try Data(contentsOf: csvURL)
         guard let csv = CSVDashboard(config: config, csvData: csvData, workbook: workbook,
-                                     currentCSVURL: csvURL) else {
+                                     currentCSVURL: csvURL, profile: self.profile) else {
             throw ReportEngineError.csvParseFailed(csvURL)
         }
         return csv
@@ -3171,6 +3175,7 @@ struct ReportEngine: Sendable {
         config: ReportConfig,
         dataDir: URL,
         outputURL: URL,
+        profile: String? = nil,
         template: any ReportTemplate = FullInstanceTemplate(),
         aiNarrative: String? = nil,
         locateJamfCLI: @Sendable () -> URL? = { ExecutableLocator.locate("jamf-cli") },
@@ -3181,14 +3186,15 @@ struct ReportEngine: Sendable {
         // toggle would be a false promise for users who generate HTML reports.
         try preflightStrictManifestCheck(config: config, dataDir: dataDir)
         let report = htmlReport(
-            config: config, dataDir: dataDir, template: template, aiNarrative: aiNarrative,
-            expandAll: false, locateJamfCLI: locateJamfCLI, onLine: onLine)
-        let profile = config.jamfCli?.resolvedProfile ?? ""
+            config: config, dataDir: dataDir, profile: profile, template: template,
+            aiNarrative: aiNarrative, expandAll: false, locateJamfCLI: locateJamfCLI,
+            onLine: onLine)
+        let configProfile = config.jamfCli?.resolvedProfile ?? ""
         let digest = try await report.generate(
-            outputURL: outputURL, profileName: profile, sections: template.htmlSections
+            outputURL: outputURL, profileName: configProfile, sections: template.htmlSections
         )
         // Write SHA-256 manifest alongside the HTML artifact.
-        writeManifestStatic(for: outputURL, profile: profile, template: template.identifier)
+        writeManifestStatic(for: outputURL, profile: configProfile, template: template.identifier)
         // T-13 integrity envelope: surface the embedded fingerprint via the log
         // stream so the GUI can show it in the "Report ready" toast.
         onLine?(sha256LogLine(hash: digest, artifact: outputURL))
@@ -3201,6 +3207,7 @@ struct ReportEngine: Sendable {
     private static func htmlReport(
         config: ReportConfig,
         dataDir: URL,
+        profile: String?,
         template: any ReportTemplate,
         aiNarrative: String? = nil,
         expandAll: Bool,
@@ -3209,6 +3216,7 @@ struct ReportEngine: Sendable {
     ) -> HtmlReport {
         var report = HtmlReport(
             config: config, dataDir: dataDir, aiNarrative: aiNarrative, onLine: onLine)
+        report.profile = profile
         report.templateName = template.displayName
         report.openSections = Set(template.htmlOpenSections)
         report.expandAll = expandAll
@@ -3260,8 +3268,8 @@ struct ReportEngine: Sendable {
         // The PDF renderer runs no script, so every group is rendered open rather than
         // left for a print handler, and the expand and collapse buttons are left out.
         let report = htmlReport(
-            config: config, dataDir: dataDir, template: template, expandAll: true,
-            locateJamfCLI: locateJamfCLI)
+            config: config, dataDir: dataDir, profile: profileName.isEmpty ? nil : profileName,
+            template: template, expandAll: true, locateJamfCLI: locateJamfCLI)
         try await report.generate(
             outputURL: tmpHTML,
             profileName: profileName,

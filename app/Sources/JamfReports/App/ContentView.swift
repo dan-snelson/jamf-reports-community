@@ -95,6 +95,8 @@ struct ContentView: View {
                             automationIssues: workspace.automationHealthIssues,
                             isRemediating: workspace.isRemediatingFreshness,
                             sharedConfigKeys: AutomationHealthModel.shared.sharedConfigKeys,
+                            automationFolderRefused:
+                                AutomationHealthModel.shared.automationFolderRefused,
                             onOpenAutomation: { tab = .schedules },
                             onCollectNow: {
                                 Task { await workspace.collectFailingNow() }

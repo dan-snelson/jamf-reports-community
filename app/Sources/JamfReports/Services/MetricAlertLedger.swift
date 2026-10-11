@@ -9,18 +9,15 @@ import Foundation
 /// rule keys have already been carded today and filters them out, while a rule
 /// that trips for the FIRST time later the same day still alerts.
 ///
-/// Stored at `<workspace>/automation/.metric-alerts-ledger.json`. Best-effort
-/// I/O: a read or write failure returns the input keys unchanged, so alerting fails toward
-/// SENDING, never toward silence. The exception is a refused folder (`automation` is a
-/// symlink): the ledger can never be written, so every key reads as already carded and
-/// nothing is sent on every pass.
+/// Stored at `<workspace>/automation/.metric-alerts-ledger.json`, or in this Mac's Application
+/// Support when that folder is refused (`AutomationStateFile`), so a symlinked `automation`
+/// neither mutes the alerts nor repeats them. Best-effort I/O: a read or write failure returns
+/// the input keys unchanged, so alerting fails toward SENDING, never toward silence.
 struct MetricAlertLedger: Sendable {
     let workspace: URL
 
-    /// Nil when `automation` is a symlink.
-    private var fileURL: URL? {
-        WorkspacePaths.confinedFolderOrWarn(["automation"], under: workspace)?
-            .appendingPathComponent(".metric-alerts-ledger.json")
+    private var fileURL: URL {
+        AutomationStateFile.url(named: ".metric-alerts-ledger.json", in: workspace)
     }
 
     private struct Record: Codable {
@@ -33,8 +30,8 @@ struct MetricAlertLedger: Sendable {
     /// read failure returns `keys` unchanged so a ledger problem never silences
     /// an alert.
     func pendingKeys(day: String, keys: [String]) -> [String] {
-        guard !keys.isEmpty, let url = fileURL else { return [] }
-        let existing = load(from: url)
+        guard !keys.isEmpty else { return [] }
+        let existing = load(from: fileURL)
         let already: Set<String> = existing?.day == day ? Set(existing?.keys ?? []) : []
         return keys.filter { !already.contains($0) }
     }
@@ -46,7 +43,8 @@ struct MetricAlertLedger: Sendable {
     /// transient webhook failure silence that rule for the rest of the day —
     /// the same discipline `DayMarker` uses for the overdue digest.
     func record(day: String, keys: [String]) {
-        guard !keys.isEmpty, let url = fileURL else { return }
+        guard !keys.isEmpty else { return }
+        let url = fileURL
         let existing = load(from: url)
         let already: Set<String> = existing?.day == day ? Set(existing?.keys ?? []) : []
         save(Record(day: day, keys: Array(already.union(keys))), to: url)
@@ -59,11 +57,7 @@ struct MetricAlertLedger: Sendable {
 
     private func save(_ record: Record, to fileURL: URL) {
         do {
-            try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try JSONEncoder().encode(record).write(to: fileURL, options: .atomic)
+            try AutomationStateFile.write(JSONEncoder().encode(record), to: fileURL)
         } catch {
             AppLogger.webhook.warning(
                 "MetricAlertLedger: could not persist ledger — same-day dedup may not hold: \(error.localizedDescription, privacy: .public)"

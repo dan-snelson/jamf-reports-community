@@ -17,6 +17,8 @@ struct GlobalHealthBanner: View {
     let isRemediating: Bool
     /// Shared-config keys waiting for a Confirm on this Mac (`SharedConfigPin`).
     var sharedConfigKeys: [String] = []
+    /// The active workspace's `automation` folder is a link (`AutomationStateFile`).
+    var automationFolderRefused = false
     /// Opens the Automation screen, where the detail and the manual controls are.
     let onOpenAutomation: () -> Void
     /// Force-collects the tiers behind the freshness issues. Optional so a
@@ -36,7 +38,7 @@ struct GlobalHealthBanner: View {
             )
         } else if let headline = Self.headline(
             freshness: freshnessIssues, automation: automationIssues,
-            sharedConfig: sharedConfigKeys
+            sharedConfig: sharedConfigKeys, automationFolderRefused: automationFolderRefused
         ) {
             banner(
                 icon: headline.icon,
@@ -53,13 +55,13 @@ struct GlobalHealthBanner: View {
     private func bannerAction() -> InlineBannerAction {
         switch Self.primaryAction(
             freshness: freshnessIssues, canCollect: onCollectNow != nil,
-            sharedConfig: sharedConfigKeys
+            sharedConfig: sharedConfigKeys, automationFolderRefused: automationFolderRefused
         ) {
         case .openConfigDoctor:
             return InlineBannerAction(
                 label: PrimaryAction.openConfigDoctor.label,
                 icon: "stethoscope",
-                help: "Review the values another Mac changed in the shared config.yaml",
+                help: "Review what Config Doctor reports about this workspace",
                 handler: onOpenConfigDoctor ?? onOpenAutomation
             )
         case .collectNow:
@@ -127,10 +129,12 @@ struct GlobalHealthBanner: View {
     nonisolated static func primaryAction(
         freshness: [DataFreshnessIssue],
         canCollect: Bool,
-        sharedConfig: [String] = []
+        sharedConfig: [String] = [],
+        automationFolderRefused: Bool = false
     ) -> PrimaryAction {
-        // The shared-config entry ranks below failing kinds, so the button follows the headline.
-        if !sharedConfig.isEmpty, !freshness.contains(where: { $0.kind == .failing }) {
+        // The Doctor-driven entries rank below failing kinds, so the button follows the headline.
+        if !sharedConfig.isEmpty || automationFolderRefused,
+           !freshness.contains(where: { $0.kind == .failing }) {
             return .openConfigDoctor
         }
         return (canCollect && !freshness.isEmpty) ? .collectNow : .openAutomation
@@ -157,7 +161,8 @@ struct GlobalHealthBanner: View {
     nonisolated static func headline(
         freshness: [DataFreshnessIssue],
         automation: [AutomationHealthIssue],
-        sharedConfig: [String] = []
+        sharedConfig: [String] = [],
+        automationFolderRefused: Bool = false
     ) -> Headline? {
         let failing = freshness.filter { $0.kind == .failing }
         let stale = freshness.filter { $0.kind == .stale && !$0.neverCollected }
@@ -182,6 +187,15 @@ struct GlobalHealthBanner: View {
                 text: "Shared config needs confirming on this Mac",
                 detail: named + (extra > 0 ? " +\(extra) more" : "")
                     + " — background runs use safe values until you confirm"
+            )
+        }
+        if automationFolderRefused {
+            return Headline(
+                icon: "link",
+                tone: .warn,
+                text: "The automation folder is a link",
+                detail: "Alert records are kept on this Mac; Run History is not written until "
+                    + "the link is removed"
             )
         }
         if !stale.isEmpty {

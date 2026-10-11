@@ -1,8 +1,8 @@
 import XCTest
 @testable import JamfReports
 
-/// With `automation` refused, the hourly self-remediation marker can never be stamped, so the
-/// re-collect must not run on every check.
+/// With `automation` refused, the hourly self-remediation marker lives on this Mac: the
+/// re-collect runs once in the hour, not on every check and not never.
 @MainActor
 final class RefusedAutomationRemediationTests: XCTestCase {
 
@@ -13,7 +13,7 @@ final class RefusedAutomationRemediationTests: XCTestCase {
         var value: Int { lock.lock(); defer { lock.unlock() }; return count }
     }
 
-    func testSelfRemediationDoesNotRunWhenItsMarkerCannotBeWritten() async throws {
+    func testSelfRemediationRunsOncePerHourWhenAutomationIsRefused() async throws {
         let fm = FileManager.default
         let profile = "refused"
         let root = fm.temporaryDirectory
@@ -42,11 +42,12 @@ final class RefusedAutomationRemediationTests: XCTestCase {
 
         let runs = Counter()
         let collect: WorkspaceStore.RemediationCollector = { _, _, _ in runs.bump() }
+        var attempts: [Bool] = []
         for _ in 0..<3 {
-            let attempted = await store.remediateStaleDataIfNeeded(collect: collect)
-            XCTAssertFalse(attempted)
+            attempts.append(await store.remediateStaleDataIfNeeded(collect: collect))
         }
-        XCTAssertEqual(runs.value, 0)
+        XCTAssertEqual(attempts, [true, false, false])
+        XCTAssertEqual(runs.value, 1)
         XCTAssertTrue(((try? fm.contentsOfDirectory(atPath: elsewhere.path)) ?? []).isEmpty)
     }
 }

@@ -2991,15 +2991,6 @@ struct ReportEngine: Sendable {
                              text: "[warn] patch-definitions: skipping title with an unsafe id"))
                 continue
             }
-            // Sanitize id for filename — mirrors Python's `re.sub(r"[^0-9A-Za-z._-]", "_", id)`.
-            let safeId = titleId.unicodeScalars.map { c -> Character in
-                let ch = Character(c)
-                if ch.isLetter || ch.isNumber || ch == "." || ch == "_" || ch == "-" {
-                    return ch
-                }
-                return "_"
-            }.reduce("") { $0 + String($1) }
-
             let args = ["-p", profile, "pro", "patch-software-title-configurations",
                         "definitions", titleId, "--page-size", "100", "--output", "json"]
             let captureResult = try? await bridge.runAndCapture(
@@ -3022,13 +3013,6 @@ struct ReportEngine: Sendable {
                 continue
             }
 
-            // Cache per-title definition file.
-            let defsDir = dataDir.appendingPathComponent("patch-definitions", isDirectory: true)
-            try? FileManager.default.createDirectory(at: defsDir, withIntermediateDirectories: true)
-            let cacheFile = defsDir.appendingPathComponent(
-                "patch-definitions_title\(safeId).json")
-            try? data.write(to: cacheFile)
-
             // Extract latest definition date.
             guard let definitions = try? JSONSerialization.jsonObject(with: data)
                     as? [[String: Any]]
@@ -3046,13 +3030,7 @@ struct ReportEngine: Sendable {
 
         // Write merged snapshot.
         do {
-            let outDir = dataDir.appendingPathComponent("patch-release-dates", isDirectory: true)
-            try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
-            let outFile = outDir.appendingPathComponent("patch-release-dates_\(ts).json")
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted]
-            let payload = try encoder.encode(merged)
-            try payload.write(to: outFile)
+            try writePatchReleaseDates(merged, stamp: ts, dataDir: dataDir)
             onLine(.init(timestamp: Date(), level: .ok,
                          text: "[ok] patch-release-dates: \(merged.count) title(s)"))
             return .landed
@@ -3062,6 +3040,21 @@ struct ReportEngine: Sendable {
                                error.localizedDescription))
             return .failed(exitCode: nil)
         }
+    }
+
+    /// Writes one `patch-release-dates` snapshot. Atomic, so a symlink planted at the name on a
+    /// shared folder is replaced rather than followed to its target.
+    @discardableResult
+    static func writePatchReleaseDates(
+        _ merged: [[String: String]], stamp: String, dataDir: URL
+    ) throws -> URL {
+        let outDir = dataDir.appendingPathComponent(patchReleaseDatesKind, isDirectory: true)
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        let outFile = outDir.appendingPathComponent("\(patchReleaseDatesKind)_\(stamp).json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        try encoder.encode(merged).write(to: outFile, options: .atomic)
+        return outFile
     }
 
     /// How `collectPatchReleaseDates` ended when it attempted the walk.

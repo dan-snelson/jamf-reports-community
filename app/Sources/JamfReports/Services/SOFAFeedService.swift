@@ -308,11 +308,12 @@ struct SOFAFeedService: Sendable {
         return result
     }
 
-    private static func writeCacheAtomic(data: Data, to url: URL) {
+    static func writeCacheAtomic(data: Data, to url: URL) {
         let tmp = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).partial")
         do {
-            try data.write(to: tmp)
+            // Atomic, so a symlink planted at the staging name is replaced, not followed.
+            try data.write(to: tmp, options: .atomic)
             // replaceItem requires the destination to exist; use move when it doesn't.
             if FileManager.default.fileExists(atPath: url.path) {
                 _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)

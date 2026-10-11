@@ -14,6 +14,12 @@ versions in this repository map to git tags.
   outside the file.
 - Documentation refresh: the threat model is updated to 2.9.0, the architecture notes match the
   current code, and the third-party notices now list swift-argument-parser and IBM Plex Mono.
+- The diagnostic bundle zip is now written to `~/Library/Logs/JamfReports/diagnostics/<profile>/`
+  on this Mac instead of the workspace's `diagnostics` folder, so it is no longer synced to the
+  Macs that share a team folder. Settings, the command-line tool and the guides name the new
+  folder; bundles made by earlier builds stay where they are.
+- The per-title patch definition files the patch release-date lookup used to save under
+  `jamf-cli-data/patch-definitions/` are no longer written; nothing read them.
 
 ### Security
 
@@ -76,6 +82,32 @@ versions in this repository map to git tags.
   error lines), in what the command-line tool prints from jamf-cli, in the
   consolidated-report failure line and in the error in a failure notification, which also
   drops the profile's tenant and environment IDs.
+- A workspace folder the app uses by a fixed name (`automation`, `backups`, `_archive`, and the
+  `state`, `sofa` and `summaries` folders inside the data and chart-history folders) is refused
+  when it is a symbolic link, so another Mac sharing the folder cannot send this Mac's run logs,
+  backups, archives, snapshots or markers somewhere else. A marker or alert record in a refused
+  folder counts as already used, so the overdue card, the hourly re-collect and the metric alerts
+  are skipped instead of repeating on every pass. The run log names the folder; a diagnostic bundle
+  skips it and lists it in its manifest. A workspace folder that is itself a link, a synced cloud
+  folder or a network volume works as before.
+- Every read of a workspace's config.yaml now stops at 4 MB, not only the main load, so an
+  oversize file shared by another Mac reads as unreadable instead of being pulled into memory.
+  A pipe or other non-file at the name is refused without waiting on it.
+- `html.history_file` is refused in /Users/Shared, ~/Public and /tmp even with the absolute-path
+  opt-in, and is looked up in the profile's own config.yaml when the data folder is not the
+  default one. A history file over 8 MB, or one that is not a regular file, is left as it is
+  with a warning.
+- `html.history_file` and `branding.logo_path` are now part of the per-Mac shared-config pin: a
+  value another Mac changes is ignored (the history is written beside the report, and no logo is
+  embedded) until you confirm it in Config Doctor, whatever profile name the shared config.yaml
+  gives. Changing the logo on the Config screen confirms it.
+- A logo must now be a regular PNG file of at most 2 MB and cannot be in a system or credentials
+  folder, so a logo path pointing at a device or a pipe no longer hangs a report. A logo outside
+  the workspace still works without the absolute-path opt-in, and a relative path is read from
+  the workspace, and a workspace logo that is a link to a file outside it is refused. A logo kept
+  in /tmp or another system folder is no longer embedded.
+- The patch release-date snapshot and the SOFA feed cache are written atomically, so a symbolic
+  link planted at their file names is replaced instead of followed.
 
 ### Fixed
 
@@ -156,6 +188,12 @@ versions in this repository map to git tags.
   worked only when the profile was called JamfReports-Notary), every release signature asks
   for a secure timestamp, and a public release build stops instead of falling back to an
   ad-hoc signature that would fail at notarization.
+- Scheduled runs no longer move a run log over 5 MB aside at the start of the next run, which
+  left that run in Run History with an empty log and a file nothing cleaned up. Run History
+  already reads only the end of a long log, and the newest 50 logs are kept. Log files an
+  earlier build already moved aside (`.log.1`) stay where they are and can be deleted.
+- The installer package is now built so the app always installs into /Applications and cannot
+  be relocated by the installer, whichever macOS version builds the package.
 
 ### Dependencies
 

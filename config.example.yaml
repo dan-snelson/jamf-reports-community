@@ -347,9 +347,11 @@ branding:
 
   # Path to a PNG logo file. Only the workbook built from a Jamf Pro CSV export
   # uses it: the logo is placed at the top left of each of that workbook's
-  # sheets. A relative path resolves from the folder the app or command runs
-  # in, not from this file, so write an absolute path. Other image formats are
-  # skipped with a warning; the HTML report shows no logo.
+  # sheets. A relative path resolves from the workspace folder. The file must be
+  # a regular PNG of at most 2 MB, and not in a system or credentials folder.
+  # Other image formats are skipped with a warning; the HTML report shows no
+  # logo. On a shared workspace a change from another Mac is ignored until you
+  # confirm it in Config Doctor.
   logo_path: ""
 
   # Hex colour used for Excel column headers and the HTML report's primary
@@ -379,7 +381,9 @@ branding:
 #   Relative paths resolve from this config file's directory and must stay
 #   inside it. An absolute path outside the workspace needs
 #   output.allow_absolute_paths: true; system and credentials folders are never
-#   used. Default (when blank or refused): html_history.json beside the report.
+#   used; neither are /Users/Shared, ~/Public and /tmp. Default (when blank or
+#   refused): html_history.json beside the report. On a shared workspace a
+#   change from another Mac is ignored until you confirm it in Config Doctor.
 #
 html:
   with_workbook: false

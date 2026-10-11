@@ -144,7 +144,7 @@ func notifyOverdueSchedulesHeadless(
     let today = SummaryJSONParser.dateFormatter.string(from: Date())
     let runProfiles = profiles.filter { !excluded.contains($0) }
     let targets = notifyTargets(in: runProfiles) {
-        marker.lastStampedDay(in: $0) == today
+        marker.isStamped(today, in: $0)
     }
     let routing = OverdueDigestRouting.route(
         overdue: overdue, targets: targets, runProfiles: runProfiles)

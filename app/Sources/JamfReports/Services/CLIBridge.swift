@@ -1653,10 +1653,10 @@ final class CLIBridge {
             ))
             return
         }
-        let dir = dataDir.appendingPathComponent(type, isDirectory: true)
-        let file = dir.appendingPathComponent(Self.snapshotFileName(type: type, at: Date()))
-
         do {
+            // A type folder that is a symlink would send the snapshot wherever a peer pointed it.
+            let dir = try WorkspacePaths.confinedFolder([type], under: dataDir)
+            let file = dir.appendingPathComponent(Self.snapshotFileName(type: type, at: Date()))
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             // S-01: write atomically so a crash, OOM, or full-disk
             // mid-write leaves no truncated <type>_<ts>.json poisoning
@@ -1730,6 +1730,11 @@ final class CLIBridge {
         // refusal leaves no staging directory behind.
         try Self.checkBackupConfigProfile(profile, onLine: onLine)
         let backupsRoot = workspace.appendingPathComponent("backups", isDirectory: true)
+        // Checked from the resolved root; the unresolved paths below stay as they are (see above).
+        guard WorkspacePaths.confinedFolderOrWarn(["backups"], under: workspace, onLine: onLine)
+                != nil else {
+            throw CLIBridgeError.directoryOperationFailed(path: backupsRoot.path)
+        }
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: backupsRoot, withIntermediateDirectories: true,

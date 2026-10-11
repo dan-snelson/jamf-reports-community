@@ -70,7 +70,9 @@ struct SOFAFeedService: Sendable {
     /// - Returns: A `Snapshot` with one row per OS family across all platforms.
     ///            Empty when no cache files exist.
     static func load(dataDir: URL, referenceDate: Date = Date()) -> Snapshot {
-        let sofaDir = dataDir.appendingPathComponent("sofa", isDirectory: true)
+        guard let sofaDir = WorkspacePaths.confinedFolderOrWarn(["sofa"], under: dataDir) else {
+            return .empty
+        }
         var rows: [OSFamilyRow] = []
         var warnings: [String] = []
         for platform in allPlatforms {
@@ -112,7 +114,9 @@ struct SOFAFeedService: Sendable {
         timeout: TimeInterval = 30,
         referenceDate: Date = Date()
     ) async -> (Snapshot, [String]) {
-        let sofaDir = dataDir.appendingPathComponent("sofa", isDirectory: true)
+        guard let sofaDir = WorkspacePaths.confinedFolderOrWarn(["sofa"], under: dataDir) else {
+            return (.empty, ["SOFA: the sofa cache folder is a symbolic link, so it is not used"])
+        }
         do {
             try FileManager.default.createDirectory(
                 at: sofaDir, withIntermediateDirectories: true)

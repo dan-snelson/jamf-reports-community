@@ -49,8 +49,11 @@ final class ScheduledRunRecorder: @unchecked Sendable {
         self.started = now
         self.label = label
 
-        let automationDir = workspace.appendingPathComponent("automation", isDirectory: true)
-        let logsDir = automationDir.appendingPathComponent("logs", isDirectory: true)
+        // A symlinked automation/ or logs/ would send run logs wherever a peer pointed it.
+        guard let automationDir = WorkspacePaths.confinedFolderOrWarn(
+                  ["automation"], under: workspace),
+              let logsDir = WorkspacePaths.confinedFolderOrWarn(
+                  ["automation", "logs"], under: workspace) else { return nil }
         let fm = FileManager.default
         do {
             // 0o700: run logs contain device serials, hostnames, and usernames.

@@ -449,6 +449,9 @@ enum DiagnosticBundleService {
         var cliProfile: String = ""
         /// The profile's tenant and environment IDs, redacted wherever they appear.
         var scopeIDs: [String] = []
+        /// Folders `makeSources` did not collect because they are symlinks, as skipped entries.
+        /// `stageFiles` reads neither `logsDir` nor `summariesDir` when its entry is here.
+        var refused: [ManifestEntry] = []
     }
 
     struct ManifestEntry {
@@ -480,23 +483,43 @@ enum DiagnosticBundleService {
     static func generate(
         profile: String, options: DiagnosticBundleOptions = .init(), now: Date = Date()
     ) throws -> URL {
+        let sources = try makeSources(profile: profile, options: options)
+        return try buildBundle(
+            sources: sources, outputDir: try WorkspacePaths.diagnosticsDir(for: profile),
+            profileSlug: slug(profile), options: options, now: now)
+    }
+
+    /// The folders a bundle for `profile` reads. A fixed workspace folder that is a symlink is
+    /// left out and recorded as a skipped manifest entry, so the bundle still builds.
+    static func makeSources(profile: String, options: DiagnosticBundleOptions) throws -> Sources {
         guard let workspace = ProfileService.workspaceURL(for: profile)?
             .resolvingSymlinksInPath().standardizedFileURL else {
             throw DiagnosticBundleError.invalidProfile(profile)
         }
-        let sources = Sources(
+        var refused: [ManifestEntry] = []
+        func folder(_ name: String, _ resolve: () throws -> URL) -> URL? {
+            do { return try resolve() } catch {
+                let reason = WorkspacePaths.refusal(of: error)
+                AppLogger.collect.warning(
+                    "DiagnosticBundle: \(name, privacy: .public) not collected: \(reason, privacy: .public)")
+                refused.append(.skipped(path: name, reason: reason))
+                return nil
+            }
+        }
+        let logsDir = folder("automation/logs") { try WorkspacePaths.runHistoryDir(for: profile) }
+        let summariesDir = folder("summaries") { try WorkspacePaths.summariesDir(for: profile) }
+        // A refused folder keeps a nominal path that `stageFiles` never reads.
+        return Sources(
             workspaceName: workspace.lastPathComponent,
             workspaceRoot: workspace,
-            logsDir: try WorkspacePaths.runHistoryDir(for: profile),
-            summariesDir: try WorkspacePaths.summariesDir(for: profile),
+            logsDir: logsDir ?? workspace.appendingPathComponent("automation/logs"),
+            summariesDir: summariesDir ?? workspace.appendingPathComponent("summaries"),
             configURL: workspace.appendingPathComponent("config.yaml"),
             dataDir: try WorkspacePaths.dataDir(for: profile),
             cliProfile: profile,
-            scopeIDs: options.redact ? scopeIDs(profile: profile) : []
+            scopeIDs: options.redact ? scopeIDs(profile: profile) : [],
+            refused: refused
         )
-        return try buildBundle(
-            sources: sources, outputDir: try WorkspacePaths.diagnosticsDir(for: profile),
-            profileSlug: slug(profile), options: options, now: now)
     }
 
     private static let scopeIDKeys: Set<String> = ["tenant-id", "environment-id"]
@@ -627,13 +650,18 @@ enum DiagnosticBundleService {
         sources: Sources, into staging: URL, redactor: DiagnosticRedactor?,
         options: DiagnosticBundleOptions, now: Date
     ) throws -> [ManifestEntry] {
-        var entries: [ManifestEntry] = []
-        entries += collectLogs(
-            from: sources.logsDir, into: staging, redactor: redactor,
-            days: options.logLookbackDays, now: now)
-        entries += collectSummaries(
-            from: sources.summariesDir, into: staging, redactor: redactor,
-            limit: options.summaryLimit)
+        var entries: [ManifestEntry] = sources.refused
+        let refused = Set(sources.refused.map(\.path))
+        if !refused.contains("automation/logs") {
+            entries += collectLogs(
+                from: sources.logsDir, into: staging, redactor: redactor,
+                days: options.logLookbackDays, now: now)
+        }
+        if !refused.contains("summaries") {
+            entries += collectSummaries(
+                from: sources.summariesDir, into: staging, redactor: redactor,
+                limit: options.summaryLimit)
+        }
         entries += try collectConfig(from: sources.configURL, into: staging, redactor: redactor)
         entries += try collectWorkspaceTree(
             root: sources.workspaceRoot, name: sources.workspaceName,
@@ -958,8 +986,10 @@ enum DiagnosticBundleService {
         let keys: [URLResourceKey] = [.isDirectoryKey]
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return }
+        // lstat, so a symlinked folder is listed by name and never walked.
         let isDir: (URL) -> Bool = {
-            (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            var info = stat()
+            return lstat($0.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR
         }
         let dirs = contents.filter(isDir).sorted { $0.lastPathComponent < $1.lastPathComponent }
         let files = contents.filter { !isDir($0) }

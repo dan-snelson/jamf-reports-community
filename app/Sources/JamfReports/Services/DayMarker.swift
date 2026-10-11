@@ -7,28 +7,36 @@ struct DayMarker: Sendable {
 
     /// The day last stamped, or nil when the marker is absent or unreadable.
     func lastStampedDay(in workspace: URL) -> String? {
-        guard let text = try? String(contentsOf: markerURL(in: workspace), encoding: .utf8)
-        else { return nil }
+        guard let url = markerURL(in: workspace),
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let day = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return day.isEmpty ? nil : day
     }
 
-    /// Best-effort: creates `automation/` if needed and never throws.
+    /// Whether `key` is stamped. A marker whose folder is refused (`automation` is a symlink)
+    /// reads as stamped: it can never be written, so reading it as unclaimed would repeat the
+    /// action on every pass. That fails toward not sending and not re-running.
+    func isStamped(_ key: String, in workspace: URL) -> Bool {
+        markerURL(in: workspace) == nil || lastStampedDay(in: workspace) == key
+    }
+
+    /// Best-effort: creates `automation/` if needed and never throws. Nothing is written when
+    /// `automation` is a symlink.
     func stamp(day: String, in workspace: URL) {
-        let automation = workspace.appendingPathComponent("automation", isDirectory: true)
+        guard let url = markerURL(in: workspace) else { return }
         try? FileManager.default.createDirectory(
-            at: automation, withIntermediateDirectories: true)
-        try? day.write(to: markerURL(in: workspace), atomically: true, encoding: .utf8)
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? day.write(to: url, atomically: true, encoding: .utf8)
     }
 
     /// Gives the stamp back, so the day or hour counts as unclaimed. Best-effort.
     func clear(in workspace: URL) {
-        try? FileManager.default.removeItem(at: markerURL(in: workspace))
+        guard let url = markerURL(in: workspace) else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
-    private func markerURL(in workspace: URL) -> URL {
-        workspace
-            .appendingPathComponent("automation", isDirectory: true)
+    private func markerURL(in workspace: URL) -> URL? {
+        WorkspacePaths.confinedFolderOrWarn(["automation"], under: workspace)?
             .appendingPathComponent(".\(name)-last")
     }
 }

@@ -79,6 +79,8 @@ enum WorkspacePaths {
                 : "it is outside the workspace and output.allow_absolute_paths is not true"
         case PathError.resolutionEscaped:
             "a relative path must stay inside the workspace"
+        case PathError.symlinkedSubfolder:
+            "it is a symbolic link inside the workspace"
         default:
             "config.yaml could not be read"
         }
@@ -140,7 +142,7 @@ enum WorkspacePaths {
     /// `<historical_csv_dir>/summaries` — the trend-summary directory written
     /// by `_emit_summary_json` on the Python side.
     static func summariesDir(for profile: String) throws -> URL {
-        try historicalDir(for: profile).appendingPathComponent("summaries", isDirectory: true)
+        try confinedFolder(["summaries"], under: try historicalDir(for: profile))
     }
 
     /// `<jamf_cli.data_dir>/state` — per-report cadence state files
@@ -152,24 +154,21 @@ enum WorkspacePaths {
     ///
     /// PR-22 T-6.
     static func stateDir(for profile: String) throws -> URL {
-        try dataDir(for: profile)
-            .appendingPathComponent("state", isDirectory: true)
+        try confinedFolder(["state"], under: try dataDir(for: profile))
     }
 
     /// `<workspace>/automation/logs` — the run-history log directory written
     /// by LaunchAgent stdout/stderr redirection.
     ///
     /// This path is fixed by convention (not a config knob), so no YAML
-    /// parsing is performed. The helper throws only when `profile` fails
+    /// parsing is performed. The helper throws when `profile` fails
     /// `ProfileService.isValid`, enforcing the profile-name regex at one
-    /// canonical site.
+    /// canonical site, and when `automation` or `logs` is a symlink (`confinedFolder`).
     static func runHistoryDir(for profile: String) throws -> URL {
         guard let workspace = workspaceRoot(for: profile) else {
             throw PathError.invalidProfile(profile)
         }
-        return workspace
-            .appendingPathComponent("automation", isDirectory: true)
-            .appendingPathComponent("logs", isDirectory: true)
+        return try confinedFolder(["automation", "logs"], under: workspace)
     }
 
     /// `<workspace>/diagnostics` — output directory for native diagnostic
@@ -182,7 +181,54 @@ enum WorkspacePaths {
         guard let workspace = workspaceRoot(for: profile) else {
             throw PathError.invalidProfile(profile)
         }
-        return workspace.appendingPathComponent("diagnostics", isDirectory: true)
+        return try confinedFolder(["diagnostics"], under: workspace)
+    }
+
+    /// A fixed folder below a workspace (or below a config-derived folder such as `data_dir`),
+    /// refused when any component of it is a symbolic link. A peer on a shared folder can
+    /// plant a link at `automation`, `backups` or `_archive`, which would send this Mac's
+    /// reads, writes and prunes to a folder of the peer's choosing.
+    ///
+    /// `root` is resolved first, so a workspace root that is itself a link (a synced
+    /// `~/Library/CloudStorage` folder, iCloud, `/Volumes`) keeps working; each component below
+    /// it is then checked with `lstat`. A component that does not exist yet passes.
+    static func confinedFolder(_ components: [String], under root: URL) throws -> URL {
+        let base = root.resolvingSymlinksInPath().standardizedFileURL
+        var current = base
+        var walked: [String] = []
+        for component in components {
+            current = current.appendingPathComponent(component, isDirectory: true)
+            walked.append(component)
+            if isSymbolicLink(current) {
+                throw PathError.symlinkedSubfolder(walked.joined(separator: "/"))
+            }
+        }
+        guard isInside(current.resolvingSymlinksInPath().standardizedFileURL, root: base) else {
+            throw PathError.resolutionEscaped(components.joined(separator: "/"), base)
+        }
+        return current
+    }
+
+    /// `confinedFolder` for best-effort callers: nil for a refused folder, with one `[warn]`
+    /// line (Console, and `onLine` when given) naming the folder and why.
+    static func confinedFolderOrWarn(
+        _ components: [String], under root: URL,
+        onLine: @Sendable (CLIBridge.LogLine) -> Void = CLIBridge.noOpOnLine
+    ) -> URL? {
+        do {
+            return try confinedFolder(components, under: root)
+        } catch {
+            let msg = "[warn] \(components.joined(separator: "/")) is not used: "
+                + "\(refusal(of: error))."
+            AppLogger.collect.warning("\(msg, privacy: .private)")
+            onLine(.init(timestamp: Date(), level: .warn, text: msg))
+            return nil
+        }
+    }
+
+    private static func isSymbolicLink(_ url: URL) -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFLNK
     }
 
     // MARK: - Internals
@@ -199,6 +245,8 @@ enum WorkspacePaths {
         /// A report or archive folder in `/Users/Shared` or `~/Public`, which every local
         /// account can read. Refused even with the opt-in.
         case worldReadableFolder(URL)
+        /// A fixed workspace subfolder (`automation/logs`, `backups`, ...) that is a symlink.
+        case symlinkedSubfolder(String)
 
         var errorDescription: String? {
             switch self {
@@ -207,6 +255,7 @@ enum WorkspacePaths {
             case .resolutionEscaped(let val, let root): "Path '\(val)' escapes workspace root \(root.lastPathComponent)"
             case .disallowedAbsolutePath(let u): "Disallowed absolute path: \(u.path)"
             case .worldReadableFolder(let u): "World-readable folder: \(u.path)"
+            case .symlinkedSubfolder(let f): "'\(f)' inside the workspace is a symbolic link"
             }
         }
     }

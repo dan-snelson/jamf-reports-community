@@ -15,9 +15,9 @@ struct SOFAScoreFeed: Sendable, Equatable {
     let xprotectReleased: Date?
 
     static func load(dataDir: URL) -> SOFAScoreFeed? {
-        let url = dataDir.appendingPathComponent("sofa", isDirectory: true)
-            .appendingPathComponent("macos_data_feed.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
+        guard let url = WorkspacePaths.confinedFolderOrWarn(["sofa"], under: dataDir)?
+            .appendingPathComponent("macos_data_feed.json"),
+              let data = try? Data(contentsOf: url) else { return nil }
         return decode(data)
     }
 

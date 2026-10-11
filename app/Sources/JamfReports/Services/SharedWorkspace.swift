@@ -251,9 +251,9 @@ enum SharedWorkspace {
     private static let claimFilename = ".workspace-claim.json"
 
     private static func claimURL(profile: String) -> URL? {
-        ProfileService.workspaceURL(for: profile)?
-            .appendingPathComponent("automation", isDirectory: true)
-            .appendingPathComponent(claimFilename)
+        ProfileService.workspaceURL(for: profile).flatMap {
+            WorkspacePaths.confinedFolderOrWarn(["automation"], under: $0)
+        }?.appendingPathComponent(claimFilename)
     }
 
     private static let coder: (encoder: JSONEncoder, decoder: JSONDecoder) = {
@@ -345,9 +345,9 @@ enum SharedWorkspace {
     // MARK: - Per-host activity
 
     private static func hostsDir(profile: String) -> URL? {
-        ProfileService.workspaceURL(for: profile)?
-            .appendingPathComponent("automation", isDirectory: true)
-            .appendingPathComponent("hosts", isDirectory: true)
+        ProfileService.workspaceURL(for: profile).flatMap {
+            WorkspacePaths.confinedFolderOrWarn(["automation", "hosts"], under: $0)
+        }
     }
 
     /// Filename-safe form of a host id. The hardware UUID is already safe; the

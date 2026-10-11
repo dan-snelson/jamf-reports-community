@@ -1436,8 +1436,10 @@ struct ReportEngine: Sendable {
         profile: String,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
     ) -> URL? {
-        resolvedHistoricalDir(profile: profile, onLine: onLine)?
-            .appendingPathComponent("summaries", isDirectory: true)
+        resolvedHistoricalDir(profile: profile, onLine: onLine).flatMap {
+            WorkspacePaths.confinedFolderOrWarn(
+                ["summaries"], under: $0, onLine: onLine ?? CLIBridge.noOpOnLine)
+        }
     }
 
     /// Routes through `WorkspacePaths.archiveDir(for:)` so that config-supplied
@@ -3048,7 +3050,7 @@ struct ReportEngine: Sendable {
     static func writePatchReleaseDates(
         _ merged: [[String: String]], stamp: String, dataDir: URL
     ) throws -> URL {
-        let outDir = dataDir.appendingPathComponent(patchReleaseDatesKind, isDirectory: true)
+        let outDir = try WorkspacePaths.confinedFolder([patchReleaseDatesKind], under: dataDir)
         try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         let outFile = outDir.appendingPathComponent("\(patchReleaseDatesKind)_\(stamp).json")
         let encoder = JSONEncoder()
@@ -3886,7 +3888,8 @@ struct ReportEngine: Sendable {
         recordManifest: Bool = false,
         onLine: @Sendable (CLIBridge.LogLine) -> Void = CLIBridge.noOpOnLine
     ) throws {
-        let dir = dataDir.appendingPathComponent(kind, isDirectory: true)
+        // A kind folder that is a symlink would send the snapshot wherever a peer pointed it.
+        let dir = try WorkspacePaths.confinedFolder([kind], under: dataDir)
         try FileManager.default.createDirectory(
             at: dir,
             withIntermediateDirectories: true,

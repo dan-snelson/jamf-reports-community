@@ -10,14 +10,16 @@ import Foundation
 /// that trips for the FIRST time later the same day still alerts.
 ///
 /// Stored at `<workspace>/automation/.metric-alerts-ledger.json`. Best-effort
-/// I/O: any read/write failure returns the input keys unchanged — alerting must
-/// fail toward SENDING, never toward silence.
+/// I/O: a read or write failure returns the input keys unchanged, so alerting fails toward
+/// SENDING, never toward silence. The exception is a refused folder (`automation` is a
+/// symlink): the ledger can never be written, so every key reads as already carded and
+/// nothing is sent on every pass.
 struct MetricAlertLedger: Sendable {
     let workspace: URL
 
-    private var fileURL: URL {
-        workspace
-            .appendingPathComponent("automation", isDirectory: true)
+    /// Nil when `automation` is a symlink.
+    private var fileURL: URL? {
+        WorkspacePaths.confinedFolderOrWarn(["automation"], under: workspace)?
             .appendingPathComponent(".metric-alerts-ledger.json")
     }
 
@@ -31,8 +33,8 @@ struct MetricAlertLedger: Sendable {
     /// read failure returns `keys` unchanged so a ledger problem never silences
     /// an alert.
     func pendingKeys(day: String, keys: [String]) -> [String] {
-        guard !keys.isEmpty else { return [] }
-        let existing = load()
+        guard !keys.isEmpty, let url = fileURL else { return [] }
+        let existing = load(from: url)
         let already: Set<String> = existing?.day == day ? Set(existing?.keys ?? []) : []
         return keys.filter { !already.contains($0) }
     }
@@ -44,18 +46,18 @@ struct MetricAlertLedger: Sendable {
     /// transient webhook failure silence that rule for the rest of the day —
     /// the same discipline `DayMarker` uses for the overdue digest.
     func record(day: String, keys: [String]) {
-        guard !keys.isEmpty else { return }
-        let existing = load()
+        guard !keys.isEmpty, let url = fileURL else { return }
+        let existing = load(from: url)
         let already: Set<String> = existing?.day == day ? Set(existing?.keys ?? []) : []
-        save(Record(day: day, keys: Array(already.union(keys))))
+        save(Record(day: day, keys: Array(already.union(keys))), to: url)
     }
 
-    private func load() -> Record? {
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+    private func load(from url: URL) -> Record? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(Record.self, from: data)
     }
 
-    private func save(_ record: Record) {
+    private func save(_ record: Record, to fileURL: URL) {
         do {
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),

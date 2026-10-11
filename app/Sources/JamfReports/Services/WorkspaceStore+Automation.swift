@@ -542,7 +542,7 @@ extension WorkspaceStore {
         guard !automaticCollectMustWait(for: [profile]) else { return false }
 
         let hourKey = Self.hourKeyFormatter.string(from: Date())
-        guard Self.remediationMarker.lastStampedDay(in: workspace) != hourKey else { return false }
+        guard !Self.remediationMarker.isStamped(hourKey, in: workspace) else { return false }
         // Claim the hour BEFORE the await so a second foreground event during a
         // slow collect cannot start a parallel one.
         Self.remediationMarker.stamp(day: hourKey, in: workspace)
@@ -760,7 +760,7 @@ extension WorkspaceStore {
         // calendar day across both.
         let today = Self.dayKeyFormatter.string(from: Date())
         let marker = DayMarker(name: "overdue-notify")
-        guard marker.lastStampedDay(in: workspace) != today else { return }
+        guard !marker.isStamped(today, in: workspace) else { return }
 
         let facts = Self.overdueFacts(
             detail: notify.resolvedDetail, profile: profile, overdue: overdue

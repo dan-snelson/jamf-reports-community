@@ -785,6 +785,8 @@ final class WorkspaceStore {
         let changedFolders = SharedConfigPin.changedFolderKeys(
             before: _savedState.map { ($0.outputDir, $0.archiveDir) },
             after: (configState.outputDir, configState.archiveDir))
+        let changedBranding = SharedConfigPin.changedBrandingKeys(
+            before: _savedState?.logoPath, after: configState.logoPath)
         let saved = try ConfigService.save(
             profile: profile,
             state: configState,
@@ -794,7 +796,7 @@ final class WorkspaceStore {
         _loadedDoc = saved.document
         _loadedStamp = saved.stamp
         // A folder this save changed was typed on this Mac; one it left alone is not confirmed.
-        confirmSharedConfig(changedFolders)
+        confirmSharedConfig(changedFolders.union(changedBranding))
         // A block left as typed was not written: the screen goes back to what the file holds
         // for it, rather than calling its own entries saved.
         if saved.report.keptBlocks.contains("custom_eas") {

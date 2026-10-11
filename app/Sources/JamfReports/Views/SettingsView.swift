@@ -1082,15 +1082,12 @@ struct SettingsView: View {
                 let revealed = SystemActions.reveal(url)
                 diagnosticBundleMessage = revealed
                     ? "Bundle written to \(url.lastPathComponent) and revealed in Finder."
-                    : "Bundle written to \(url.lastPathComponent) in this profile's " +
-                      "diagnostics folder (Finder reveal was blocked)."
+                    : "Bundle written to \(url.lastPathComponent) in " +
+                      "~/Library/Logs/JamfReports/diagnostics (Finder reveal was blocked)."
             } catch {
-                let diagnosticsPath = WorkspaceRootStore.displayPath(
-                    profile: workspace.profile, subpath: "diagnostics"
-                )
                 diagnosticBundleMessage =
                     "Diagnostic bundle failed: \(error.localizedDescription). Verify "
-                    + "\(diagnosticsPath) is writable and has free space."
+                    + "~/Library/Logs/JamfReports/diagnostics is writable and has free space."
             }
             isGeneratingBundle = false
         }

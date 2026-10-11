@@ -174,7 +174,7 @@ struct ConfigView: View {
             parseNotes = []
             return
         }
-        parseNotes = ((try? String(contentsOf: url, encoding: .utf8))
+        parseNotes = ((try? ConfigLoader.readText(at: url))
             .flatMap { try? YAMLCodec.decode($0) }?.parseNotes ?? []).map(\.display)
         do {
             _ = try ConfigLoader.load(from: url)

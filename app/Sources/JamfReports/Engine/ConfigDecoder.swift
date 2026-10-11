@@ -1380,11 +1380,14 @@ enum ConfigLoader {
         case encodingError(URL)
         case decodeError(String, Error)
         case fileTooLarge(URL, bytes: Int)
+        case notRegularFile(URL)
 
         var errorDescription: String? {
             switch self {
             case .fileNotFound(let u): return "config.yaml not found at \(u.path)"
             case .encodingError(let u): return "Could not read config.yaml at \(u.path)"
+            case .notRegularFile(let u):
+                return "config.yaml at \(u.path) is not a regular file"
             case .fileTooLarge(let u, let bytes):
                 return "config.yaml at \(u.path) is \(bytes) bytes, over the "
                     + "\(ConfigLoader.maxConfigBytes / 1_048_576) MB limit"
@@ -1449,16 +1452,42 @@ enum ConfigLoader {
     /// with other Macs and sync tools.
     static let maxConfigBytes = 4 * 1_048_576
 
+    /// The bytes of a config.yaml, read from one descriptor that was checked to be a regular
+    /// file (a FIFO at the name cannot hang the read) and never past the cap: a file that grows
+    /// between a size check and a read is still caught. Every read of a workspace's
+    /// config.yaml goes through here or `readText(at:)`.
+    static func readData(at url: URL) throws -> Data {
+        do {
+            return try BoundedFile.read(url, limit: maxConfigBytes)
+        } catch BoundedFile.Failure.tooLarge {
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+            throw LoadError.fileTooLarge(url, bytes: size ?? maxConfigBytes + 1)
+        } catch BoundedFile.Failure.notRegular {
+            throw LoadError.notRegularFile(url)
+        } catch BoundedFile.Failure.unreadable(let code) {
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+    }
+
+    /// `readData(at:)` as UTF-8 text; bytes that are not UTF-8 throw `LoadError.encodingError`.
+    static func readText(at url: URL) throws -> String {
+        guard let text = String(data: try readData(at: url), encoding: .utf8) else {
+            throw LoadError.encodingError(url)
+        }
+        return text
+    }
+
     /// Load and decode `config.yaml` at `url`, merging defaults via `withDefaults()`.
     static func load(from url: URL) throws -> ReportConfig {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw LoadError.fileNotFound(url)
         }
-        if let bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
-           bytes > maxConfigBytes {
-            throw LoadError.fileTooLarge(url, bytes: bytes)
-        }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+        let text: String
+        do {
+            text = try readText(at: url)
+        } catch let e as LoadError {
+            throw e
+        } catch {
             throw LoadError.encodingError(url)
         }
         // Convert YAML → JSON via YAMLCodec, then decode with JSONDecoder.

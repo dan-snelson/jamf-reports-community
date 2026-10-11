@@ -11,6 +11,12 @@ final class OOXMLLogoEmbedTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    /// Under home: the loader refuses a logo in a system folder, and the temp folder is one.
+    private static func logoFolder() -> URL {
+        URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("jrc-logo-\(UUID().uuidString)", isDirectory: true)
+    }
+
     /// Minimal 8-byte valid PNG magic followed by enough bytes to satisfy `Data.prefix`.
     private var validPNGData: Data {
         var bytes: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
@@ -44,8 +50,7 @@ final class OOXMLLogoEmbedTests: XCTestCase {
     // MARK: - Valid PNG embed
 
     func testValidPNGIsEmbeddedInXLSX() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tmpDir = Self.logoFolder()
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -71,8 +76,7 @@ final class OOXMLLogoEmbedTests: XCTestCase {
     // MARK: - Missing file
 
     func testMissingLogoFileProducesWorkbookWithoutImage() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tmpDir = Self.logoFolder()
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -95,8 +99,7 @@ final class OOXMLLogoEmbedTests: XCTestCase {
     // MARK: - Non-PNG file
 
     func testNonPNGFileIsRejectedAndProducesNoImage() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tmpDir = Self.logoFolder()
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -123,8 +126,7 @@ final class OOXMLLogoEmbedTests: XCTestCase {
     /// Verify that a valid PNG logo is embedded in ALL written sheets, not just the first.
     /// Each sheet must have its own xl/drawings/drawingN.xml entry in the ZIP.
     func testLogoEmbeddedOnAllThreeCSVSheets() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tmpDir = Self.logoFolder()
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -168,8 +170,7 @@ final class OOXMLLogoEmbedTests: XCTestCase {
     /// The PNG data should be stored as a single media entry even when embedded on
     /// multiple sheets (one media file, multiple drawing references).
     func testLogoMediaDeduplicatedAcrossSheets() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tmpDir = Self.logoFolder()
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -204,8 +205,7 @@ final class OOXMLLogoEmbedTests: XCTestCase {
     // MARK: - No logo configured
 
     func testNoLogoConfiguredProducesCleanWorkbook() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tmpDir = Self.logoFolder()
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -238,8 +238,7 @@ final class OOXMLLogoEmbedTests: XCTestCase {
     /// reports "We found a problem with some content" and offers to repair the
     /// file (stripping the chart images). Regression test for that exact bug.
     func testImageWorkbookDeclaresPNGContentType() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tmpDir = Self.logoFolder()
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -267,8 +266,7 @@ final class OOXMLLogoEmbedTests: XCTestCase {
 
     /// A workbook with no embedded images must not declare image content types.
     func testImageFreeWorkbookOmitsPNGContentType() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let tmpDir = Self.logoFolder()
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 

@@ -552,7 +552,7 @@ final class CLIBridge {
                          text: "[error] could not resolve data_dir for \(profile)"))
             throw CLIBridgeError.workspaceMissing(profile: profile)
         }
-        let engine = ReportEngine(config: config, dataDir: dataDir)
+        let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
         let csvURL = csvPath.map { URL(fileURLWithPath: $0) }
         let defaultURL = engine.resolveOutputURL(
             stem: ExportNaming.reportKind(for: .xlsx, schoolMode: false), profile: profile,
@@ -1385,6 +1385,7 @@ final class CLIBridge {
                 config: config,
                 dataDir: dataDir,
                 outputURL: outputURL,
+                profile: profile,
                 template: template,
                 aiNarrative: aiNarrative,
                 onLine: onLine
@@ -1653,10 +1654,10 @@ final class CLIBridge {
             ))
             return
         }
-        let dir = dataDir.appendingPathComponent(type, isDirectory: true)
-        let file = dir.appendingPathComponent(Self.snapshotFileName(type: type, at: Date()))
-
         do {
+            // A type folder that is a symlink would send the snapshot wherever a peer pointed it.
+            let dir = try WorkspacePaths.confinedFolder([type], under: dataDir)
+            let file = dir.appendingPathComponent(Self.snapshotFileName(type: type, at: Date()))
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             // S-01: write atomically so a crash, OOM, or full-disk
             // mid-write leaves no truncated <type>_<ts>.json poisoning
@@ -1730,6 +1731,11 @@ final class CLIBridge {
         // refusal leaves no staging directory behind.
         try Self.checkBackupConfigProfile(profile, onLine: onLine)
         let backupsRoot = workspace.appendingPathComponent("backups", isDirectory: true)
+        // Checked from the resolved root; the unresolved paths below stay as they are (see above).
+        guard WorkspacePaths.confinedFolderOrWarn(["backups"], under: workspace, onLine: onLine)
+                != nil else {
+            throw CLIBridgeError.directoryOperationFailed(path: backupsRoot.path)
+        }
         let fm = FileManager.default
         do {
             try fm.createDirectory(at: backupsRoot, withIntermediateDirectories: true,
@@ -2204,7 +2210,7 @@ final class CLIBridge {
         onLine: @Sendable @escaping (LogLine) -> Void
     ) throws {
         do {
-            let document = try YAMLCodec.decode(String(contentsOf: config, encoding: .utf8))
+            let document = try YAMLCodec.decode(ConfigLoader.readText(at: config))
             guard case .mapping(let root) = document.root else { return }
             let current = root.value(for: "jamf_cli")?.mapping?.value(for: "profile")?
                 .stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

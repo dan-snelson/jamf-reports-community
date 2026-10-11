@@ -101,6 +101,11 @@ enum SnapshotRetentionService {
 
         guard let dataDir = try? WorkspacePaths.dataDir(for: profile) else { return 0 }
         let archiveRoot = resolvedArchiveRoot(config: config, workspace: workspace, onLine: onLine)
+        // The default `_archive` as a symlink would carry archived snapshots to a peer's folder.
+        let defaultArchive = workspace.appendingPathComponent("_archive", isDirectory: true)
+        if pol.mode == .archive, archiveRoot == defaultArchive,
+           WorkspacePaths.confinedFolderOrWarn(["_archive"], under: workspace, onLine: onLine)
+            == nil { return 0 }
         let summariesDir = pol.includeSummaries ? try? WorkspacePaths.summariesDir(for: profile) : nil
 
         let result = sweepWithResult(

@@ -234,8 +234,9 @@ enum BackupMaintenance {
     // MARK: - Private
 
     private static func backupsRoot(for profile: String) -> URL? {
-        guard let workspace = ProfileService.workspaceURL(for: profile) else { return nil }
-        let root = workspace.appendingPathComponent("backups", isDirectory: true)
+        guard let workspace = ProfileService.workspaceURL(for: profile),
+              let root = WorkspacePaths.confinedFolderOrWarn(["backups"], under: workspace)
+        else { return nil }
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir),
               isDir.boolValue else {

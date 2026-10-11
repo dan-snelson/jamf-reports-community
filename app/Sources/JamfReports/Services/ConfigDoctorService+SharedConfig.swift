@@ -30,7 +30,8 @@ extension ConfigDoctorService {
             hint: "A Mac sharing this workspace edited config.yaml, or it was edited here. Until "
                 + "you confirm, every screen, report and run on this Mac uses the safe value "
                 + "for each key (workspace Generated Reports folder, archive instead of "
-                + "delete, no webhook send, no Protect collection).",
+                + "delete, no webhook send, no Protect collection, no logo, the history file "
+                + "beside the report).",
             action: unreadable ? .confirmSharedConfig(check.drifts) : nil,
             items: items
         )]

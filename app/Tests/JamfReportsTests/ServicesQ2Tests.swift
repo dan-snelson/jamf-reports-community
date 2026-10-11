@@ -55,20 +55,6 @@ final class ServicesQ2Tests: XCTestCase {
         XCTAssertEqual(perms, 0o600, "Log files must have mode 0600")
     }
 
-    func test_launchAgentLogRotator_recreatedLogHas0o600() throws {
-        let log = tmpRoot.appendingPathComponent("rotate_perms.log")
-        let content = String(repeating: "x", count: 200).data(using: .utf8)!
-        try content.write(to: log)
-
-        try LaunchAgentLogRotator.rotateIfNeeded(logURL: log, sizeLimit: 100)
-
-        let fm = FileManager.default
-        XCTAssertTrue(fm.fileExists(atPath: log.path), "Active log must exist after rotation")
-        let attrs = try fm.attributesOfItem(atPath: log.path)
-        let perms = attrs[.posixPermissions] as? Int ?? 0
-        XCTAssertEqual(perms, 0o600, "Recreated log file after rotation must have mode 0600")
-    }
-
     func test_preExistingLogDir_tightenedTo0o700() throws {
         let fm = FileManager.default
         let existingDir = tmpRoot.appendingPathComponent("existing_logdir", isDirectory: true)

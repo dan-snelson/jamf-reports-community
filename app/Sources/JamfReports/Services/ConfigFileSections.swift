@@ -170,7 +170,7 @@ enum ConfigFileReading: Equatable, Sendable {
         }
         let text: String
         do {
-            text = try String(contentsOf: url, encoding: .utf8)
+            text = try ConfigLoader.readText(at: url)
         } catch {
             return .unavailable("config.yaml could not be read: \(error.localizedDescription)")
         }

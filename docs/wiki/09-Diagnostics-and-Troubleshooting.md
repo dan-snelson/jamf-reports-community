@@ -14,8 +14,9 @@ To share diagnostics safely, build a redacted bundle from the app:
 **Settings → Diagnostics → Generate diagnostic bundle now**.
 
 It collects recent logs, the last few `summary.json` snapshots, `config.yaml`, a
-workspace tree listing, and version metadata into a zip under the workspace's
-`diagnostics/` folder, and reveals it in Finder. Credentials are always redacted; PII
+workspace tree listing, and version metadata into a zip under
+`~/Library/Logs/JamfReports/diagnostics/<profile>/` (on this Mac only, never in the
+workspace, which may be a shared folder), and reveals it in Finder. Credentials are always redacted; PII
 (hostnames, serials, emails, device names) is redacted by default with stable hash
 placeholders.
 

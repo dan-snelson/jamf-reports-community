@@ -144,7 +144,7 @@ func notifyOverdueSchedulesHeadless(
     let today = SummaryJSONParser.dateFormatter.string(from: Date())
     let runProfiles = profiles.filter { !excluded.contains($0) }
     let targets = notifyTargets(in: runProfiles) {
-        marker.lastStampedDay(in: $0) == today
+        marker.isStamped(today, in: $0)
     }
     let routing = OverdueDigestRouting.route(
         overdue: overdue, targets: targets, runProfiles: runProfiles)
@@ -251,30 +251,6 @@ private func scheduledRunSingleBody(
     guard let workspace = ProfileService.workspaceURL(for: profile) else {
         fputs("[error] No workspace for profile '\(profile)'\n", stderr)
         return 1
-    }
-
-    // Rotate run-history logs at the start of each scheduled invocation so
-    // logs in <workspace>/automation/logs/ don't grow unbounded.
-    // Best-effort: rotation failure must not abort the run.
-    if let logsDir = try? WorkspacePaths.runHistoryDir(for: profile) {
-        let fm = FileManager.default
-        let entries = (try? fm.contentsOfDirectory(
-            at: logsDir,
-            includingPropertiesForKeys: nil,
-            options: .skipsHiddenFiles
-        )) ?? []
-        for entry in entries where entry.pathExtension == "log" {
-            do {
-                try LaunchAgentLogRotator.rotateIfNeeded(logURL: entry)
-            } catch {
-                fputs(
-                    LogRedactor.redact(
-                        "[warn] could not rotate \(entry.lastPathComponent): "
-                            + error.localizedDescription) + "\n",
-                    stderr
-                )
-            }
-        }
     }
 
     // Per-run record in <workspace>/automation/ — this is what Run History
@@ -525,7 +501,7 @@ private func scheduledRunSingleBody(
         }
         defer { if holdsGenerateClaim { SharedWorkspace.release(profile: profile) } }
 
-        let engine = ReportEngine(config: config, dataDir: dataDir)
+        let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
         let outputURL = engine.resolveOutputURL(stem: "report", profile: profile, onLine: onLine)
         // onLine only carries CLIBridge.LogLine progress during generate; per-sheet
         // [fail] lines are raw `print` calls in SheetRegistry and bypass both onLine

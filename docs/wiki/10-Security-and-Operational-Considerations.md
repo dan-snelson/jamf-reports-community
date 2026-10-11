@@ -330,6 +330,11 @@ The diagnostic bundle includes:
 
 It does not include the raw `jamf-cli-data/` snapshots.
 
+The zip is written to `~/Library/Logs/JamfReports/diagnostics/<profile>/` (folders mode 0700),
+on this Mac and outside the workspace, so a bundle is never synced to the Macs that share a
+team folder. A workspace folder that is a symbolic link (`automation`, `summaries`) is skipped
+and named in the bundle's manifest.
+
 Run History's **Copy log** and **Export log…**, and the export in Settings › Logging, apply
 the same redaction before the text reaches the clipboard or a file: secrets, webhook URLs
 (Slack, Teams, Teams Workflows, Power Automate), the Jamf server address and the profile's
@@ -346,7 +351,7 @@ details if your security policy requires it:
 
 ```bash
 # Inspect the bundle contents
-unzip -l ~/Jamf-Reports/<profile>/diagnostics/jamf-reports-diagnostic-*.zip
+unzip -l ~/Library/Logs/JamfReports/diagnostics/<profile>/jamf-reports-diagnostic-*.zip
 ```
 
 ## Generated Report Handling

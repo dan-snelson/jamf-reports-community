@@ -26,6 +26,9 @@ let HTMLReportSHA256Placeholder = String(repeating: "0", count: 64)
 struct HtmlReport: Sendable {
     let config: ReportConfig
     let dataDir: URL
+    /// The profile this report is for, from the caller. Its workspace holds the config.yaml
+    /// and the shared-config pin. Not read from config.yaml, which a peer can edit.
+    var profile: String? = nil
     /// GUI-generate-only AI executive narrative (F3). nil (the default) omits
     /// the `.aiNarrative` section entirely — headless callers never set it.
     var aiNarrative: String? = nil
@@ -50,18 +53,35 @@ struct HtmlReport: Sendable {
         var historyFile: String = ""
     }
 
-    /// Read from the config.yaml beside `dataDir` through the engine's loader, so a value
-    /// reads as the decoder would read it.
+    /// The profile's workspace, which holds its config.yaml and its shared-config pin.
+    /// `jamf_cli.data_dir` can name any folder, so the parent of `dataDir` is the workspace only
+    /// as a fallback: when the caller named no profile or its workspace has no config.yaml.
+    private var workspaceURL: URL {
+        if let profile, !profile.isEmpty,
+           let workspace = ProfileService.workspaceURL(for: profile),
+           FileManager.default.fileExists(
+               atPath: workspace.appendingPathComponent("config.yaml").path) {
+            return workspace
+        }
+        return dataDir.deletingLastPathComponent()
+    }
+
+    /// Read from the workspace's config.yaml through the engine's loader, so a value reads as
+    /// the decoder would read it. `html.history_file` reads as blank (the default beside the
+    /// report) while the shared config.yaml's value is not confirmed on this Mac.
     private func htmlConfig() -> HtmlConfig {
-        let configURL = dataDir.deletingLastPathComponent().appendingPathComponent("config.yaml")
-        guard let text = try? String(contentsOf: configURL, encoding: .utf8),
+        let workspace = workspaceURL
+        let configURL = workspace.appendingPathComponent("config.yaml")
+        guard let text = try? ConfigLoader.readText(at: configURL),
               let root = try? ConfigLoader.rawMapping(fromYAML: text)
         else { return HtmlConfig() }
+        let typed = ConfigLoader.rawValue(at: ["html", "history_file"], in: root) as? String ?? ""
+        let safe = SharedConfigPin.safePathValue(
+            workspace: workspace, section: "html", key: "history_file") as? String
         return HtmlConfig(
             trackHistory: ConfigLoader.rawValue(at: ["html", "track_history"], in: root)
                 as? Bool ?? false,
-            historyFile: ConfigLoader.rawValue(at: ["html", "history_file"], in: root)
-                as? String ?? ""
+            historyFile: safe ?? typed
         )
     }
 
@@ -539,7 +559,8 @@ struct HtmlReport: Sendable {
     /// `html.history_file`, which the report writes to, under the rules for every path
     /// config.yaml names (`WorkspacePaths.resolve`): relative to the workspace and inside it,
     /// an absolute path outside it only with `output.allow_absolute_paths`, never a system or
-    /// credentials folder. It must also end in `.json`, so it cannot name config.yaml or a
+    /// credentials folder, and, as for every file the report writes, never `/Users/Shared`,
+    /// `~/Public` or `/tmp`. It must also end in `.json`, so it cannot name config.yaml or a
     /// shell profile. Blank or refused, it is `html_history.json` beside the report; a
     /// refused path is one `[warn]` line.
     func resolvedHistoryPath(_ configured: String, outputURL: URL) -> URL {
@@ -547,12 +568,12 @@ struct HtmlReport: Sendable {
             .appendingPathComponent("html_history.json")
         let trimmed = configured.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return fallback }
-        let workspace = dataDir.deletingLastPathComponent()
-            .resolvingSymlinksInPath().standardizedFileURL
+        let workspace = workspaceURL.resolvingSymlinksInPath().standardizedFileURL
         let refusal: String
         do {
             let resolved = try WorkspacePaths.resolve(
-                rawValue: trimmed, fallback: fallback.path, workspace: workspace)
+                rawValue: trimmed, fallback: fallback.path, workspace: workspace,
+                reportsFolder: true)
             if resolved.pathExtension.lowercased() == "json" {
                 return URL(fileURLWithPath: resolved.path, isDirectory: false)
             }
@@ -596,18 +617,27 @@ struct HtmlReport: Sendable {
         // A file that is not our history array is not ours to replace: the path is whatever
         // config.yaml names, and it may be a file that already holds something else.
         var history: [[String: Any]] = []
-        if FileManager.default.fileExists(atPath: path.path) {
-            guard let existing = try? Data(contentsOf: path),
-                  let parsed = try? JSONSerialization.jsonObject(with: existing)
+        let name = ConfigSchema.displayText(path.lastPathComponent)
+        do {
+            let existing = try BoundedFile.read(path, limit: Self.maxHistoryBytes)
+            guard let parsed = try? JSONSerialization.jsonObject(with: existing)
                     as? [[String: Any]],
                   parsed.allSatisfy({ $0["ts"] is String && $0["versions"] is [Any] })
             else {
-                let name = ConfigSchema.displayText(path.lastPathComponent)
                 warn("[warn] html.history_file \"\(name)\" is not written: it exists and "
                     + "is not an HTML report history.")
                 return
             }
             history = parsed
+        } catch BoundedFile.Failure.unreadable(let code) where code == ENOENT {
+            // No history yet: the first entry creates the file.
+        } catch {
+            let why = (error as? BoundedFile.Failure) == .tooLarge
+                ? "it is over \(Self.maxHistoryBytes / 1_048_576) MB"
+                : "it is not a regular file or could not be read"
+            warn("[warn] html.history_file \"\(name)\" is not written: \(why). The file is "
+                + "left as it is.")
+            return
         }
         history.append(entry)
         // Trim to last 365 entries
@@ -618,8 +648,11 @@ struct HtmlReport: Sendable {
         }
     }
 
+    /// The largest history file read. A year of entries is a few hundred KB.
+    static let maxHistoryBytes = 8 * 1_048_576
+
     private func loadHistory(path: URL) -> [HistoryEntry] {
-        guard let data = try? Data(contentsOf: path),
+        guard let data = try? BoundedFile.read(path, limit: Self.maxHistoryBytes),
               let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { return [] }
 

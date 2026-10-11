@@ -70,7 +70,9 @@ struct SOFAFeedService: Sendable {
     /// - Returns: A `Snapshot` with one row per OS family across all platforms.
     ///            Empty when no cache files exist.
     static func load(dataDir: URL, referenceDate: Date = Date()) -> Snapshot {
-        let sofaDir = dataDir.appendingPathComponent("sofa", isDirectory: true)
+        guard let sofaDir = WorkspacePaths.confinedFolderOrWarn(["sofa"], under: dataDir) else {
+            return .empty
+        }
         var rows: [OSFamilyRow] = []
         var warnings: [String] = []
         for platform in allPlatforms {
@@ -112,7 +114,9 @@ struct SOFAFeedService: Sendable {
         timeout: TimeInterval = 30,
         referenceDate: Date = Date()
     ) async -> (Snapshot, [String]) {
-        let sofaDir = dataDir.appendingPathComponent("sofa", isDirectory: true)
+        guard let sofaDir = WorkspacePaths.confinedFolderOrWarn(["sofa"], under: dataDir) else {
+            return (.empty, ["SOFA: the sofa cache folder is a symbolic link, so it is not used"])
+        }
         do {
             try FileManager.default.createDirectory(
                 at: sofaDir, withIntermediateDirectories: true)
@@ -308,11 +312,12 @@ struct SOFAFeedService: Sendable {
         return result
     }
 
-    private static func writeCacheAtomic(data: Data, to url: URL) {
+    static func writeCacheAtomic(data: Data, to url: URL) {
         let tmp = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).partial")
         do {
-            try data.write(to: tmp)
+            // Atomic, so a symlink planted at the staging name is replaced, not followed.
+            try data.write(to: tmp, options: .atomic)
             // replaceItem requires the destination to exist; use move when it doesn't.
             if FileManager.default.fileExists(atPath: url.path) {
                 _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)

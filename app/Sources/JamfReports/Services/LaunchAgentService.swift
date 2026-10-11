@@ -26,15 +26,15 @@ enum LaunchAgentService {
     ///    exact inverse of that check, so this path can only ever retire a
     ///    user-built agent the operator confirmed.
     /// 2. Each plist is copied to
-    ///    `<workspacesRoot>/_archived-launchagents/<label>.<ts>.plist` BEFORE
+    ///    `AppSupport/archived-launchagents/<label>.<ts>.plist` (per Mac, never under a
+    ///    possibly shared workspaces root) BEFORE
     ///    bootout + delete (recoverable, matching the snapshot retention
     ///    archive-not-delete model). A failed archive aborts that label's
     ///    removal — recoverability first, nothing is lost on a mis-click.
     static func archiveAndRemove(
-        labels: [String], includingManaged: Bool = false
+        labels: [String], includingManaged: Bool = false, in agents: URL = agentsDir
     ) -> ConsolidationRemovalResult {
-        let archiveDir = ProfileService.workspacesRoot()
-            .appendingPathComponent("_archived-launchagents", isDirectory: true)
+        let archiveDir = archivedAgentsDir()
         var removed: [String] = []
         var rejected: [String] = []
         var didArchive = false
@@ -45,7 +45,8 @@ enum LaunchAgentService {
                 rejected.append(label)
                 continue
             }
-            guard LaunchAgentWriter.isValidLabel(label), let url = agentURL(forLabel: label) else {
+            guard LaunchAgentWriter.isValidLabel(label),
+                  let url = agentURL(forLabel: label, in: agents) else {
                 rejected.append(label)
                 continue
             }
@@ -73,6 +74,12 @@ enum LaunchAgentService {
             removed: removed.sorted(), rejected: rejected.sorted(),
             archiveDir: didArchive ? archiveDir : nil
         )
+    }
+
+    /// Where retired plists are kept: this Mac's Application Support. They are per-machine and
+    /// hold the old schedule's arguments, so they do not belong under a shared workspaces root.
+    static func archivedAgentsDir() -> URL {
+        AppSupport.directory().appendingPathComponent("archived-launchagents", isDirectory: true)
     }
 
     /// Resolve the on-disk plist URL whose `Label` matches `label`. Prefers the

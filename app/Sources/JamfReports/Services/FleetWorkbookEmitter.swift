@@ -28,7 +28,7 @@ enum FleetWorkbookEmitter {
             lookbackDays: lookbackDays, timestamp: timestamp
         ) else { return nil }
 
-        let dir = outputDir ?? FleetReportEmitter.consolidatedDir()
+        let dir = try outputDir ?? FleetReportEmitter.consolidatedDir()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(
             "fleet-\(ExportNaming.sanitize(group.name))-\(timestamp).xlsx")

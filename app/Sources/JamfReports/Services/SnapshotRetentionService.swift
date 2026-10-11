@@ -297,15 +297,35 @@ enum SnapshotRetentionService {
         }
         let cutoff = now.addingTimeInterval(-Double(policy.keepDays) * 86_400)
 
-        var acted = 0
-        var failed = 0
-        for (rank, entry) in sorted.enumerated() {
-            // Keep a file if EITHER rule protects it: within the count floor
-            // (N newest) OR within the age horizon. Act only when neither does.
+        // Keep a file if EITHER rule protects it: within the count floor (N newest) OR within
+        // the age horizon. Act only when neither does.
+        let due = sorted.enumerated().filter { rank, entry in
             let protectedByCount = policy.keepCount > 0 && rank < policy.keepCount
             let protectedByAge = policy.keepDays > 0 && entry.date >= cutoff
-            if protectedByCount || protectedByAge { continue }
-            if act(on: entry.url, archiveSubpath: archiveSubpath, archiveRoot: archiveRoot,
+            return !(protectedByCount || protectedByAge)
+        }.map(\.element)
+        guard !due.isEmpty else { return SweepResult(acted: 0, failed: 0) }
+
+        // Archive folders below `_archive` can be links a peer planted; refuse once per folder,
+        // and only when a file is due, so a protected folder neither warns nor blocks the marker.
+        var archiveDir: URL?
+        if policy.mode == .archive {
+            do {
+                archiveDir = try WorkspacePaths.confinedFolder(
+                    archiveSubpath.split(separator: "/").map(String.init), under: archiveRoot)
+            } catch {
+                let msg = "[warn] retention: \(archiveSubpath) is not used as an archive "
+                    + "folder: \(WorkspacePaths.refusal(of: error)); \(due.count) file(s) kept"
+                AppLogger.collect.warning("\(msg, privacy: .private)")
+                onLine(.init(timestamp: Date(), level: .warn, text: msg))
+                return SweepResult(acted: 0, failed: due.count)
+            }
+        }
+
+        var acted = 0
+        var failed = 0
+        for entry in due {
+            if act(on: entry.url, archiveDir: archiveDir,
                    policy: policy, fm: fm, onLine: onLine) {
                 acted += 1
             } else {
@@ -321,8 +341,7 @@ enum SnapshotRetentionService {
     /// shows them rather than silently swallowing them.
     private static func act(
         on url: URL,
-        archiveSubpath: String,
-        archiveRoot: URL,
+        archiveDir: URL?,
         policy: Policy,
         fm: FileManager,
         onLine: @Sendable (CLIBridge.LogLine) -> Void
@@ -343,7 +362,7 @@ enum SnapshotRetentionService {
                 return false
             }
         case .archive:
-            let destDir = archiveRoot.appendingPathComponent(archiveSubpath, isDirectory: true)
+            guard let destDir = archiveDir else { return false }
             let dest = destDir.appendingPathComponent(url.lastPathComponent)
             do {
                 try fm.createDirectory(at: destDir, withIntermediateDirectories: true)

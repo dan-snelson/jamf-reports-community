@@ -1193,14 +1193,14 @@ final class CLIBridge {
             return nil
         }
         guard ProfileService.isValid(profile),
-              let workspace = ProfileService.workspaceURL(for: profile) else {
+              ProfileService.workspaceURL(for: profile) != nil else {
             return nil
         }
 
-        let devicesDir = workspace
-            .appendingPathComponent("jamf-cli-data", isDirectory: true)
-            .appendingPathComponent(cacheSubdir, isDirectory: true)
-        let cache = devicesDir.appendingPathComponent(deviceCacheFilename(trimmedID))
+        // Nil when the cache folder is refused: the lookup then runs live and caches nothing.
+        let devicesDir = Self.deviceCacheFolder(
+            profile: profile, cacheSubdir: cacheSubdir, onLine: onLine)
+        let cache = devicesDir?.appendingPathComponent(deviceCacheFilename(trimmedID))
         if let bin = locateJamfCLI() {
             // Staged in the per-user temp directory, not beside the cache: a predictable name
             // in a shared workspace can be a symlink someone planted, and jamf-cli would write
@@ -1214,7 +1214,7 @@ final class CLIBridge {
                 arguments: baseArgs + [
                     "--output", "json", "--no-input", "--out-file", staging.path,
                 ],
-                outputDirectory: devicesDir,
+                outputDirectory: devicesDir ?? FileManager.default.temporaryDirectory,
                 stdoutFallbackFile: staging,
                 timeout: timeout,
                 onLine: onLine
@@ -1222,7 +1222,7 @@ final class CLIBridge {
             if exit == 0 {
                 do {
                     let data = try Data(contentsOf: staging)
-                    if !data.isEmpty {
+                    if !data.isEmpty, let cache {
                         // Remove both the stale cache and its freshness sidecar so a
                         // forged-old-timestamp sidecar can't survive a live refresh.
                         try? FileManager.default.removeItem(at: cache)
@@ -1235,6 +1235,8 @@ final class CLIBridge {
                         return DeviceDetailResult(
                             data: data, fromCache: false, cacheURL: cached ? cache : nil
                         )
+                    } else if !data.isEmpty {
+                        return DeviceDetailResult(data: data, fromCache: false, cacheURL: nil)
                     }
                 } catch {
                     let reason = error.localizedDescription
@@ -1244,8 +1246,45 @@ final class CLIBridge {
                 }
             }
         }
-        guard let data = try? Data(contentsOf: cache) else { return nil }
-        return DeviceDetailResult(data: data, fromCache: true, cacheURL: cache)
+        let fallback = [cache, Self.legacyDeviceCache(
+            profile: profile, cacheSubdir: cacheSubdir, file: deviceCacheFilename(trimmedID),
+            current: devicesDir)]
+        for url in fallback.compactMap({ $0 }) {
+            if let data = try? Data(contentsOf: url) {
+                return DeviceDetailResult(data: data, fromCache: true, cacheURL: url)
+            }
+        }
+        return nil
+    }
+
+    /// The kind folder under the profile's data folder (`jamf_cli.data_dir`). A link there would
+    /// send cached device JSON wherever a peer pointed it, so it is refused with one warning.
+    nonisolated private static func deviceCacheFolder(
+        profile: String, cacheSubdir: String,
+        onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
+    ) -> URL? {
+        do {
+            return try WorkspacePaths.confinedFolder(
+                [cacheSubdir], under: try WorkspacePaths.dataDir(for: profile))
+        } catch {
+            let msg = "[warn] device detail: the \(cacheSubdir) cache folder is not used, so "
+                + "this lookup is not cached: \(WorkspacePaths.refusal(of: error))."
+            AppLogger.cli.warning("\(msg, privacy: .private)")
+            onLine?(.init(timestamp: Date(), level: .warn, text: msg))
+            return nil
+        }
+    }
+
+    /// A copy cached under the fixed `jamf-cli-data/<kind>` folder before the cache followed
+    /// `jamf_cli.data_dir`. Read only, never written, and only through a confined folder.
+    nonisolated private static func legacyDeviceCache(
+        profile: String, cacheSubdir: String, file: String, current: URL?
+    ) -> URL? {
+        guard let workspace = ProfileService.workspaceURL(for: profile),
+              let folder = try? WorkspacePaths.confinedFolder(
+                  ["jamf-cli-data", cacheSubdir], under: workspace),
+              folder.standardizedFileURL != current?.standardizedFileURL else { return nil }
+        return folder.appendingPathComponent(file)
     }
 
     /// Writes `data` to `cache` through a temp file and rename, then restricts it to the owner.

@@ -35,15 +35,26 @@ private func emitConsolidatedReports(record: @Sendable (String) -> Void = { _ in
         }
     }()
     let stamp = ExportNaming.timestamp()
+    // One refusal for the whole run, not one per group.
+    let outputDir: URL
+    do {
+        outputDir = try FleetReportEmitter.consolidatedDir()
+    } catch {
+        let message = "[warn] consolidated reports not written: _fleet-reports is not used: "
+            + WorkspacePaths.refusal(of: error) + "."
+        fputs(message + "\n", stderr)
+        record(message)
+        return
+    }
     for group in policy.reportGroups {
         do {
             if let url = try FleetReportEmitter.emit(
-                group: group, lookbackDays: lookback, timestamp: stamp
+                group: group, lookbackDays: lookback, timestamp: stamp, outputDir: outputDir
             ) {
                 print("[ok] consolidated fleet report: \(url.lastPathComponent)")
             }
             if let xlsxURL = try FleetWorkbookEmitter.emit(
-                group: group, lookbackDays: lookback, timestamp: stamp
+                group: group, lookbackDays: lookback, timestamp: stamp, outputDir: outputDir
             ) {
                 print("[ok] consolidated fleet workbook: \(xlsxURL.lastPathComponent)")
             }
@@ -64,35 +75,8 @@ private func emitConsolidatedReports(record: @Sendable (String) -> Void = { _ in
 /// Best-effort — never throws.
 @Sendable
 private func appendFleetLog(_ message: String) {
-    let logURL = FleetReportEmitter.consolidatedDir()
-        .appendingPathComponent("fleet-reports.log")
-    let fm = FileManager.default
     do {
-        try fm.createDirectory(
-            at: logURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        let line = ISO8601DateFormatter().string(from: Date()) + " " + message + "\n"
-        guard let data = line.data(using: .utf8) else { return }
-        if fm.fileExists(atPath: logURL.path) {
-            // Truncate if already over 1 MB before appending.
-            let attrs = try? fm.attributesOfItem(atPath: logURL.path)
-            let size = attrs?[.size] as? Int ?? 0
-            if size > 1_048_576 {
-                try data.write(to: logURL, options: .atomic)
-                return
-            }
-            let handle = try FileHandle(forWritingTo: logURL)
-            handle.seekToEndOfFile()
-            // write(contentsOf:), not write(_:): the latter bridges to
-            // -[NSFileHandle writeData:] and RAISES on failure, which Swift
-            // cannot catch — the enclosing do/catch here looked like it covered
-            // that and did not. On a synced workspace the write really can fail.
-            try handle.write(contentsOf: data)
-            try handle.close()
-        } else {
-            try data.write(to: logURL, options: .atomic)
-        }
+        try FleetReportEmitter.appendLog(message, in: try FleetReportEmitter.consolidatedDir())
     } catch {
         AppLogger.schedule.warning(
             "appendFleetLog: could not write fleet-reports.log: \(error.localizedDescription, privacy: .public)"

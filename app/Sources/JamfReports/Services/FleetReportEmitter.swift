@@ -15,10 +15,39 @@ enum FleetReportEmitter {
 
     /// Shared output dir for consolidated reports — `_fleet-reports` under the
     /// workspaces root. The leading underscore is an invalid profile slug, so
-    /// it never collides with profile discovery.
-    static func consolidatedDir() -> URL {
-        ProfileService.workspacesRoot()
-            .appendingPathComponent("_fleet-reports", isDirectory: true)
+    /// it never collides with profile discovery. Throws when the folder is a symbolic link,
+    /// which a peer on a shared root could plant to redirect the reports.
+    static func consolidatedDir() throws -> URL {
+        try WorkspacePaths.confinedFolder(["_fleet-reports"], under: ProfileService.workspacesRoot())
+    }
+
+    static let logFileName = "fleet-reports.log"
+
+    /// Appends one timestamped line to `<dir>/fleet-reports.log` without following a link at
+    /// that name (`O_NOFOLLOW`), emptying the file first when it is over `maxBytes`.
+    static func appendLog(_ message: String, in dir: URL, maxBytes: Int = 1_048_576) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent(logFileName).path
+        // O_NONBLOCK so opening a FIFO planted at the name returns instead of waiting for a
+        // reader; the type check then refuses anything but a regular file.
+        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK,
+                      0o600)
+        guard fd >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+            try? handle.close()
+            throw POSIXError(.EFTYPE)
+        }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
+        if Int(info.st_size) > maxBytes { _ = ftruncate(fd, 0) }
+        let line = ISO8601DateFormatter().string(from: Date()) + " " + message + "\n"
+        // write(contentsOf:), not write(_:): the latter raises on failure, which Swift cannot
+        // catch. On a synced workspace the write really can fail.
+        try handle.write(contentsOf: Data(line.utf8))
+        try handle.close()
     }
 
     /// CSV text for a rollup: `Metric,Current,Previous,Delta`. Pure — testable.
@@ -74,7 +103,7 @@ enum FleetReportEmitter {
         guard let rollup = rollup(for: group, summariesByProfile: lists, lookbackDays: lookbackDays) else {
             return nil
         }
-        let dir = outputDir ?? consolidatedDir()
+        let dir = try outputDir ?? consolidatedDir()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let stem = "fleet-\(ExportNaming.sanitize(group.name))"
         let url = dir.appendingPathComponent("\(stem)-\(timestamp).csv")

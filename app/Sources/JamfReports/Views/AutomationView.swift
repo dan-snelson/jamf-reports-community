@@ -217,7 +217,7 @@ struct AutomationView: View {
             let suffix = result.rejected.isEmpty ? "" : " (\(result.rejected.count) skipped)"
             workspace.toast = Toast(
                 message: "Retired \(n) hand-built schedule\(n == 1 ? "" : "s")\(suffix) — "
-                    + "archived under _archived-launchagents",
+                    + "archived under Application Support/JamfReports/archived-launchagents",
                 style: result.rejected.isEmpty ? .success : .danger
             )
         }
@@ -723,7 +723,7 @@ private struct ConsolidationCard: View {
                 Text("These schedules were imported and now run from the JamfReports "
                     + "background item, but their old LaunchAgent files are still loaded — "
                     + "each runs twice per fire until retired. Retiring archives the file to "
-                    + "_archived-launchagents first.")
+                    + "this Mac's Application Support first.")
                     .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
 
                 ForEach(candidates) { candidate in
@@ -756,8 +756,9 @@ private struct ConsolidationCard: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Each schedule is archived to _archived-launchagents and can be restored by "
-                + "copying its plist back to ~/Library/LaunchAgents.")
+            Text("Each schedule is archived in Application Support/JamfReports/"
+                + "archived-launchagents and can be restored by copying its plist back to "
+                + "~/Library/LaunchAgents.")
         }
     }
 

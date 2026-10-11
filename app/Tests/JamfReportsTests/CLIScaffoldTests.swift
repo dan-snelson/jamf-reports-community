@@ -63,6 +63,24 @@ final class CLIScaffoldTests: XCTestCase {
             .contains("minimal workspace config"))
     }
 
+    /// The copy is the only record of the old file, but a webhook URL is a credential.
+    func testScaffoldKeepsACopyWithoutTheWebhookURL() async throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let outURL = dir.appendingPathComponent("config.yaml")
+        try "columns:\n  computer_name: A\nnotify:\n  enabled: true\n"
+            .appending("  url: \"https://hooks.example.com/services/T0/secret-token\"\n")
+            .write(to: outURL, atomically: true, encoding: .utf8)
+        try await Scaffold.parse(["--out", outURL.path]).run()
+
+        let name = try XCTUnwrap(try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .first { $0.hasPrefix("config.yaml.bak-") })
+        let copy = try String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8)
+        XCTAssertFalse(copy.contains("secret-token"))
+        XCTAssertTrue(copy.contains("computer_name: A"))
+        XCTAssertTrue(copy.contains("(was https://hooks.example.com/…)"))
+    }
+
     // MARK: - Providing --csv is unchanged (regression)
 
     func testScaffoldWithCSVBehaviorUnchanged() async throws {

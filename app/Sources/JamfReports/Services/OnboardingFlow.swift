@@ -1052,6 +1052,8 @@ final class OnboardingFlow {
         csvOutput.append(.init(
             timestamp: Date(), level: .info,
             text: "[info] kept a copy of the existing config.yaml as \(backup.lastPathComponent)"
+                + (ConfigService.backupOmitsWebhook(backup)
+                    ? "; its webhook URL is not kept, so enter it again after a restore" : "")
         ))
     }
 

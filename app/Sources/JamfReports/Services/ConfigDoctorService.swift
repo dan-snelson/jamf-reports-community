@@ -16,6 +16,15 @@ struct DoctorRow: Identifiable, Sendable, Equatable {
     let hint: String?
     /// A button the Config Doctor screen shows on the row; nil for every row but one.
     var action: DoctorAction?
+    /// Parts of `detail` that carry a button of their own; empty for every row but one.
+    var items: [DoctorRowItem] = []
+}
+
+/// One part of a row, such as a single drifted key, with its own button.
+struct DoctorRowItem: Identifiable, Sendable, Equatable {
+    let id: String
+    let text: String
+    var action: DoctorAction?
 }
 
 /// What a row's button does. The screen runs it for the active profile.

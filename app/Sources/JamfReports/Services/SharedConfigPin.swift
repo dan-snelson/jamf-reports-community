@@ -61,6 +61,14 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             self == .notifyURL ? "\(pin.notifyURLHost) \(pin.notifyURLHash)" : text(of: pin)
         }
 
+        /// The keys that name a folder the app reads or writes.
+        var isFolder: Bool {
+            switch self {
+            case .outputDir, .archiveDir, .dataDir, .historicalDir, .retentionArchiveDir: true
+            default: false
+            }
+        }
+
         /// Place in `allCases`, which orders the rows and warnings.
         fileprivate var position: Int { Key.allCases.firstIndex(of: self) ?? Int.max }
 
@@ -107,14 +115,21 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     struct Drift: Sendable, Equatable {
         let key: Key
         let pinned: String
+        /// True when `pinned` is a note (first sight, unreadable pin) rather than a pinned value,
+        /// so a value that merely looks like a note is still shown as a value.
+        let pinnedIsNote: Bool
         /// What the row shows. The webhook shows host, port and a short fingerprint.
         let current: String
         /// What Confirm compares: the whole value, including the full URL hash.
         let currentToken: String
 
-        init(key: Key, pinned: String, current: String, currentToken: String? = nil) {
+        init(
+            key: Key, pinned: String, current: String, currentToken: String? = nil,
+            pinnedIsNote: Bool = false
+        ) {
             self.key = key
             self.pinned = pinned
+            self.pinnedIsNote = pinnedIsNote
             self.current = current
             self.currentToken = currentToken ?? current
         }
@@ -132,6 +147,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     }
 
     static let firstSightNote = "(first seen, not confirmed)"
+    static let unreadableNote = "(pin unreadable)"
 
     /// The pin for a workspace seen for the first time. What is already in the shared file may
     /// have been written by a peer, so a folder outside the workspace and a `delete` retention
@@ -318,8 +334,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         case .unreadable:
             // Fail closed: with no pin to compare against, every key reads as changed.
             let drifts = Key.allCases.map {
-                Drift(key: $0, pinned: "(pin unreadable)", current: $0.text(of: current),
-                      currentToken: $0.token(of: current))
+                Drift(key: $0, pinned: unreadableNote, current: $0.text(of: current),
+                      currentToken: $0.token(of: current), pinnedIsNote: true)
             }
             return Check(workspace: workspace, pinned: nil, drifts: drifts)
         case .pin(let stored):
@@ -349,7 +365,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             .filter { key in !changed.contains { $0.key == key } }
             .map {
                 Drift(key: $0, pinned: firstSightNote, current: $0.text(of: current),
-                      currentToken: $0.token(of: current))
+                      currentToken: $0.token(of: current), pinnedIsNote: true)
             }
         return (changed + waiting).sorted { $0.key.position < $1.key.position }
     }
@@ -409,6 +425,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             confirmed += 1
         }
         if unreadable, confirmed < Key.allCases.count { throw ConfirmError.changedSinceShown }
+        // Nothing still matched what the row showed: say so rather than report a confirmation.
+        if confirmed == 0, !drifts.isEmpty { throw ConfirmError.changedSinceShown }
         try save(pin, profile: profile, appSupport: appSupport)
         invalidateOverrides(for: workspace)
     }

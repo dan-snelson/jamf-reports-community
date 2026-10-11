@@ -228,7 +228,8 @@ final class SharedConfigPinTests: XCTestCase {
 
         // A peer edits again after the row was shown.
         try writeConfig(retentionMode: "archive", webhook: "https://collector.attacker.test/a")
-        try SharedConfigPin.confirm(profile: profile, drifts: shown, appSupport: appSupport)
+        XCTAssertThrowsError(try SharedConfigPin.confirm(
+            profile: profile, drifts: shown, appSupport: appSupport))
         XCTAssertEqual(check().drifts.map(\.key), [.notifyURL],
                        "the retention row no longer matched, the webhook was never shown")
         guard case .pin(let pin) = SharedConfigPin.read(profile: profile, appSupport: appSupport)
@@ -249,7 +250,8 @@ final class SharedConfigPinTests: XCTestCase {
         let forged = SharedConfigPin.Drift(
             key: .notifyURL, pinned: shown.pinned, current: shown.current,
             currentToken: shown.currentToken + "0")
-        try SharedConfigPin.confirm(profile: profile, drifts: [forged], appSupport: appSupport)
+        XCTAssertThrowsError(try SharedConfigPin.confirm(
+            profile: profile, drifts: [forged], appSupport: appSupport))
         XCTAssertEqual(check().drifts.map(\.key), [.notifyURL])
         try SharedConfigPin.confirm(profile: profile, drifts: [shown], appSupport: appSupport)
         XCTAssertTrue(check().drifts.isEmpty)
@@ -342,7 +344,7 @@ final class SharedConfigPinTests: XCTestCase {
             .archive)
         let rows = ConfigDoctorService.sharedConfigRows(profile: profile, appSupport: appSupport)
         XCTAssertEqual(rows.count, 1)
-        XCTAssertTrue(rows[0].detail.contains("pinned (first seen, not confirmed)"))
+        XCTAssertTrue(rows[0].detail.contains("pinned: (first seen, not confirmed)"))
 
         try confirmAll()
         XCTAssertTrue(check().drifts.isEmpty)
@@ -635,9 +637,37 @@ final class SharedConfigPinTests: XCTestCase {
         XCTAssertNil(SharedConfigPin.outputFolderNote(profile: profile, folder: confirmed))
         try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
         let fallback = try WorkspacePaths.outputDir(for: profile)
-        let note = try XCTUnwrap(SharedConfigPin.outputFolderNote(profile: profile, folder: fallback))
+        let note = try XCTUnwrap(
+            SharedConfigPin.outputFolderNote(profile: profile, folder: fallback))
         XCTAssertTrue(note.contains("output.output_dir"), note)
         XCTAssertTrue(note.contains("not confirmed on this Mac"), note)
+    }
+
+    func testConfirmingAValueThatChangedSinceItWasShownSaysSo() throws {
+        try writeConfig(outputDir: outside, allowAbsolute: true)
+        _ = check()
+        try confirmAll()
+        try writeConfig(outputDir: outside + "-shown", allowAbsolute: true)
+        let shown = check().drifts
+        try writeConfig(outputDir: outside + "-later", allowAbsolute: true)
+        XCTAssertThrowsError(try SharedConfigPin.confirm(
+            profile: profile, drifts: shown, appSupport: appSupport)) { error in
+            XCTAssertEqual(error as? SharedConfigPin.ConfirmError, .changedSinceShown)
+        }
+        XCTAssertTrue(check().isDrifted(.outputDir), "nothing was pinned")
+    }
+
+    func testAValueWithHiddenCharactersIsLabelledAndCannotBeConfirmedFromTheRow() throws {
+        try writeConfig(outputDir: outside, allowAbsolute: true)
+        _ = check()
+        try confirmAll()
+        try writeConfig(outputDir: outside + "\u{200B}-peer", allowAbsolute: true)
+        let row = try XCTUnwrap(ConfigDoctorService.sharedConfigRows(
+            profile: profile, appSupport: appSupport).first)
+        let item = try XCTUnwrap(
+            row.items.first { $0.id == SharedConfigPin.Key.outputDir.rawValue })
+        XCTAssertTrue(item.text.contains("contains hidden characters"), item.text)
+        XCTAssertNil(item.action)
     }
 
     func testTheSafeFolderHoldsUntilConfirmedWhateverRanBefore() throws {
@@ -770,7 +800,7 @@ final class SharedConfigPinTests: XCTestCase {
 
     // MARK: - Config Doctor and confirming
 
-    func testDoctorRowIsAWarningWithConfirmAndShowsTheHostOnly() throws {
+    func testDoctorRowIsAWarningWithAConfirmPerKeyAndShowsTheHostOnly() throws {
         try writeConfig(retentionMode: "archive", webhook: "https://hooks.example.com/a")
         _ = check()
         XCTAssertTrue(ConfigDoctorService.sharedConfigRows(
@@ -782,8 +812,11 @@ final class SharedConfigPinTests: XCTestCase {
         let row = try XCTUnwrap(rows.first)
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(row.severity, .warn)
-        XCTAssertEqual(row.action, .confirmSharedConfig(check().drifts))
-        XCTAssertTrue(row.detail.contains("retention.mode: pinned \"archive\", now \"delete\""))
+        XCTAssertNil(row.action, "a readable pin confirms one key at a time")
+        let drifts = check().drifts
+        XCTAssertEqual(row.items.map(\.action), drifts.map { .confirmSharedConfig([$0]) })
+        XCTAssertTrue(row.detail.contains(
+            "retention.mode\n  pinned: \"archive\"\n  now:    \"delete\""))
         XCTAssertTrue(row.detail.contains("hooks.example.com"))
         XCTAssertTrue(row.detail.contains("collector.attacker.test"))
         XCTAssertFalse(row.detail.contains("secret-token"))
@@ -791,6 +824,101 @@ final class SharedConfigPinTests: XCTestCase {
         try confirmAll()
         XCTAssertTrue(ConfigDoctorService.sharedConfigRows(
             profile: profile, appSupport: appSupport).isEmpty)
+    }
+
+    func testConfirmingOneKeyThroughTheDoctorActionLeavesTheOthersDrifted() throws {
+        try writeConfig()
+        _ = check()
+        try writeConfig(retentionMode: "delete", webhook: "https://collector.example.org/a")
+        let row = try XCTUnwrap(ConfigDoctorService.sharedConfigRows(
+            profile: profile, appSupport: appSupport).first)
+        let item = try XCTUnwrap(row.items.first { $0.id == "retention.mode" })
+        guard case .confirmSharedConfig(let drifts)? = item.action else {
+            return XCTFail("no action")
+        }
+        try SharedConfigPin.confirm(profile: profile, drifts: drifts, appSupport: appSupport)
+        XCTAssertEqual(check().drifts.map(\.key), [.notifyURL])
+    }
+
+    func testAnUnreadablePinOffersOneConfirmAllAndNoPerKeyButton() throws {
+        try writeConfig()
+        _ = check()
+        let store = SharedConfigPin.storeURL(profile: profile, appSupport: appSupport)
+        try "not json".write(to: store, atomically: true, encoding: .utf8)
+        let row = try XCTUnwrap(ConfigDoctorService.sharedConfigRows(
+            profile: profile, appSupport: appSupport).first)
+        XCTAssertEqual(row.action, .confirmSharedConfig(check().drifts))
+        XCTAssertTrue(row.items.allSatisfy { $0.action == nil })
+        XCTAssertEqual(row.items.count, SharedConfigPin.Key.allCases.count)
+        XCTAssertTrue(row.detail.contains("pinned: (pin unreadable)"))
+        let one = try XCTUnwrap(check().drifts.first)
+        XCTAssertThrowsError(try SharedConfigPin.confirm(
+            profile: profile, drifts: [one], appSupport: appSupport))
+    }
+
+    private func driftText(_ key: String) throws -> String {
+        let row = try XCTUnwrap(ConfigDoctorService.sharedConfigRows(
+            profile: profile, appSupport: appSupport).first)
+        return try XCTUnwrap(row.items.first { $0.id == key }).text
+    }
+
+    func testAPaddedPathShowsWholeAndWhereItLands() throws {
+        let padded = "/" + String(repeating: "a", count: 59) + "/../../Volumes/x"
+        try writeConfig(outputDir: padded, allowAbsolute: true)
+        let text = try driftText("output.output_dir")
+        XCTAssertTrue(text.contains("now:    \"\(padded)\""), "shown whole, not cut at 60")
+        XCTAssertTrue(text.contains("lands:  /Volumes/x (outside this workspace)"), text)
+        XCTAssertTrue(text.contains("pinned: \(SharedConfigPin.firstSightNote)"), text)
+    }
+
+    func testARelativeFolderLandsInsideTheWorkspaceAndASymlinkedParentResolves() throws {
+        try writeConfig(outputDir: "reports/2026")
+        _ = check()
+        let target = root.appendingPathComponent("elsewhere", isDirectory: true)
+        try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+        let link = workspace.appendingPathComponent("linked")
+        try fileManager.createSymbolicLink(at: link, withDestinationURL: target)
+        try writeConfig(outputDir: "other/dir")
+        let inside = try driftText("output.output_dir")
+        let home = workspace.resolvingSymlinksInPath().path
+        XCTAssertTrue(inside.contains("lands:  \(home)/other/dir (inside this workspace)"), inside)
+
+        try writeConfig(outputDir: "linked/new-sub")
+        let escaped = try driftText("output.output_dir")
+        let real = target.resolvingSymlinksInPath().path
+        XCTAssertTrue(escaped.contains("lands:  \(real)/new-sub (outside this workspace)"), escaped)
+    }
+
+    func testAMissingTailResolvesThroughItsDeepestExistingAncestor() throws {
+        let realParent = root.appendingPathComponent("real-parent", isDirectory: true)
+        try fileManager.createDirectory(at: realParent, withIntermediateDirectories: true)
+        let alias = root.appendingPathComponent("alias")
+        try fileManager.createSymbolicLink(at: alias, withDestinationURL: realParent)
+        try writeConfig(outputDir: alias.path + "/not/yet/made", allowAbsolute: true)
+        let text = try driftText("output.output_dir")
+        let real = realParent.resolvingSymlinksInPath().path
+        XCTAssertTrue(text.contains("lands:  \(real)/not/yet/made (outside this workspace)"), text)
+    }
+
+    func testAValueThatLooksLikeANoteIsShownAsAValueWithControlCharactersRemoved() throws {
+        try writeConfig(outputDir: "a")
+        _ = check()
+        try writeConfig(outputDir: "(pin unreadable)\u{202E}x\u{1B}[31my")
+        let text = try driftText("output.output_dir")
+        XCTAssertTrue(text.contains("now:    \"(pin unreadable)x[31my\""), text)
+        XCTAssertFalse(text.contains("\u{1B}"))
+        XCTAssertFalse(text.contains("\u{202E}"))
+        XCTAssertTrue(text.contains("pinned: \"a\""), text)
+    }
+
+    func testAValueOverTheLimitIsCutWithANote() throws {
+        try writeConfig(outputDir: "a")
+        _ = check()
+        try writeConfig(outputDir: String(repeating: "b", count: 1500))
+        let text = try driftText("output.output_dir")
+        let now = try XCTUnwrap(text.components(separatedBy: "\n").first { $0.hasPrefix("  now:") })
+        XCTAssertTrue(now.hasSuffix(String(repeating: "b", count: 1024) + "\" (truncated)"), "")
+        XCTAssertFalse(now.contains(String(repeating: "b", count: 1025)))
     }
 
     func testConfirmOnALocalWorkspaceWritesNoPin() throws {

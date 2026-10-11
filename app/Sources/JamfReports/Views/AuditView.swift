@@ -370,6 +370,10 @@ struct AuditView: View {
                     }.value
                     workspace.toast = Toast(
                         message: "Shared config confirmed on this Mac", style: .success)
+                } catch SharedConfigPin.ConfirmError.changedSinceShown {
+                    workspace.toast = Toast(
+                        message: "Not confirmed: the value changed since this row was shown",
+                        style: .warning)
                 } catch {
                     workspace.toast = Toast(
                         message: "Could not confirm · \(error.localizedDescription)",
@@ -1665,6 +1669,29 @@ private func toneColor(_ tone: Pill.Tone) -> Color {
 
 // MARK: - Config Doctor row (EPIC #182)
 
+/// One part of a Config Doctor row with its own Confirm. Monospaced and selectable, since it
+/// carries a path a person has to read whole and may want to copy.
+private struct DoctorItemView: View {
+    let item: DoctorRowItem
+    let onAction: (DoctorAction) -> Void
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(item.text)
+                .font(.caption.monospaced())
+                .foregroundStyle(Theme.Text.tertiary(contrast))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if let action = item.action {
+                Button("Confirm") { onAction(action) }
+                    .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 private struct DoctorRowView: View {
     let row: DoctorRow
     let onAction: (DoctorAction) -> Void
@@ -1678,10 +1705,16 @@ private struct DoctorRowView: View {
                 Text(row.title)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.Colors.fg)
-                Text(row.detail)
-                    .font(.caption)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .fixedSize(horizontal: false, vertical: true)
+                if row.items.isEmpty {
+                    Text(row.detail)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(row.items) { item in
+                        DoctorItemView(item: item, onAction: onAction)
+                    }
+                }
                 if let hint = row.hint {
                     Text(hint)
                         .font(.caption2)
@@ -1689,7 +1722,7 @@ private struct DoctorRowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let action = row.action {
-                    Button("Confirm") { onAction(action) }
+                    Button(row.items.isEmpty ? "Confirm" : "Confirm all") { onAction(action) }
                         .controlSize(.small)
                         .padding(.top, 2)
                 }
@@ -1698,7 +1731,11 @@ private struct DoctorRowView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .accessibilityElement(children: row.action == nil ? .combine : .contain)
+        .accessibilityElement(children: hasButton ? .contain : .combine)
+    }
+
+    private var hasButton: Bool {
+        row.action != nil || row.items.contains { $0.action != nil }
     }
 
     private var severityLabel: String {

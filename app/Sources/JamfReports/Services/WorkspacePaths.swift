@@ -274,7 +274,7 @@ enum WorkspacePaths {
     /// `url` with symlinks resolved. A path that does not exist yet keeps its missing tail:
     /// the deepest existing ancestor is resolved and the rest appended, so an alias or a
     /// different spelling of an existing parent cannot hide a denied folder.
-    private static func resolvedForPolicy(_ url: URL) -> String {
+    static func resolvedForPolicy(_ url: URL) -> String {
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) {
             return url.resolvingSymlinksInPath().standardizedFileURL.path
@@ -288,6 +288,22 @@ enum WorkspacePaths {
         return tail.reduce(existing.resolvingSymlinksInPath()) {
             $0.appendingPathComponent($1)
         }.standardizedFileURL.path
+    }
+
+    /// Where a typed folder lands, for a row that asks a person to confirm it: built on the
+    /// workspace as `resolve` builds it (a relative value is the workspace's, `~` expands),
+    /// symlinks resolved through the deepest existing ancestor, and whether it is inside the
+    /// workspace. It does not judge the folder; `resolve` still refuses what it refuses.
+    static func destination(
+        of typed: String, workspace: URL
+    ) -> (path: String, insideWorkspace: Bool) {
+        let root = workspace.resolvingSymlinksInPath().standardizedFileURL
+        let expanded = expandTilde(typed.trimmingCharacters(in: .whitespacesAndNewlines))
+        let candidate = expanded.hasPrefix("/")
+            ? URL(fileURLWithPath: expanded, isDirectory: true)
+            : root.appendingPathComponent(expanded, isDirectory: true)
+        let path = resolvedForPolicy(candidate)
+        return (path, isInside(URL(fileURLWithPath: path), root: root))
     }
 
     private static func folded(_ path: String) -> String {

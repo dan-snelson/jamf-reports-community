@@ -398,6 +398,18 @@ same-day retry still try it. `runAndCapture` also stops waiting for pipe EOF
 `CLIBridge.eofGraceAfterExit` (3 s) after a normal exit, so a process the child left running
 cannot hold the call; it returns what was read.
 
+**Other jamf-cli calls (unreleased).** Three more calls that can run under the tick lock have
+limits: the `pro auth token` probe in `CLIBridge.authGuard` (`CLIBridge.tokenProbeTimeout`, 60 s;
+`probeToken` tells a timeout from a rejection, and a timeout logs one `[warn]` and lets the command
+run, as `collect` does for `AuthProbeResult.unconfirmed`, never the re-authenticate error),
+`CLIBridge.backup` (`backupTimeout`, 2 hours; `CLIBridge.run` takes the same `timeout:` as
+`runAndCapture`; a timeout logs one `[error]` naming the limit, removes the staging folder like any
+failed exit, and returns -2, which `backupOutputIsPrunable` refuses), and `DefaultCLIExecutor`
+(`defaultTimeout`, 60 s, `execute(_:timeout:)` per call; a timeout throws
+`CLIExecutorError.nonZeroExit(code: -2, ...)` naming the limit). Left unbounded by decision: the
+audit and group-hygiene runs from their screens, backup diff (local only), the multi-profile
+command, onboarding Validate and the two semaphore waits.
+
 **Per-device scan phase (2.8.0).** `ReportEngine+DeviceScan.runDeviceScanPhase`
 runs at the end of `collect` — after `enforceCollectVerdicts`, before
 `finalizeCollect` — for the scan tier only, and is skipped by
@@ -1078,7 +1090,7 @@ Named constants in `CLIBridge`. Reference: jamf-cli Error Handling & Exit Codes 
 | 6 | `exitCodeRateLimited` | HTTP 429 — server throttling | Warn with specific message; use cached data |
 | 7 | `exitCodePartialFailure` | Partial failure (v1.19.0+) — some sub-operations failed, stdout contains valid JSON for the successful subset | Warn; save the returned partial data |
 | 8 | `exitCodeRefusedByPolicy` | Refused by policy (v1.28.0+) — correctly invoked, but the command is outside what this profile's API publishes (a Jamf Pro/Classic command on a Platform gateway profile, or a Platform-only command on an instance profile) | Warn; keep the kind in the health banner; **never** auto-retry — the remedy is a different profile, not another attempt |
-| -2 | `exitCodeTimedOut` | Local sentinel: the call hit its timeout and was terminated | Treat as undecided/failed; never a jamf-cli code. A collect kind (60 min, `ReportEngine.collectKindTimeout`), a per-device scan call or patch-definition call (180 s) and the auth probe (60 s) that hit it record a failed attempt like exit 1: not permanent, not auth-dead, counted by the outage guard, not retried inside the run, retried by the next one (self-remediation backs off after two in a row); the log line reads "timed out" |
+| -2 | `exitCodeTimedOut` | Local sentinel: the call hit its timeout and was terminated | Treat as undecided/failed; never a jamf-cli code. A collect kind (60 min, `ReportEngine.collectKindTimeout`), a per-device scan call or patch-definition call (180 s), the auth probes (60 s) and `pro backup` (2 hours) that hit it record a failed attempt like exit 1: not permanent, not auth-dead, counted by the outage guard, not retried inside the run, retried by the next one (self-remediation backs off after two in a row); the log line reads "timed out" |
 
 The `authGuard` function probes `pro auth token` before any live API command. It skips the probe for Jamf School profiles (`shouldSkipAuthProbe`) because School uses API key auth rather than OAuth2. `exitCodeUnauthorized` (3) is the only code that causes a hard abort — all others warn and fall back to cached data. Exit code 7 counts as a success for the auth-dead verdict (auth was accepted; only some sub-operations failed). From jamf-cli 1.28.0 a Platform command's HTTP 403 exits 5 rather than 1, so it lands in the privileges branch instead of the generic one; note the grant it names is a Jamf Account capability permission on a gateway profile and a Jamf Pro API-role privilege on an instance profile.
 

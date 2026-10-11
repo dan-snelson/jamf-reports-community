@@ -209,6 +209,12 @@ versions in this repository map to git tags.
   earlier build already moved aside (`.log.1`) stay where they are and can be deleted.
 - The installer package is now built so the app always installs into /Applications and cannot
   be relocated by the installer, whichever macOS version builds the package.
+- The sign-in check that runs before a live command (a collect, Generate, a connection check)
+  and the shared doctor, config-list and help probes now stop after one minute, and a backup
+  after two hours, when jamf-cli gets no answer, instead of holding the scheduled-run lock for
+  hours. A sign-in check that times out logs a warning and the command carries on. A backup that
+  times out fails, is logged with its limit, and leaves no folder behind for the Backups screen
+  to list.
 
 ### Dependencies
 

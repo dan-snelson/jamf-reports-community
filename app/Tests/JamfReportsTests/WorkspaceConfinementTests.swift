@@ -42,7 +42,8 @@ final class WorkspaceConfinementTests: XCTestCase {
     func testHelperAcceptsARealFolderAndOneThatDoesNotExistYet() throws {
         try fm.createDirectory(
             at: workspace.appendingPathComponent("automation"), withIntermediateDirectories: true)
-        XCTAssertNoThrow(try WorkspacePaths.confinedFolder(["automation", "logs"], under: workspace))
+        XCTAssertNoThrow(
+            try WorkspacePaths.confinedFolder(["automation", "logs"], under: workspace))
         XCTAssertNoThrow(try WorkspacePaths.confinedFolder(["backups"], under: workspace))
     }
 
@@ -60,7 +61,9 @@ final class WorkspaceConfinementTests: XCTestCase {
 
     func testHelperRefusesASymlinkAtAnyComponent() throws {
         try link("automation")
-        XCTAssertThrowsError(try WorkspacePaths.confinedFolder(["automation", "logs"], under: workspace)) {
+        XCTAssertThrowsError(
+            try WorkspacePaths.confinedFolder(["automation", "logs"], under: workspace)
+        ) {
             guard case WorkspacePaths.PathError.symlinkedSubfolder(let name) = $0 else {
                 return XCTFail("expected symlinkedSubfolder, got \($0)")
             }
@@ -70,7 +73,8 @@ final class WorkspaceConfinementTests: XCTestCase {
             at: workspace.appendingPathComponent("state"), withIntermediateDirectories: true)
         try fm.createSymbolicLink(
             at: workspace.appendingPathComponent("state/hosts"), withDestinationURL: elsewhere)
-        XCTAssertThrowsError(try WorkspacePaths.confinedFolder(["state", "hosts"], under: workspace))
+        XCTAssertThrowsError(
+            try WorkspacePaths.confinedFolder(["state", "hosts"], under: workspace))
     }
 
     func testRunHistoryAndStateFoldersAreRefusedWhenSymlinked() throws {
@@ -230,7 +234,8 @@ final class WorkspaceConfinementTests: XCTestCase {
     func testATypedArchiveFolderIsNotRefusedBecauseTheDefaultOneIsALink() throws {
         let typed = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("jrc-arch-\(UUID().uuidString.prefix(8))/_archive")
-        addTeardownBlock { try? FileManager.default.removeItem(at: typed.deletingLastPathComponent()) }
+        let typedParent = typed.deletingLastPathComponent()
+        addTeardownBlock { try? FileManager.default.removeItem(at: typedParent) }
         try """
         output:
           allow_absolute_paths: true

@@ -182,7 +182,8 @@ enum WorkspacePaths {
         guard ProfileService.workspaceURL(for: profile) != nil else {
             throw PathError.invalidProfile(profile)
         }
-        return home.appendingPathComponent("Library/Logs/JamfReports/diagnostics", isDirectory: true)
+        return home
+            .appendingPathComponent("Library/Logs/JamfReports/diagnostics", isDirectory: true)
             .appendingPathComponent(ProfileName.pathComponent(profile), isDirectory: true)
     }
 

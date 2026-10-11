@@ -104,7 +104,8 @@ final class HistoryFileAndLogoPathTests: XCTestCase {
         _ = SharedConfigPin.check(profile: profile, appSupport: appSupport)
         try writeConfig(body("peer.json"))
         let out = workspace.appendingPathComponent("Generated Reports/r.html")
-        try fm.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let reports = out.deletingLastPathComponent()
+        try fm.createDirectory(at: reports, withIntermediateDirectories: true)
 
         var report = HtmlReport(config: try config(),
                                 dataDir: workspace.appendingPathComponent("jamf-cli-data"))
@@ -112,7 +113,7 @@ final class HistoryFileAndLogoPathTests: XCTestCase {
         _ = report.buildHistorySection(security: [], outputURL: out)
         XCTAssertFalse(fm.fileExists(atPath: workspace.appendingPathComponent("peer.json").path))
         XCTAssertTrue(fm.fileExists(
-            atPath: out.deletingLastPathComponent().appendingPathComponent("html_history.json").path))
+            atPath: reports.appendingPathComponent("html_history.json").path))
 
         let drifts = SharedConfigPin.check(profile: profile, appSupport: appSupport).drifts
         XCTAssertEqual(drifts.map(\.key), [.htmlHistoryFile])

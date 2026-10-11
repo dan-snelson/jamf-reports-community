@@ -505,8 +505,8 @@ enum DiagnosticBundleService {
         func folder(_ name: String, _ resolve: () throws -> URL) -> URL? {
             do { return try resolve() } catch {
                 let reason = WorkspacePaths.refusal(of: error)
-                AppLogger.collect.warning(
-                    "DiagnosticBundle: \(name, privacy: .public) not collected: \(reason, privacy: .public)")
+                let note = "DiagnosticBundle: \(name) not collected: \(reason)"
+                AppLogger.collect.warning("\(note, privacy: .public)")
                 refused.append(.skipped(path: name, reason: reason))
                 return nil
             }

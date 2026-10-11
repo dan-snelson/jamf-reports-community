@@ -253,30 +253,6 @@ private func scheduledRunSingleBody(
         return 1
     }
 
-    // Rotate run-history logs at the start of each scheduled invocation so
-    // logs in <workspace>/automation/logs/ don't grow unbounded.
-    // Best-effort: rotation failure must not abort the run.
-    if let logsDir = try? WorkspacePaths.runHistoryDir(for: profile) {
-        let fm = FileManager.default
-        let entries = (try? fm.contentsOfDirectory(
-            at: logsDir,
-            includingPropertiesForKeys: nil,
-            options: .skipsHiddenFiles
-        )) ?? []
-        for entry in entries where entry.pathExtension == "log" {
-            do {
-                try LaunchAgentLogRotator.rotateIfNeeded(logURL: entry)
-            } catch {
-                fputs(
-                    LogRedactor.redact(
-                        "[warn] could not rotate \(entry.lastPathComponent): "
-                            + error.localizedDescription) + "\n",
-                    stderr
-                )
-            }
-        }
-    }
-
     // Per-run record in <workspace>/automation/ — this is what Run History
     // and the Schedules "Last Run" column read. The launchd stdout/stderr
     // redirect to ~/Library/Logs/JamfReports/<label>/ is unchanged (raw

@@ -498,6 +498,32 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
               let text = try? String(contentsOf: url, encoding: .utf8) else { return }
         let keys = keysSet(inYAML: text)
         guard !keys.isEmpty else { return }
+        confirmBestEffort(profile: profile, keys: keys, appSupport: appSupport)
+    }
+
+    /// `confirm(profile:keys:)` for a write this Mac just made; a failure is logged, since the
+    /// write itself succeeded and the Doctor row still offers the Confirm.
+    /// Re-pins `key` to `written`, the value a save on this Mac just wrote, only while
+    /// config.yaml still holds it (a peer's edit landing in between is not confirmed), and
+    /// even when it equals the value before (it clears a peer's identical pending drift).
+    /// For keys whose token is their text; never the webhook.
+    static func confirmWritten(
+        _ written: String, key: Key, profile: String, appSupport: URL = AppSupport.directory()
+    ) {
+        guard key != .notifyURL else { return }
+        let drift = Drift(key: key, pinned: "", current: written)
+        do {
+            try confirm(profile: profile, drifts: [drift], appSupport: appSupport)
+        } catch {
+            let reason = error.localizedDescription
+            AppLogger.collect.warning(
+                "SharedConfigPin: did not confirm \(key.rawValue): \(reason, privacy: .public)")
+        }
+    }
+
+    static func confirmBestEffort(
+        profile: String, keys: Set<Key>, appSupport: URL = AppSupport.directory()
+    ) {
         do {
             try confirm(profile: profile, keys: keys, appSupport: appSupport)
         } catch {

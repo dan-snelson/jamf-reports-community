@@ -303,6 +303,29 @@ final class SharedConfigPinTests: XCTestCase {
                 ? config.protect : nil), ["x"])
     }
 
+    @MainActor
+    func testConnectingProtectOnThisMacConfirmsTheProfileItWrote() throws {
+        try writeConfig(protectProfile: "protect-a")
+        _ = check()
+        let flow = OnboardingFlow()
+        try flow.writeProtectConfig(profileSlug: profile, protectProfileName: "protect-b")
+        XCTAssertTrue(check().drifts.isEmpty, "\(check().drifts)")
+        XCTAssertTrue(SharedConfigPin.protectAllowed(profile: profile, appSupport: appSupport))
+        XCTAssertEqual(SharedConfigPin.load(profile: profile, appSupport: appSupport)?
+            .protectProfile, "protect-b")
+    }
+
+    @MainActor
+    func testConnectingTheProfileAPeerAlsoWroteConfirmsOnlyThatKey() throws {
+        try writeConfig(protectProfile: "protect-a")
+        _ = check()
+        try writeConfig(retentionMode: "delete", protectProfile: "peers")
+        let flow = OnboardingFlow()
+        // The operator typed the same name here, so it is theirs; the peer's other edit is not.
+        try flow.writeProtectConfig(profileSlug: profile, protectProfileName: "peers")
+        XCTAssertEqual(check().drifts.map(\.key), [.retentionMode])
+    }
+
     func testFirstSightKeepsAnAbsoluteFolderAndDeleteUnconfirmedUntilOneConfirm() throws {
         try writeConfig(outputDir: outside, allowAbsolute: true, retentionMode: "delete")
         let lines = LineBox()

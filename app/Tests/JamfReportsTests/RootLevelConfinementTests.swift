@@ -14,7 +14,8 @@ final class RootLevelConfinementTests: XCTestCase {
 
     override func setUpWithError() throws {
         base = fm.temporaryDirectory
-            .appendingPathComponent("jrc-rootconf-\(UUID().uuidString.prefix(8))", isDirectory: true)
+            .appendingPathComponent("jrc-rootconf-\(UUID().uuidString.prefix(8))",
+                                    isDirectory: true)
         workspaces = base.appendingPathComponent("Jamf-Reports", isDirectory: true)
         elsewhere = base.appendingPathComponent("elsewhere", isDirectory: true)
         try fm.createDirectory(at: workspaces, withIntermediateDirectories: true)
@@ -152,8 +153,10 @@ final class RootLevelConfinementTests: XCTestCase {
         XCTAssertEqual(result.failed, 1)
         XCTAssertTrue(fm.fileExists(atPath: old.path), "the snapshot stays where it is")
         XCTAssertTrue(isEmpty(elsewhere))
-        XCTAssertEqual(lines.all.filter { $0.hasPrefix("[warn] retention: jamf-cli-data/computers") }
-            .count, 1, "\(lines.all)")
+        let warnings = lines.all.filter {
+            $0.hasPrefix("[warn] retention: jamf-cli-data/computers")
+        }
+        XCTAssertEqual(warnings.count, 1, "\(lines.all)")
     }
 
     /// A refused folder that no file is due for neither warns nor holds back the day's marker.

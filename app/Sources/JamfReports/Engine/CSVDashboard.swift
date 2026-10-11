@@ -194,8 +194,10 @@ struct CSVDashboard: Sendable {
         }
 
         // Load prior snapshot for Fleet Drift if historical_csv_dir is configured.
-        if let historicalDir = Self.priorSnapshotDir(config: config, profile: profile), let csvURL = currentCSVURL {
-            self.priorSnapshot = PriorCSVLoader.load(historicalDir: historicalDir, currentCSVURL: csvURL)
+        if let historicalDir = Self.priorSnapshotDir(config: config, profile: profile),
+           let csvURL = currentCSVURL {
+            self.priorSnapshot = PriorCSVLoader.load(
+                historicalDir: historicalDir, currentCSVURL: csvURL)
         } else {
             self.priorSnapshot = nil
         }

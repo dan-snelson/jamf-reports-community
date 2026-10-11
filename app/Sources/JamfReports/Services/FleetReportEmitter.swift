@@ -18,7 +18,8 @@ enum FleetReportEmitter {
     /// it never collides with profile discovery. Throws when the folder is a symbolic link,
     /// which a peer on a shared root could plant to redirect the reports.
     static func consolidatedDir() throws -> URL {
-        try WorkspacePaths.confinedFolder(["_fleet-reports"], under: ProfileService.workspacesRoot())
+        try WorkspacePaths.confinedFolder(
+            ["_fleet-reports"], under: ProfileService.workspacesRoot())
     }
 
     static let logFileName = "fleet-reports.log"

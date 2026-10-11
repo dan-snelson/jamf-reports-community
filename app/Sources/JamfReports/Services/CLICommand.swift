@@ -133,13 +133,33 @@ enum CLIExecutorError: Error, Equatable {
 /// This is additive — it does not change how existing `CLIBridge` helpers
 /// (generate, collect, audit, …) build their argv or run their processes.
 struct DefaultCLIExecutor: CLIExecutor {
-    let bridge: CLIBridge
+    /// Limit for one command. jamf-cli leaves body transfer unbounded, so a server that stalls
+    /// mid-response would hang a doctor, config-list or help probe. A command that legitimately
+    /// runs longer passes its own limit to `execute(_:timeout:)`.
+    static let defaultTimeout: TimeInterval = 60
 
-    init(bridge: CLIBridge) {
+    let bridge: CLIBridge
+    let timeout: TimeInterval
+    /// Test seam: runs this binary instead of the located jamf-cli.
+    private let executableOverride: URL?
+
+    init(
+        bridge: CLIBridge,
+        timeout: TimeInterval = DefaultCLIExecutor.defaultTimeout,
+        _testExecutable: URL? = nil
+    ) {
         self.bridge = bridge
+        self.timeout = timeout
+        self.executableOverride = _testExecutable
     }
 
     func execute(_ command: CLICommand) async throws -> Data {
+        try await execute(command, timeout: timeout)
+    }
+
+    /// Executes `command`, stopping it after `timeout` seconds. A timeout throws
+    /// `nonZeroExit(code: CLIBridge.exitCodeTimedOut, ...)` with the limit named in `stderr`.
+    func execute(_ command: CLICommand, timeout: TimeInterval) async throws -> Data {
         let profile = command.profile
         // `.configList` is profile-less and must skip slug validation. Every
         // other case carries a slug and must validate it before reaching argv.
@@ -155,7 +175,7 @@ struct DefaultCLIExecutor: CLIExecutor {
         guard !argv.isEmpty else {
             throw CLIExecutorError.invalidProfile(profile)
         }
-        guard let bin = ExecutableLocator.locate("jamf-cli") else {
+        guard let bin = executableOverride ?? ExecutableLocator.locate("jamf-cli") else {
             throw CLIExecutorError.binaryNotFound("jamf-cli")
         }
         // `runAndCapture` captures stdout into `data` and streams stderr via `onLine`.
@@ -168,6 +188,7 @@ struct DefaultCLIExecutor: CLIExecutor {
             (exitCode, data) = try await bridge.runAndCapture(
                 executable: bin,
                 arguments: argv,
+                timeout: timeout,
                 onLine: { line in stderrBuffer.append(line.text) }
             )
         } catch let bridgeError as CLIBridgeError {
@@ -180,6 +201,13 @@ struct DefaultCLIExecutor: CLIExecutor {
             // Catch-all: if a future change causes runAndCapture to throw a
             // non-CLIBridgeError type, convert it rather than propagate unknown.
             throw CLIExecutorError.nonZeroExit(code: -1, stderr: error.localizedDescription)
+        }
+        if exitCode == CLIBridge.exitCodeTimedOut {
+            let accumulated = stderrBuffer.snapshot()
+            let named = "jamf-cli did not answer within \(Int(timeout.rounded(.up))) s and was stopped"
+            throw CLIExecutorError.nonZeroExit(
+                code: exitCode, stderr: accumulated.isEmpty ? named : named + "\n" + accumulated
+            )
         }
         guard exitCode == 0 else {
             throw CLIExecutorError.nonZeroExit(code: exitCode, stderr: stderrBuffer.snapshot())

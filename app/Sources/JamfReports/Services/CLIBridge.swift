@@ -169,11 +169,14 @@ final class CLIBridge {
     ///   `environmentForJamfCLI()` (S-02) so callers that omit the
     ///   argument do not inherit the parent's `DYLD_INSERT_LIBRARIES`,
     ///   `SSL_CERT_FILE`, or other dyld-relevant variables.
+    /// - Parameter timeout: seconds before the child is terminated, as for ``runAndCapture``;
+    ///   the call then returns ``exitCodeTimedOut``. `nil` waits as long as the child runs.
     nonisolated func run(
         executable: URL,
         arguments: [String],
         cwd: URL? = nil,
         environment: [String: String] = CLIBridge.environmentForJamfCLI(),
+        timeout: TimeInterval? = nil,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async throws -> Int32 {
         // M-01: re-verify jamf-cli signature before each spawn so a
@@ -215,6 +218,19 @@ final class CLIBridge {
                 if shouldResume { continuation.resume(throwing: error) }
             }
 
+            /// Timeout path only: a grandchild may hold the pipes after the child is gone,
+            /// so stop waiting for their EOF. Shares the single-resume flag with `finish`.
+            @discardableResult
+            func forceResume(_ code: Int32) -> Bool {
+                let shouldResume: Bool
+                lock.lock()
+                shouldResume = !resumed
+                if shouldResume { resumed = true }
+                lock.unlock()
+                if shouldResume { continuation.resume(returning: code) }
+                return shouldResume
+            }
+
             private func finish(_ mutate: (RunCompletion) -> Void) {
                 var pending: Int32?
                 lock.lock()
@@ -236,15 +252,9 @@ final class CLIBridge {
         // already-cancelled-at-entry case is safe: onCancel fires first (reads
         // nil), body spawns, process runs to completion normally. A belt-and-
         // suspenders isCancelled check after run() catches that edge and terminates.
-        final class ProcessBox: @unchecked Sendable {
-            private let lock = NSLock()
-            private var process: Process?
-            func set(_ p: Process) { lock.lock(); process = p; lock.unlock() }
-            func terminate() { lock.lock(); let p = process; lock.unlock(); p?.terminate() }
-        }
-        let box = ProcessBox()
+        let box = TimedProcessBox()
 
-        return try await withTaskCancellationHandler {
+        let code = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Int32, Error>) in
                 let completion = RunCompletion(continuation)
                 let process = Process()
@@ -288,8 +298,14 @@ final class CLIBridge {
                     }
                 }
 
+                box.setReadHandles([stdout.fileHandleForReading, stderr.fileHandleForReading])
                 process.terminationHandler = { proc in
-                    completion.markTerminated(proc.terminationStatus)
+                    let status = proc.terminationStatus
+                    completion.markTerminated(status)
+                    guard box.didTimeOut else { return }
+                    DispatchQueue.global().asyncAfter(deadline: .now() + CLIBridge.eofGraceAfterExit) {
+                        if completion.forceResume(status) { box.clearReadHandlers() }
+                    }
                 }
 
                 do {
@@ -298,6 +314,7 @@ final class CLIBridge {
                     // (onCancel fired first, read nil, returned without terminating),
                     // terminate the now-running process ourselves.
                     if Task.isCancelled { process.terminate() }
+                    if let timeout { box.armTimeout(timeout) }
                 } catch {
                     // C-11: mirror to OSLog so post-mortem forensics see launch
                     // failures even when the in-app stream is gone.
@@ -313,6 +330,7 @@ final class CLIBridge {
         } onCancel: {
             box.terminate()
         }
+        return box.didTimeOut ? Self.exitCodeTimedOut : code
     }
     /// Run an arbitrary command, streaming each line through `onLine` and returning
     /// the collected stdout + the process exit code.
@@ -884,6 +902,12 @@ final class CLIBridge {
     /// Returned by `runAndCapture(timeout:)` when it stopped the child. jamf-cli never exits
     /// with it; a signal-terminated child would otherwise read as exit 15.
     nonisolated static let exitCodeTimedOut: Int32 = -2
+    /// Limit on the `pro auth token` probe. jamf-cli leaves body transfer unbounded, so a
+    /// server that stalls mid-response would otherwise hold the tick lock until its give-up.
+    nonisolated static let tokenProbeTimeout: TimeInterval = 60
+    /// Limit on one `pro backup`, which holds the tick lock throughout. Generous: a large
+    /// tenant's backup is legitimately long; the limit only ends a stalled transfer.
+    nonisolated static let backupTimeout: TimeInterval = 2 * 60 * 60
     /// Seconds a child gets to act on the timeout's SIGTERM before `runAndCapture` sends SIGKILL.
     nonisolated static let timeoutKillGrace: TimeInterval = 3
     /// Seconds `runAndCapture` waits for pipe EOF after the child exits normally, before it
@@ -994,8 +1018,15 @@ final class CLIBridge {
     /// Returns `true` when it's safe to proceed. On failure, emits a `[error]` log
     /// line with a remediation hint and returns `false` — callers must return
     /// a non-zero exit code immediately without running any further API calls.
+    ///
+    /// A probe that gets no answer within `probeTimeout` is neither a rejection nor a pass:
+    /// the guard logs one `[warn]` and lets the command run, as `collect` does for
+    /// `AuthProbeResult.unconfirmed`. The command's own 401 then reports dead credentials.
+    /// `_testExecutable` is a test seam; production resolves jamf-cli.
     nonisolated func authGuard(
         profile: String,
+        probeTimeout: TimeInterval = CLIBridge.tokenProbeTimeout,
+        _testExecutable: URL? = nil,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> Bool {
         AppLogger.auth.debug("auth probe profile=\(profile, privacy: .public)")
@@ -1003,7 +1034,21 @@ final class CLIBridge {
             .first(where: { $0.name == profile })?
             .authMethod ?? ""
         guard !CLIBridge.shouldSkipAuthProbe(for: authMethod) else { return true }
-        let status = await tokenStatus(for: profile)
+        let probe = await probeToken(
+            for: profile, executable: _testExecutable, timeout: probeTimeout
+        )
+        let status: TokenStatus?
+        switch probe {
+        case .timedOut:
+            let msg = "[warn] auth check timed out after \(Int(probeTimeout.rounded(.up))) s for "
+                + "profile '\(profile)'; could not confirm the credentials. Continuing; the "
+                + "command reports a rejected credential itself."
+            AppLogger.auth.warning("\(msg, privacy: .public)")
+            onLine(.init(timestamp: Date(), level: .warn, text: msg))
+            return true
+        case .status(let result):
+            status = result
+        }
         if let status, status.isValid, !status.isExpired { return true }
         if ExecutableLocator.locate("jamf-cli") == nil {
             onLine(.init(
@@ -1051,6 +1096,12 @@ final class CLIBridge {
         )
     }
 
+    /// What `probeToken` found: the token status, or no answer within the time limit.
+    enum TokenProbe: Sendable {
+        case status(TokenStatus?)
+        case timedOut
+    }
+
     /// Fetch the token status for `profile` using `jamf-cli pro auth token --output json`.
     ///
     /// Returns a `TokenStatus` with `isValid: false` (never throws) when:
@@ -1058,10 +1109,24 @@ final class CLIBridge {
     /// - the profile slug is invalid
     /// - jamf-cli exits non-zero (unauthenticated, old version, unknown command)
     /// - JSON is missing or malformed
+    /// - the probe did not answer within `tokenProbeTimeout`
     nonisolated func tokenStatus(for profile: String) async -> TokenStatus? {
+        switch await probeToken(for: profile, executable: nil, timeout: Self.tokenProbeTimeout) {
+        case .status(let status): return status
+        case .timedOut: return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)
+        }
+    }
+
+    /// The probe behind `tokenStatus` and `authGuard`; the guard needs a timeout told apart
+    /// from a rejection. `executable` overrides the jamf-cli lookup (tests).
+    nonisolated func probeToken(
+        for profile: String,
+        executable: URL?,
+        timeout: TimeInterval
+    ) async -> TokenProbe {
         guard ProfileService.isValid(profile),
-              let bin = ExecutableLocator.locate("jamf-cli") else {
-            return nil
+              let bin = executable ?? ExecutableLocator.locate("jamf-cli") else {
+            return .status(nil)
         }
         // Subcommand: jamf-cli -p <profile> pro auth token --output json --no-input
         // Available since jamf-cli v1.9; older versions exit non-zero with "unknown command".
@@ -1072,7 +1137,8 @@ final class CLIBridge {
             (exitCode, data) = try await runAndCapture(
                 executable: bin,
                 arguments: args,
-                environment: Self.environmentForJamfCLI()
+                environment: Self.environmentForJamfCLI(),
+                timeout: timeout
             ) { _ in }
         } catch {
             // tokenStatus is the auth prober — codesign rejection or launch failure
@@ -1080,12 +1146,13 @@ final class CLIBridge {
             AppLogger.auth.warning(
                 "tokenStatus: runAndCapture threw for \(profile, privacy: .public): \(error.localizedDescription, privacy: .private)"
             )
-            return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)
+            return .status(TokenStatus.make(profile: profile, token: nil, expiresAt: nil))
         }
+        if exitCode == Self.exitCodeTimedOut { return .timedOut }
         guard exitCode == 0, !data.isEmpty else {
-            return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)
+            return .status(TokenStatus.make(profile: profile, token: nil, expiresAt: nil))
         }
-        return parseTokenStatus(profile: profile, data: data)
+        return .status(parseTokenStatus(profile: profile, data: data))
     }
 
     nonisolated func parseTokenStatus(profile: String, data: Data) -> TokenStatus {
@@ -1724,9 +1791,12 @@ final class CLIBridge {
         }
     }
 
+    /// `timeout` ends a stalled `pro backup`; `_testExecutable` is a test seam.
     func backup(
         profile: String,
         label: String?,
+        timeout: TimeInterval = CLIBridge.backupTimeout,
+        _testExecutable: URL? = nil,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async throws -> Int32 {
         guard ProfileService.isValid(profile) else {
@@ -1740,7 +1810,7 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] backup label may not start with '-'"))
             throw CLIBridgeError.invalidArgument("backup label may not start with '-'")
         }
-        guard let bin = ExecutableLocator.locate("jamf-cli") else {
+        guard let bin = _testExecutable ?? ExecutableLocator.locate("jamf-cli") else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] jamf-cli not found"))
             throw CLIBridgeError.executableNotFound
         }
@@ -1811,8 +1881,14 @@ final class CLIBridge {
             executable: bin,
             arguments: args,
             environment: Self.environmentForJamfCLI(),
+            timeout: timeout,
             onLine: onLine
         )
+        if exit == Self.exitCodeTimedOut {
+            onLine(.init(timestamp: Date(), level: .fail,
+                         text: "[error] backup stopped after the \(Int(timeout.rounded(.up))) s "
+                             + "limit; the unfinished backup was discarded"))
+        }
 
         // Exit 7 is jamf-cli's documented partial failure: some config-object types
         // failed (e.g. one type 403s under a reporting-scoped API role) but valid

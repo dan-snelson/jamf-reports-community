@@ -1,42 +1,34 @@
 import Foundation
 
-/// One-line day stamp at <workspace>/automation/.<name>-last (yyyy-MM-dd).
+/// One-line day stamp at <workspace>/automation/.<name>-last (yyyy-MM-dd), or in this Mac's
+/// Application Support when that folder is refused (`AutomationStateFile`).
 /// Best-effort persistence shared by GUI and headless once-per-day signals.
 struct DayMarker: Sendable {
     let name: String
 
     /// The day last stamped, or nil when the marker is absent or unreadable.
     func lastStampedDay(in workspace: URL) -> String? {
-        guard let url = markerURL(in: workspace),
-              let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        guard let text = try? String(contentsOf: markerURL(in: workspace), encoding: .utf8)
+        else { return nil }
         let day = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return day.isEmpty ? nil : day
     }
 
-    /// Whether `key` is stamped. A marker whose folder is refused (`automation` is a symlink)
-    /// reads as stamped: it can never be written, so reading it as unclaimed would repeat the
-    /// action on every pass. That fails toward not sending and not re-running.
     func isStamped(_ key: String, in workspace: URL) -> Bool {
-        markerURL(in: workspace) == nil || lastStampedDay(in: workspace) == key
+        lastStampedDay(in: workspace) == key
     }
 
-    /// Best-effort: creates `automation/` if needed and never throws. Nothing is written when
-    /// `automation` is a symlink.
+    /// Best-effort: creates the folder if needed and never throws.
     func stamp(day: String, in workspace: URL) {
-        guard let url = markerURL(in: workspace) else { return }
-        try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? day.write(to: url, atomically: true, encoding: .utf8)
+        try? AutomationStateFile.write(Data(day.utf8), to: markerURL(in: workspace))
     }
 
     /// Gives the stamp back, so the day or hour counts as unclaimed. Best-effort.
     func clear(in workspace: URL) {
-        guard let url = markerURL(in: workspace) else { return }
-        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(at: markerURL(in: workspace))
     }
 
-    private func markerURL(in workspace: URL) -> URL? {
-        WorkspacePaths.confinedFolderOrWarn(["automation"], under: workspace)?
-            .appendingPathComponent(".\(name)-last")
+    private func markerURL(in workspace: URL) -> URL {
+        AutomationStateFile.url(named: ".\(name)-last", in: workspace)
     }
 }

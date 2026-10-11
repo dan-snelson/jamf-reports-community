@@ -23,6 +23,21 @@ versions in this repository map to git tags.
 
 ### Security
 
+- A report run for one profile now reads and writes only that profile's folders. If the shared
+  config.yaml names a different `jamf_cli.profile`, the run stops with an error naming both
+  instead of using the other profile's summaries, chart history and archive.
+- Config Doctor now fails a workspace whose config.yaml names a different `jamf_cli.profile`
+  (a copied or renamed workspace), telling you which line to fix before a scheduled run stops.
+- When a workspace's `automation` folder is a link, metric alerts, the overdue digest and
+  self-remediation no longer go silent. This Mac keeps their once-a-day and once-an-hour records in
+  its own Application Support folder, and Config Doctor and the health banner say so. Run History
+  logs are still not written through it.
+- The fleet report folder and log, the folders below an archive and the cached device lookups are
+  refused when they are links, with one warning, and the fleet log is never appended through a
+  link or opened if it is not a plain file. A refused device cache still gives a live lookup, just
+  not cached. The device lookup cache now follows a custom `jamf_cli.data_dir`, and a cache from
+  the old fixed folder is still read. Retired background-item plists are now archived under this
+  Mac's Application Support folder instead of the workspaces folder.
 - Report and archive folders in /Users/Shared or ~/Public are refused, because every account on
   the Mac can read them. Reports fall back to the workspace folder and the run log says why.
 - Output folders under /tmp and /var/tmp are refused like /Users/Shared and ~/Public.

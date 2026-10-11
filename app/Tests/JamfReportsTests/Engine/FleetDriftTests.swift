@@ -313,6 +313,10 @@ final class FleetDriftTests: XCTestCase {
     }
     // MARK: - Folder resolution
 
+    private func priorDir(_ config: ReportConfig) -> URL? {
+        CSVDashboard.priorSnapshotDir(config: config, profile: "driftprofile")
+    }
+
     private let driftHeaders = "Computer Name,Serial Number,OS Version,Last Check-in,Department\n"
 
     /// A workspace under a test root, a current CSV beside it and one prior export in `folder`.
@@ -351,7 +355,7 @@ final class FleetDriftTests: XCTestCase {
             priorFolder: { $0.appendingPathComponent("snaps", isDirectory: true) })
         let dashboard = try XCTUnwrap(CSVDashboard(
             config: fixture.config, csvData: try Data(contentsOf: fixture.current),
-            workbook: Workbook(), currentCSVURL: fixture.current))
+            workbook: Workbook(), currentCSVURL: fixture.current, profile: "driftprofile"))
         XCTAssertEqual(dashboard.priorSnapshot?.label, "prior.csv")
     }
 
@@ -361,14 +365,14 @@ final class FleetDriftTests: XCTestCase {
         let fixture = try driftFixture(
             configYAML: "charts:\n  historical_csv_dir: \"\(outside)\"\n",
             priorFolder: { _ in URL(fileURLWithPath: outside, isDirectory: true) })
-        XCTAssertNil(CSVDashboard.priorSnapshotDir(config: fixture.config))
+        XCTAssertNil(priorDir(fixture.config))
 
         let optedIn = "output:\n  allow_absolute_paths: true\ncharts:\n"
             + "  historical_csv_dir: \"\(outside)\"\n"
         try optedIn
             .write(to: fixture.workspace.appendingPathComponent("config.yaml"),
                    atomically: true, encoding: .utf8)
-        XCTAssertEqual(CSVDashboard.priorSnapshotDir(config: fixture.config)?.path,
+        XCTAssertEqual(priorDir(fixture.config)?.path,
                        URL(fileURLWithPath: outside).resolvingSymlinksInPath().path)
     }
 
@@ -381,12 +385,12 @@ final class FleetDriftTests: XCTestCase {
             configYAML: yaml,
             priorFolder: { _ in URL(fileURLWithPath: outside, isDirectory: true) })
         // First sight pins an absolute folder as unconfirmed, so it reads as the default.
-        XCTAssertEqual(CSVDashboard.priorSnapshotDir(config: fixture.config)?.lastPathComponent,
+        XCTAssertEqual(priorDir(fixture.config)?.lastPathComponent,
                        "snapshots")
         try SharedConfigPin.confirm(
             profile: "driftprofile",
             drifts: SharedConfigPin.check(profile: "driftprofile").drifts)
-        XCTAssertEqual(CSVDashboard.priorSnapshotDir(config: fixture.config)?.path,
+        XCTAssertEqual(priorDir(fixture.config)?.path,
                        URL(fileURLWithPath: outside).resolvingSymlinksInPath().path)
     }
 }

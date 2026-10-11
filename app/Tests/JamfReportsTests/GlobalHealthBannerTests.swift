@@ -224,4 +224,28 @@ final class GlobalHealthBannerTests: XCTestCase {
             [failing("a", permission(["P1", "P2"])), failing("b", permission(["P2", "P3", "P4"]))])
         XCTAssertEqual(reason, "missing permission: P1; P2; P3 +1 more")
     }
+
+    func testARefusedAutomationFolderIsAWarnEntryBelowFailingKindsAndSharedConfig() {
+        let refused = GlobalHealthBanner.headline(
+            freshness: [freshness("security", .stale)], automation: [],
+            automationFolderRefused: true)
+        XCTAssertEqual(refused?.text, "The automation folder is a link")
+        XCTAssertEqual(refused?.tone, .warn)
+
+        XCTAssertEqual(GlobalHealthBanner.headline(
+            freshness: [freshness("security", .failing, failures: 3)], automation: [],
+            automationFolderRefused: true)?.tone, .danger)
+        XCTAssertEqual(GlobalHealthBanner.headline(
+            freshness: [], automation: [], sharedConfig: ["output.output_dir"],
+            automationFolderRefused: true)?.text, "Shared config needs confirming on this Mac")
+        XCTAssertNil(GlobalHealthBanner.headline(freshness: [], automation: []))
+    }
+
+    func testTheRefusedFolderEntryOffersConfigDoctor() {
+        XCTAssertEqual(GlobalHealthBanner.primaryAction(
+            freshness: [], canCollect: true, automationFolderRefused: true), .openConfigDoctor)
+        XCTAssertEqual(GlobalHealthBanner.primaryAction(
+            freshness: [freshness("security", .failing, failures: 3)], canCollect: true,
+            automationFolderRefused: true), .collectNow)
+    }
 }

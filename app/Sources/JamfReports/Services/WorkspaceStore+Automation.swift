@@ -204,6 +204,9 @@ final class AutomationHealthModel {
     /// been confirmed against, this Mac's pin for the ACTIVE profile.
     var sharedConfigKeys: [String] = []
 
+    /// The active profile's `automation` folder is a link, so its state lives on this Mac.
+    var automationFolderRefused = false
+
     /// Set by the banner's button; Audit opens its Config Doctor segment and clears it.
     var openConfigDoctorRequested = false
 }
@@ -380,11 +383,15 @@ extension WorkspaceStore {
         guard !demoMode else {
             AutomationHealthModel.shared.freshnessIssues = []
             AutomationHealthModel.shared.sharedConfigKeys = []
+            AutomationHealthModel.shared.automationFolderRefused = false
             return
         }
         let profile = self.profile
         let sharedConfig = await Task.detached(priority: .utility) {
             SharedConfigPin.check(profile: profile).drifts.map(\.key.rawValue)
+        }.value
+        let folderRefused = await Task.detached(priority: .utility) {
+            ProfileService.workspaceURL(for: profile).map(AutomationStateFile.isRefused) ?? false
         }.value
         let jamfCLIVersion = self.jamfCLIVersion
         let resolveAuth = resolveAuthMethod
@@ -397,6 +404,7 @@ extension WorkspaceStore {
         guard request == freshnessRequests, profile == self.profile else { return }
         AutomationHealthModel.shared.freshnessIssues = issues
         AutomationHealthModel.shared.sharedConfigKeys = sharedConfig
+        AutomationHealthModel.shared.automationFolderRefused = folderRefused
     }
 
     /// Pure-ish freshness read: state dir → states → issues. `nonisolated` so

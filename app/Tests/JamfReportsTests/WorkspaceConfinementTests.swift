@@ -141,28 +141,84 @@ final class WorkspaceConfinementTests: XCTestCase {
         try link("automation")
         let marker = DayMarker(name: "probe")
         marker.stamp(day: "2026-10-11", in: workspace)
-        XCTAssertNil(marker.lastStampedDay(in: workspace))
+        XCTAssertEqual(marker.lastStampedDay(in: workspace), "2026-10-11", "kept on this Mac")
         let ledger = MetricAlertLedger(workspace: workspace)
         ledger.record(day: "2026-10-11", keys: ["rule"])
         XCTAssertTrue(isEmpty(elsewhere))
     }
 
-    /// A marker that can never be written must not read as unclaimed, or the overdue card and
-    /// the hourly re-collect would repeat on every pass; the ledger likewise sends nothing.
-    func testARefusedMarkerAndLedgerReadAsAlreadyClaimed() throws {
+    /// A refused folder neither mutes nor repeats: the stamp and the ledger move to this Mac.
+    func testARefusedMarkerAndLedgerDeduplicateFromThisMacsOwnRecord() throws {
         let marker = DayMarker(name: "overdue-notify")
-        XCTAssertFalse(marker.isStamped("2026-10-11", in: workspace), "a fresh marker is open")
-        marker.stamp(day: "2026-10-11", in: workspace)
-        XCTAssertTrue(marker.isStamped("2026-10-11", in: workspace))
-        XCTAssertFalse(marker.isStamped("2026-10-12", in: workspace))
-        XCTAssertEqual(
-            MetricAlertLedger(workspace: workspace).pendingKeys(day: "d", keys: ["rule"]), ["rule"])
-
-        try fm.removeItem(at: workspace.appendingPathComponent("automation"))
+        let ledger = MetricAlertLedger(workspace: workspace)
         try link("automation")
-        XCTAssertTrue(marker.isStamped("2026-10-13", in: workspace))
-        XCTAssertEqual(
-            MetricAlertLedger(workspace: workspace).pendingKeys(day: "d", keys: ["rule"]), [])
+
+        XCTAssertFalse(marker.isStamped("2026-10-13", in: workspace), "not muted")
+        XCTAssertEqual(ledger.pendingKeys(day: "d", keys: ["rule"]), ["rule"], "not muted")
+
+        marker.stamp(day: "2026-10-13", in: workspace)
+        ledger.record(day: "d", keys: ["rule"])
+
+        XCTAssertTrue(marker.isStamped("2026-10-13", in: workspace), "once a day, not every pass")
+        XCTAssertFalse(marker.isStamped("2026-10-14", in: workspace), "the next day is open")
+        XCTAssertEqual(ledger.pendingKeys(day: "d", keys: ["rule", "other"]), ["other"])
+        XCTAssertEqual(ledger.pendingKeys(day: "e", keys: ["rule"]), ["rule"])
+        XCTAssertTrue(isEmpty(elsewhere), "nothing is written through the link")
+
+        marker.clear(in: workspace)
+        XCTAssertFalse(marker.isStamped("2026-10-13", in: workspace), "clear gives the hour back")
+    }
+
+    func testTheFallbackIsPerWorkspaceAndPerNameAndPrivate() throws {
+        let other = workspace.deletingLastPathComponent().appendingPathComponent("other")
+        try fm.createDirectory(at: other, withIntermediateDirectories: true)
+        try fm.createSymbolicLink(
+            at: other.appendingPathComponent("automation"), withDestinationURL: elsewhere)
+        try link("automation")
+        let marker = DayMarker(name: "overdue-notify")
+        marker.stamp(day: "2026-10-13", in: workspace)
+
+        XCTAssertFalse(marker.isStamped("2026-10-13", in: other), "keyed by the workspace")
+        XCTAssertFalse(DayMarker(name: "freshness-remediation")
+            .isStamped("2026-10-13", in: workspace), "keyed by the marker name")
+
+        let folder = AppSupport.directory().appendingPathComponent("automation-fallback")
+        let files = try fm.contentsOfDirectory(atPath: folder.path)
+        XCTAssertEqual(files.count, 1)
+        let name = try XCTUnwrap(files.first)
+        XCTAssertFalse(name.contains(profile), "no path or profile in the file name")
+        let mode = try fm.attributesOfItem(
+            atPath: folder.appendingPathComponent(name).path)[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o600)
+    }
+
+    func testARealAutomationFolderKeepsTheStateInTheWorkspace() throws {
+        DayMarker(name: "probe").stamp(day: "2026-10-13", in: workspace)
+        MetricAlertLedger(workspace: workspace).record(day: "d", keys: ["rule"])
+        XCTAssertTrue(fm.fileExists(atPath: workspace.appendingPathComponent(
+            "automation/.probe-last").path))
+        XCTAssertTrue(fm.fileExists(atPath: workspace.appendingPathComponent(
+            "automation/.metric-alerts-ledger.json").path))
+        XCTAssertFalse(fm.fileExists(atPath: AppSupport.directory()
+            .appendingPathComponent("automation-fallback").path))
+    }
+
+    func testConfigDoctorWarnsOnlyForARefusedAutomationFolder() throws {
+        XCTAssertEqual(ConfigDoctorService.automationFolderRows(workspace: workspace), [])
+        XCTAssertEqual(ConfigDoctorService.automationFolderRows(workspace: nil), [])
+        try link("automation")
+
+        let rows = ConfigDoctorService.automationFolderRows(workspace: workspace)
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.severity, .warn)
+        XCTAssertEqual(rows.first?.id, "automation.folder_refused")
+        XCTAssertTrue(rows.first?.detail.contains(
+            "automation folder is a link") == true)
+        try "".write(to: workspace.appendingPathComponent("config.yaml"),
+                     atomically: true, encoding: .utf8)
+        let report = ConfigDoctorService.run(
+            profile: profile, workspaceRoot: workspace.deletingLastPathComponent())
+        XCTAssertTrue(report.rows.contains { $0.id == "automation.folder_refused" })
     }
 
     func testHostActivityIsNotRecordedThroughASymlinkedAutomationFolder() throws {
@@ -255,5 +311,56 @@ final class WorkspaceConfinementTests: XCTestCase {
         XCTAssertEqual(SnapshotRetentionService.sweepIfDue(profile: profile), 1)
         XCTAssertTrue(isEmpty(elsewhere))
         XCTAssertTrue(fm.fileExists(atPath: typed.path))
+    }
+}
+
+// MARK: - Profile name in config.yaml
+
+final class ProfileMismatchDoctorTests: XCTestCase {
+
+    private func config(_ profile: String?) throws -> ReportConfig {
+        try ConfigLoader.loadFromString(profile.map { "jamf_cli:\n  profile: \($0)\n" } ?? "")
+    }
+
+    func testADifferentProfileIsAFailRowNamingBothAndTheFix() throws {
+        let rows = ConfigDoctorService.profileMismatchRows(
+            profile: "newname", config: try config("oldname"))
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.severity, .fail)
+        XCTAssertEqual(rows.first?.id, "config.profile_mismatch")
+        let text = (rows.first?.detail ?? "") + (rows.first?.hint ?? "")
+        XCTAssertTrue(text.contains("oldname") && text.contains("newname"), text)
+        XCTAssertTrue(rows.first?.hint?.contains("jamf_cli: profile line") == true)
+    }
+
+    func testBlankAndEqualProfilesAreFine() throws {
+        XCTAssertEqual(ConfigDoctorService.profileMismatchRows(
+            profile: "same", config: try config(nil)), [])
+        XCTAssertEqual(ConfigDoctorService.profileMismatchRows(
+            profile: "same", config: try config("same")), [])
+    }
+
+    func testACaseVariantIsSaidToDifferOnlyInCase() throws {
+        let rows = ConfigDoctorService.profileMismatchRows(
+            profile: "prod", config: try config("Prod"))
+        XCTAssertTrue(rows.first?.detail.contains("differ only in case") == true)
+    }
+
+    func testRunIncludesTheRowForAWorkspaceWhoseConfigNamesAnotherProfile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-mismatch-\(UUID().uuidString.prefix(8))",
+                                    isDirectory: true)
+        let workspace = root.appendingPathComponent("copied", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        try "jamf_cli:\n  profile: original\n".write(
+            to: workspace.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+
+        let report = ConfigDoctorService.run(profile: "copied", workspaceRoot: root)
+
+        XCTAssertTrue(report.rows.contains {
+            $0.id == "config.profile_mismatch" && $0.severity == .fail
+        })
     }
 }

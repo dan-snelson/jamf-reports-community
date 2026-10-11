@@ -104,6 +104,7 @@ enum ConfigDoctorService {
         rows += unknownKeyRows(profile: profile, workspaceRoot: workspaceRoot)
         rows += readerRows(profile: profile, workspaceRoot: workspaceRoot)
         if let config, parseError == nil {
+            rows += profileMismatchRows(profile: profile, config: config)
             rows += valueRows(profile: profile, config: config, workspaceRoot: workspaceRoot)
             rows += accuracyRows(config: config, profile: profile)
             rows += securityPolicyRows(profile: profile, config: config)
@@ -113,6 +114,9 @@ enum ConfigDoctorService {
                 config: config, csvHeaders: csvHeaders, csvFamily: csvFamily)
         }
         rows += sharedConfigRows(profile: profile)
+        rows += automationFolderRows(
+            workspace: (try? ConfigService.configURL(for: profile, workspaceRoot: workspaceRoot))?
+                .deletingLastPathComponent())
         rows += evaluateCloudStorage(cloudStorageInputs(profile: profile, config: config))
         rows += evaluateWorkspaceContinuity(
             workspaceContinuityInputs(profile: profile, config: config))

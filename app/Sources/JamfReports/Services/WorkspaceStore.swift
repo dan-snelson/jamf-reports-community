@@ -465,6 +465,7 @@ final class WorkspaceStore {
             AutomationHealthModel.shared.issues = []
             AutomationHealthModel.shared.freshnessIssues = []
             AutomationHealthModel.shared.sharedConfigKeys = []
+            AutomationHealthModel.shared.automationFolderRefused = false
             // The live config stayed loaded: its agent name and benchmark labelled
             // demo screens, and Config's Save reused the real YAML document.
             applyDemoConfig()

@@ -60,6 +60,10 @@ struct ReportEngine: Sendable {
         locateJamfCLI: @Sendable () -> URL? = { ExecutableLocator.locate("jamf-cli") },
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async throws -> [SheetFailure] {
+        // Every folder this run reads or writes is the run's profile's, so a peer cannot point
+        // a shared workspace's generate at another local workspace through config.yaml.
+        let profile = try runProfile(onLine: onLine)
+
         // PR-10 / threat-model T-11: strict-mode pre-flight. Abort before any
         // sheet writes if the workspace has tampered or corrupt-manifest
         // snapshots. Catching per-sheet inside writeSelected wouldn't abort
@@ -70,7 +74,6 @@ struct ReportEngine: Sendable {
         let workbook = Workbook(accentColor: accent)
 
         // Capture provenance once per run — jamf-cli version + tenant URL are best-effort.
-        let profile = config.jamfCli?.resolvedProfile ?? ""
         let prov = await Provenance.current(
             profile: profile,
             jamfCLIURL: locateJamfCLI(),
@@ -89,7 +92,7 @@ struct ReportEngine: Sendable {
         }
         // The CSV is read first so `sheets.only` is judged against every tab this
         // workbook can have.
-        let csv = try csvURL.map { try csvDashboard(at: $0, workbook: workbook) }
+        let csv = try csvURL.map { try csvDashboard(at: $0, workbook: workbook, profile: profile) }
         let sheets = Self.sheetSettings(
             config, tabs: template.includedSheets.map(\.rawValue)
                 + (csv?.sheetPlan.map(\.name) ?? [])
@@ -142,6 +145,23 @@ struct ReportEngine: Sendable {
         return coreFailures
     }
 
+    /// The profile every folder of this run belongs to: the caller's. config.yaml's
+    /// `jamf_cli.profile` may be blank or equal; another profile is refused, since a shared
+    /// workspace's file is writable by peers. An engine made with no run profile (tests and
+    /// library use) falls back to the file's value, as before.
+    func runProfile(onLine: (@Sendable (CLIBridge.LogLine) -> Void)?) throws -> String {
+        let named = config.jamfCli?.resolvedProfile ?? ""
+        guard let run = profile, !run.isEmpty else { return named }
+        guard named.isEmpty || named == run else {
+            let mismatch = ReportEngineError.profileMismatch(named: named, run: run)
+            let msg = "[error] \(mismatch.localizedDescription)"
+            AppLogger.report.error("\(msg, privacy: .private)")
+            onLine?(.init(timestamp: Date(), level: .fail, text: msg))
+            throw mismatch
+        }
+        return run
+    }
+
     /// Best effort, like the PNG writes: a folder that cannot be made is logged, not fatal.
     private func createPNGFolder(_ folder: URL) {
         do {
@@ -154,10 +174,12 @@ struct ReportEngine: Sendable {
         }
     }
 
-    private func csvDashboard(at csvURL: URL, workbook: Workbook) throws -> CSVDashboard {
+    private func csvDashboard(
+        at csvURL: URL, workbook: Workbook, profile: String
+    ) throws -> CSVDashboard {
         let csvData = try Data(contentsOf: csvURL)
         guard let csv = CSVDashboard(config: config, csvData: csvData, workbook: workbook,
-                                     currentCSVURL: csvURL, profile: self.profile) else {
+                                     currentCSVURL: csvURL, profile: profile) else {
             throw ReportEngineError.csvParseFailed(csvURL)
         }
         return csv
@@ -2383,7 +2405,7 @@ struct ReportEngine: Sendable {
         } else if let config = loadedConfig,
            let summariesDir = try? workspacePaths.summariesDir(for: profile) {
             let prov = await Provenance.current(
-                profile: config.jamfCli?.resolvedProfile ?? profile,
+                profile: profile,
                 jamfCLIURL: bin,
                 dataDir: dataDir
             )
@@ -3189,7 +3211,7 @@ struct ReportEngine: Sendable {
             config: config, dataDir: dataDir, profile: profile, template: template,
             aiNarrative: aiNarrative, expandAll: false, locateJamfCLI: locateJamfCLI,
             onLine: onLine)
-        let configProfile = config.jamfCli?.resolvedProfile ?? ""
+        let configProfile = profile ?? config.jamfCli?.resolvedProfile ?? ""
         let digest = try await report.generate(
             outputURL: outputURL, profileName: configProfile, sections: template.htmlSections
         )
@@ -3287,7 +3309,7 @@ struct ReportEngine: Sendable {
         try await PDFExporter.export(htmlString: paginatedHTML, to: outputURL)
         // Write SHA-256 manifest alongside the PDF artifact, and log its digest like the
         // other formats do so the Generate sheet lists the file.
-        let profile = config.jamfCli?.resolvedProfile ?? ""
+        let profile = profileName.isEmpty ? config.jamfCli?.resolvedProfile ?? "" : profileName
         let digest = writeManifestStatic(
             for: outputURL, profile: profile, template: template.identifier)
         if let digest { onLine?(sha256LogLine(hash: digest, artifact: outputURL)) }
@@ -4233,6 +4255,8 @@ enum ReportEngineError: Error, LocalizedError {
     case csvParseFailed(URL)
     case jamfCLINotFound
     case invalidProfile(String)
+    /// config.yaml's `jamf_cli.profile` names a profile other than the one the run is for.
+    case profileMismatch(named: String, run: String)
     case snapshotParseError(String)
     /// Raised during collect when `use_cached_data=false` and a live call fails.
     case collectFailed(kind: String, exitCode: Int32)
@@ -4275,6 +4299,11 @@ enum ReportEngineError: Error, LocalizedError {
             return "jamf-cli not found on PATH. Install it via Homebrew or from GitHub."
         case .invalidProfile(let p):
             return "Invalid profile name '\(p)'."
+        case .profileMismatch(let named, let run):
+            return "config.yaml sets jamf_cli.profile to "
+                + "'\(ConfigSchema.displayText(named))' but this run is for "
+                + "'\(ConfigSchema.displayText(run))'; nothing was generated. Set "
+                + "jamf_cli.profile back to '\(ConfigSchema.displayText(run))'."
         case .snapshotParseError(let kind):
             return "No cached snapshot found for '\(kind)'. Run collect first."
         case .collectFailed(let kind, let code):

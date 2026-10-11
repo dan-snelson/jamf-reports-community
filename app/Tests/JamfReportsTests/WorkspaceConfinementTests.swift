@@ -83,6 +83,15 @@ final class WorkspaceConfinementTests: XCTestCase {
         XCTAssertThrowsError(try WorkspacePaths.stateDir(for: profile))
     }
 
+    func testDiagnosticsFolderIsPerUserAndPerProfile() throws {
+        let home = URL(fileURLWithPath: "/Users/someone", isDirectory: true)
+        let dir = try WorkspacePaths.diagnosticsDir(for: profile, home: home)
+        XCTAssertEqual(
+            dir.path, "/Users/someone/Library/Logs/JamfReports/diagnostics/\(profile)")
+        XCTAssertFalse(dir.path.hasPrefix(workspace.path))
+        XCTAssertThrowsError(try WorkspacePaths.diagnosticsDir(for: "bad\nname", home: home))
+    }
+
     // MARK: - Diagnostic bundle
 
     func testASymlinkedAutomationFolderYieldsNoLogsAndASkipEntry() throws {

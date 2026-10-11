@@ -179,7 +179,9 @@ private struct CapabilityJSON: Encodable {
 struct DiagnosticBundleCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "diagnostic-bundle",
-        abstract: "Build a redacted diagnostic bundle for a profile."
+        abstract: "Build a redacted diagnostic bundle for a profile.",
+        discussion: "Writes the zip under ~/Library/Logs/JamfReports/diagnostics/<profile> "
+            + "and prints its path."
     )
     @Option(help: "Workspace profile slug.") var profile: String
 

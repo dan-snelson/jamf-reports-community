@@ -171,17 +171,19 @@ enum WorkspacePaths {
         return try confinedFolder(["automation", "logs"], under: workspace)
     }
 
-    /// `<workspace>/diagnostics` — output directory for native diagnostic
-    /// bundles produced by `DiagnosticBundleService`.
-    ///
-    /// Lives under the profile workspace (an `SystemActions` allowed parent) so
-    /// the generated zip can be revealed in Finder without widening the path
-    /// allow-list. Fixed by convention (not a config knob), so no YAML parsing.
-    static func diagnosticsDir(for profile: String) throws -> URL {
-        guard let workspace = workspaceRoot(for: profile) else {
+    /// `~/Library/Logs/JamfReports/diagnostics/<profile>` — where the native diagnostic bundle
+    /// zip is written. Per user and outside the workspace, which may be a team folder every
+    /// Mac reads; `SystemActions` already lets Finder reveal `~/Library/Logs/JamfReports`.
+    /// Fixed by convention (not a config knob), so no YAML parsing.
+    static func diagnosticsDir(
+        for profile: String,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> URL {
+        guard ProfileService.workspaceURL(for: profile) != nil else {
             throw PathError.invalidProfile(profile)
         }
-        return try confinedFolder(["diagnostics"], under: workspace)
+        return home.appendingPathComponent("Library/Logs/JamfReports/diagnostics", isDirectory: true)
+            .appendingPathComponent(ProfileName.pathComponent(profile), isDirectory: true)
     }
 
     /// A fixed folder below a workspace (or below a config-derived folder such as `data_dir`),

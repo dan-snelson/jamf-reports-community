@@ -479,13 +479,18 @@ enum DiagnosticBundleService {
         }
     }
 
-    /// Generate a bundle for `profile`, returning the written `.zip` URL.
+    /// Generate a bundle for `profile`, returning the written `.zip` URL. The zip goes to
+    /// `~/Library/Logs/JamfReports/diagnostics/<profile>`, not into the workspace, which may be a
+    /// folder other Macs read.
     static func generate(
         profile: String, options: DiagnosticBundleOptions = .init(), now: Date = Date()
     ) throws -> URL {
         let sources = try makeSources(profile: profile, options: options)
+        let outputDir = try WorkspacePaths.diagnosticsDir(for: profile)
+        // The per-profile folder is made 0700 by `buildBundle`; its parent holds every profile's.
+        try makePrivateFolder(outputDir.deletingLastPathComponent())
         return try buildBundle(
-            sources: sources, outputDir: try WorkspacePaths.diagnosticsDir(for: profile),
+            sources: sources, outputDir: outputDir,
             profileSlug: slug(profile), options: options, now: now)
     }
 
@@ -520,6 +525,13 @@ enum DiagnosticBundleService {
             scopeIDs: options.redact ? scopeIDs(profile: profile) : [],
             refused: refused
         )
+    }
+
+    private static func makePrivateFolder(_ url: URL) throws {
+        let mode: [FileAttributeKey: Any] = [.posixPermissions: NSNumber(value: Int16(0o700))]
+        try FileManager.default.createDirectory(
+            at: url, withIntermediateDirectories: true, attributes: mode)
+        try FileManager.default.setAttributes(mode, ofItemAtPath: url.path)
     }
 
     private static let scopeIDKeys: Set<String> = ["tenant-id", "environment-id"]

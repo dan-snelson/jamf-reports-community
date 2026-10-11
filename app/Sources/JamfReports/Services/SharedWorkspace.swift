@@ -37,11 +37,15 @@ enum SharedWorkspace {
     }
 
     /// Whether `workspace` is shared with other Macs: `shared_workspace.enabled` when set,
-    /// else true for a sync-provider or `/Volumes` path. The one definition behind
-    /// `ReportEngine.coordinationGate` and `SharedConfigPin`.
-    static func isEffectivelyShared(workspace: URL, config: SharedWorkspaceConfig?) -> Bool {
-        (config ?? SharedWorkspaceConfig())
-            .isEnabled(workspaceIsSynced: CloudStorage.provider(for: workspace) != nil)
+    /// else `CloudStorage.isSharedStorage`. Behind `ReportEngine.coordinationGate`.
+    /// `SharedConfigPin` and `BackupMaintenance` use the same storage test but not the opt-out:
+    /// the file is writable by every peer, so an `enabled: false` in it cannot switch them off.
+    static func isEffectivelyShared(
+        workspace: URL, config: SharedWorkspaceConfig?,
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume
+    ) -> Bool {
+        let shared = CloudStorage.isSharedStorage(workspace, volumeIsLocal: volumeIsLocal)
+        return (config ?? SharedWorkspaceConfig()).isEnabled(workspaceIsSynced: shared)
     }
 
     // MARK: - Host identity

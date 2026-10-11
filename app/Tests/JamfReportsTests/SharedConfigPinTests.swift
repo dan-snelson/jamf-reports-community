@@ -124,6 +124,18 @@ final class SharedConfigPinTests: XCTestCase {
         XCTAssertTrue(check().drifts.isEmpty)
     }
 
+    func testASyncMarkerAboveTheWorkspacePinsIt() throws {
+        try writeConfig(shared: false)
+        XCTAssertNil(SharedConfigPin.load(profile: profile, appSupport: appSupport))
+        _ = check()
+        XCTAssertNil(SharedConfigPin.load(profile: profile, appSupport: appSupport))
+
+        try fileManager.createDirectory(
+            at: root.appendingPathComponent(".stfolder"), withIntermediateDirectories: true)
+        _ = check()
+        XCTAssertNotNil(SharedConfigPin.load(profile: profile, appSupport: appSupport))
+    }
+
     func testAnOptOutWrittenIntoTheSharedFileDoesNotSwitchPinningOff() throws {
         try writeConfig(shared: true, retentionMode: "archive")
         _ = check()
@@ -141,15 +153,15 @@ final class SharedConfigPinTests: XCTestCase {
 
     func testPinningAppliesOnOptInProviderOrExistingPinNeverOnAnOptOutAlone() {
         XCTAssertTrue(SharedConfigPin.appliesTo(
-            sharedEnabled: true, onSyncProvider: false, pinExists: false))
+            sharedEnabled: true, onSharedStorage: false, pinExists: false))
         XCTAssertTrue(SharedConfigPin.appliesTo(
-            sharedEnabled: false, onSyncProvider: true, pinExists: false))
+            sharedEnabled: false, onSharedStorage: true, pinExists: false))
         XCTAssertTrue(SharedConfigPin.appliesTo(
-            sharedEnabled: false, onSyncProvider: false, pinExists: true))
+            sharedEnabled: false, onSharedStorage: false, pinExists: true))
         XCTAssertFalse(SharedConfigPin.appliesTo(
-            sharedEnabled: false, onSyncProvider: false, pinExists: false))
+            sharedEnabled: false, onSharedStorage: false, pinExists: false))
         XCTAssertFalse(SharedConfigPin.appliesTo(
-            sharedEnabled: nil, onSyncProvider: false, pinExists: false))
+            sharedEnabled: nil, onSharedStorage: false, pinExists: false))
     }
 
     func testAnUnreadablePinFailsClosedWithEveryKeyDrifted() throws {
@@ -503,6 +515,13 @@ final class SharedConfigPinTests: XCTestCase {
         XCTAssertTrue(SharedWorkspace.isEffectivelyShared(workspace: synced, config: nil))
         forced.enabled = false
         XCTAssertFalse(SharedWorkspace.isEffectivelyShared(workspace: synced, config: forced))
+    }
+
+    func testANonLocalVolumeCountsAsSharedForCoordination() {
+        XCTAssertFalse(SharedWorkspace.isEffectivelyShared(
+            workspace: workspace, config: nil, volumeIsLocal: { _ in true }))
+        XCTAssertTrue(SharedWorkspace.isEffectivelyShared(
+            workspace: workspace, config: nil, volumeIsLocal: { _ in false }))
     }
 
     // MARK: - Headless folders

@@ -11,9 +11,10 @@ import os
 /// every Mac sharing the folder must agree on them, but each Mac pins the values it was set up
 /// with in `AppSupport` and does not follow a later change until its operator confirms it.
 ///
-/// A local workspace is never pinned. Pinning applies when `shared_workspace.enabled` is true, the
-/// folder is on a sync provider or `/Volumes`, or a pin already exists; an opt-out written into
-/// the shared file never turns an existing pin off, since a peer could write it.
+/// A local workspace is never pinned. Pinning applies when `shared_workspace.enabled` is true,
+/// the folder is on shared storage (`CloudStorage.isSharedStorage`), or a pin already exists; an
+/// opt-out written into the shared file never turns an existing pin off, since a peer could
+/// write it.
 struct SharedConfigPin: Codable, Sendable, Equatable {
     var allowAbsolutePaths: Bool
     var outputDir: String
@@ -353,8 +354,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     /// Whether a workspace is pinned. Unlike `SharedWorkspace.isEffectivelyShared`, which
     /// coordination uses, `shared_workspace.enabled: false` does not opt out: the file is
     /// writable by every peer, so an opt-out beside hostile values would switch pinning off.
-    static func appliesTo(sharedEnabled: Bool?, onSyncProvider: Bool, pinExists: Bool) -> Bool {
-        sharedEnabled == true || onSyncProvider || pinExists
+    static func appliesTo(sharedEnabled: Bool?, onSharedStorage: Bool, pinExists: Bool) -> Bool {
+        sharedEnabled == true || onSharedStorage || pinExists
     }
 
     /// `current(workspace:)` for a workspace that is pinned; nil for a local one.
@@ -365,7 +366,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             from: workspace.appendingPathComponent("config.yaml")))?.sharedWorkspace
         guard appliesTo(
             sharedEnabled: sharedConfig?.enabled,
-            onSyncProvider: CloudStorage.provider(for: workspace) != nil,
+            onSharedStorage: CloudStorage.isSharedStorage(workspace),
             pinExists: FileManager.default.fileExists(
                 atPath: storeURL(profile: profile, appSupport: appSupport).path))
         else { return nil }

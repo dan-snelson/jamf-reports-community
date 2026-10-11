@@ -23,13 +23,27 @@ versions in this repository map to git tags.
 - On a shared workspace, each Mac now remembers the report, archive, data and chart-history
   folders, the absolute-path opt-in, the retention switch, mode and archive folder, the Protect
   profile, the notification detail level and the webhook (host, port and a fingerprint of the
-  URL) it was set up with. If another Mac changes one in the shared config.yaml, background runs
-  and the command-line tool on this Mac keep to safe values until you confirm it in Config Doctor:
-  reports go to the workspace's Generated Reports folder, retention archives instead of deleting,
-  Protect is skipped, and no webhook is sent. A folder outside the workspace or delete-mode
-  retention already in the file the first time this Mac sees it also waits for one confirmation.
-  Turning off shared-workspace mode in the shared file does not switch this off. The run log
-  names each changed key and the run is not marked partial.
+  URL) it was set up with. If another Mac changes one in the shared config.yaml, everything on
+  this Mac (screens, Generate, the period report, exports, background runs and the command-line
+  tool) keeps to safe values until you confirm it in Config Doctor: reports go to the workspace's
+  Generated Reports folder, retention archives instead of deleting, Protect is skipped, and no
+  webhook is sent. A change you make by hand to one of these keys on this Mac needs the same
+  confirmation. A folder outside the workspace or delete-mode retention already in the file the
+  first time this Mac sees it also waits for one confirmation. Turning off shared-workspace mode
+  in the shared file does not switch this off. The run log names each changed key and the run is
+  not marked partial; a Generate from the app names them too.
+- Config Doctor's shared-config row now shows each changed value in full (monospaced, selectable,
+  control characters removed, cut only at 1024 characters), where a folder really lands and
+  whether that is inside the workspace, and has a Confirm for each key. Only a pin that cannot be
+  read keeps one Confirm all. A value that changed again after the row was shown is not
+  confirmed and the app says so, and a value with hidden characters is labelled and cannot be
+  confirmed from the row.
+- A shared workspace is now also recognised on a network volume (SMB, NFS) and in a folder that
+  Syncthing, Nextcloud, ownCloud or Resilio Sync manages, for the per-Mac pin, backup pruning and
+  collect coordination. A tool that leaves no marker still needs shared_workspace.enabled: true.
+- The config.yaml.bak copies made before onboarding, a scaffold or a block rewrite no longer hold
+  the notification webhook URL, or any other webhook URL in the file: the copy reads url: ""
+  with a note naming the host, so after a restore the URL has to be entered again.
 - A custom workspace folder must be owned by you, not writable by its group or everyone, and have
   no access control list. Folders under /Volumes and cloud storage are exempt. A folder you
   already use keeps working, and Config Doctor flags it.
@@ -69,6 +83,11 @@ versions in this repository map to git tags.
   Teams reads Markdown in cards, so names such as `**x**` or `[a](https://x)` are now escaped
   (an underscore inside a word, as in `prod_east`, is left alone).
   Slack notifications are unchanged.
+- Fleet Drift in a CSV-assisted report reads the same chart-history folder the CSV archive writes
+  to, so a relative `charts.historical_csv_dir` such as `snapshots` finds the workspace's folder
+  and an absolute one follows the absolute-path opt-in.
+- Connecting Jamf Protect from Data Sources on a shared workspace no longer leaves Protect
+  collection waiting for a Config Doctor confirmation.
 - Two scheduled runs can no longer start together, and a Mac that slept in the middle of a run no
   longer has that run taken over when it wakes.
 - A hung Homebrew or archive step during a jamf-cli install or update now times out with a message

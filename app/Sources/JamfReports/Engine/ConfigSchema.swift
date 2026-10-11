@@ -103,6 +103,28 @@ enum ConfigSchema {
         return String(text.prefix(displayCharacterCap - 1)) + "…"
     }
 
+    /// Longest value `fullDisplayText` shows, in Unicode scalars: PATH_MAX, since a longer
+    /// folder cannot be opened.
+    static let fullDisplayScalarCap = 1024
+
+    /// `displayText` for a value a person must read whole before confirming it (a folder):
+    /// the same control and format characters removed, no 60-character cap, and a flag when
+    /// `fullDisplayScalarCap` cut it.
+    static func fullDisplayText(_ raw: String) -> (text: String, truncated: Bool) {
+        let hidden = CharacterSet.controlCharacters.union(.newlines)
+        let kept = Array(raw.unicodeScalars.lazy.filter { !hidden.contains($0) }
+            .prefix(fullDisplayScalarCap + 1))
+        let text = String(String.UnicodeScalarView(kept.prefix(fullDisplayScalarCap)))
+        return (text, kept.count > fullDisplayScalarCap)
+    }
+
+    /// True when `fullDisplayText` would drop characters from `raw` (zero-width, bidi and other
+    /// control or format characters), so what a row shows is not exactly what is stored.
+    static func hasHiddenCharacters(_ raw: String) -> Bool {
+        let hidden = CharacterSet.controlCharacters.union(.newlines)
+        return raw.unicodeScalars.contains { hidden.contains($0) }
+    }
+
     // MARK: - The walk
 
     /// `schemaPath` is the mapping's place in `tree` (no list indices); `path` is what is shown.

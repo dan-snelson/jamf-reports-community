@@ -41,8 +41,9 @@ enum WorkspacePaths {
         } catch {
             let typed = ((try? configValue(workspace: workspace, section: "output",
                                            key: "output_dir")) ?? nil) as? String ?? ""
+            let reason = refusal(of: error, workspace: workspace)
             let msg = "[warn] output.output_dir \"\(ConfigSchema.displayText(typed))\" is not "
-                + "used: \(refusal(of: error)). Writing to \(generatedReportsDirName) in the "
+                + "used: \(reason). Writing to \(generatedReportsDirName) in the "
                 + "workspace instead."
             AppLogger.report.warning("\(msg, privacy: .private)")
             onLine?(.init(timestamp: Date(), level: .warn, text: msg))
@@ -63,15 +64,19 @@ enum WorkspacePaths {
         return resolved
     }
 
-    /// Why `resolve` refused a typed folder, worded for a `[warn]` line.
-    static func refusal(of error: Error) -> String {
+    /// Why `resolve` refused a typed folder, worded for a `[warn]` line. With the `workspace`
+    /// it was resolved against, an opt-in this Mac has not confirmed is named as that.
+    static func refusal(of error: Error, workspace: URL? = nil) -> String {
         switch error {
         case PathError.disallowedAbsolutePath(let url) where isSensitiveAbsolutePath(url):
             "that folder is reserved by macOS or holds credentials"
         case PathError.worldReadableFolder:
             "every account on this Mac can read it"
         case PathError.disallowedAbsolutePath:
-            "it is outside the workspace and output.allow_absolute_paths is not true"
+            workspace.map { SharedConfigPin.pathOverrides(workspace: $0).absolutePaths } == true
+                ? "output.allow_absolute_paths changed in the shared config.yaml, not confirmed "
+                    + "on this Mac (Config Doctor)"
+                : "it is outside the workspace and output.allow_absolute_paths is not true"
         case PathError.resolutionEscaped:
             "a relative path must stay inside the workspace"
         default:
@@ -269,7 +274,7 @@ enum WorkspacePaths {
     /// `url` with symlinks resolved. A path that does not exist yet keeps its missing tail:
     /// the deepest existing ancestor is resolved and the rest appended, so an alias or a
     /// different spelling of an existing parent cannot hide a denied folder.
-    private static func resolvedForPolicy(_ url: URL) -> String {
+    static func resolvedForPolicy(_ url: URL) -> String {
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) {
             return url.resolvingSymlinksInPath().standardizedFileURL.path
@@ -283,6 +288,22 @@ enum WorkspacePaths {
         return tail.reduce(existing.resolvingSymlinksInPath()) {
             $0.appendingPathComponent($1)
         }.standardizedFileURL.path
+    }
+
+    /// Where a typed folder lands, for a row that asks a person to confirm it: built on the
+    /// workspace as `resolve` builds it (a relative value is the workspace's, `~` expands),
+    /// symlinks resolved through the deepest existing ancestor, and whether it is inside the
+    /// workspace. It does not judge the folder; `resolve` still refuses what it refuses.
+    static func destination(
+        of typed: String, workspace: URL
+    ) -> (path: String, insideWorkspace: Bool) {
+        let root = workspace.resolvingSymlinksInPath().standardizedFileURL
+        let expanded = expandTilde(typed.trimmingCharacters(in: .whitespacesAndNewlines))
+        let candidate = expanded.hasPrefix("/")
+            ? URL(fileURLWithPath: expanded, isDirectory: true)
+            : root.appendingPathComponent(expanded, isDirectory: true)
+        let path = resolvedForPolicy(candidate)
+        return (path, isInside(URL(fileURLWithPath: path), root: root))
     }
 
     private static func folded(_ path: String) -> String {
@@ -399,7 +420,7 @@ enum WorkspacePaths {
     /// type the decoder would give it (a path is a `String`, the opt-in a `Bool`) and a key set
     /// twice reads as its last value. Nil only when the section/key isn't present.
     private static func configValue(workspace: URL, section: String, key: String) throws -> Any? {
-        // A headless run on a shared workspace reads a drifted key as its safe value.
+        // A pinned key that drifted on a shared workspace reads as its safe value.
         if let safe = SharedConfigPin.safePathValue(
             workspace: workspace, section: section, key: key) {
             return safe

@@ -186,13 +186,26 @@ struct CSVDashboard: Sendable {
         }
 
         // Load prior snapshot for Fleet Drift if historical_csv_dir is configured.
-        if let historicalDirStr = config.charts?.historicalCsvDir,
-           !historicalDirStr.trimmingCharacters(in: .whitespaces).isEmpty,
-           let csvURL = currentCSVURL {
-            let historicalDir = URL(fileURLWithPath: historicalDirStr, isDirectory: true)
+        if let historicalDir = Self.priorSnapshotDir(config: config), let csvURL = currentCSVURL {
             self.priorSnapshot = PriorCSVLoader.load(historicalDir: historicalDir, currentCSVURL: csvURL)
         } else {
             self.priorSnapshot = nil
+        }
+    }
+
+    /// Where Fleet Drift looks for prior exports: the folder the archive writer fills
+    /// (`WorkspacePaths.historicalDir`), so a relative value is the workspace's, and an absolute
+    /// one needs the opt-in, passes the deny-list and follows the shared-config pin. Nil when
+    /// `charts.historical_csv_dir` is blank, there is no profile, or the folder is refused.
+    static func priorSnapshotDir(config: ReportConfig) -> URL? {
+        guard let typed = config.charts?.historicalCsvDir,
+              !typed.trimmingCharacters(in: .whitespaces).isEmpty,
+              let profile = config.jamfCli?.resolvedProfile, !profile.isEmpty else { return nil }
+        do {
+            return try WorkspacePaths.historicalDir(for: profile)
+        } catch {
+            engineLog.warning("[warn] Fleet Drift skipped: charts.historical_csv_dir is not used")
+            return nil
         }
     }
 

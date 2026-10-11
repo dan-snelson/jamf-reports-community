@@ -254,6 +254,10 @@ struct PeriodReportSheet: View {
                 let url = try PeriodReportService.generate(
                     profile: profile, kind: kind, metricIDs: ids)
                 resultPath = url.lastPathComponent
+                if let note = SharedConfigPin.outputFolderNote(
+                    profile: profile, folder: url.deletingLastPathComponent()) {
+                    workspace.toast = Toast(message: note, style: .warning)
+                }
             } catch {
                 errorText = error.localizedDescription
             }

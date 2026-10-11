@@ -185,6 +185,84 @@ enum CloudStorage {
         return nil
     }
 
+    /// Why a folder counts as shared with other Macs.
+    enum SharedStorage: Equatable, Sendable {
+        case provider(Provider)
+        case networkVolume
+        /// A sync daemon's marker file sits in the folder or one of its ancestors.
+        case syncMarker(String)
+    }
+
+    /// `URLResourceValues.volumeIsLocal`; nil when the volume cannot be asked. The default of
+    /// the `volumeIsLocal` parameters, so a test can stand in for an NFS mount.
+    @Sendable
+    static func isOnLocalVolume(_ url: URL) -> Bool? {
+        (try? url.resourceValues(forKeys: [.volumeIsLocalKey]))?.volumeIsLocal
+    }
+
+    /// File names a sync daemon leaves in the folders it syncs: Syncthing, Nextcloud and
+    /// ownCloud, Resilio. `.sync_<id>.db` and `._sync_<id>.db` are Nextcloud's journal.
+    private static let syncMarkerNames: Set<String> = [
+        ".stfolder", ".stignore", ".nextcloudsync.log", ".owncloudsync.log", ".sync",
+    ]
+
+    private static func isSyncMarker(_ name: String) -> Bool {
+        syncMarkerNames.contains(name)
+            || ((name.hasPrefix(".sync_") || name.hasPrefix("._sync_")) && name.hasSuffix(".db"))
+    }
+
+    /// Entry names in `path`, hidden ones included. `readdir` rather than `FileManager`, which
+    /// leaves out `._` names, the form of Nextcloud's `._sync_<id>.db`.
+    private static func entryNames(in path: String) -> [String] {
+        guard let dir = opendir(path) else { return [] }
+        defer { closedir(dir) }
+        var names: [String] = []
+        while let entry = readdir(dir) {
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(entry.pointee.d_namlen) + 1) {
+                    String(cString: $0)
+                }
+            }
+            names.append(name)
+        }
+        return names
+    }
+
+    /// The marker found in `url` or an ancestor, nil when there is none. The walk stops below
+    /// the home folder (never home itself or above), and outside home below the root's own
+    /// children, so a stray `~/.stignore` or `~/.sync` does not make every workspace shared.
+    private static func syncMarker(in url: URL, home: URL) -> String? {
+        let homePaths = Set([home.standardizedFileURL.path, home.resolvingSymlinksInPath().path])
+        var folder = url.resolvingSymlinksInPath().standardizedFileURL
+        while folder.path.split(separator: "/").count > 1, !homePaths.contains(folder.path) {
+            if let found = entryNames(in: folder.path).first(where: isSyncMarker) { return found }
+            folder = folder.deletingLastPathComponent().standardizedFileURL
+        }
+        return nil
+    }
+
+    /// Whether other Macs can write `url`: a sync-provider path, a volume that is not local
+    /// (NFS, SMB or autofs outside `/Volumes`, probed on the symlink-resolved path), or a sync
+    /// daemon's marker file in the folder or an ancestor below home. A tool that leaves no
+    /// marker is not found; `shared_workspace.enabled: true` covers it.
+    static func sharedStorage(
+        for url: URL,
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> SharedStorage? {
+        if let provider = provider(for: url) { return .provider(provider) }
+        if volumeIsLocal(url.resolvingSymlinksInPath()) == false { return .networkVolume }
+        return syncMarker(in: url, home: home).map { .syncMarker($0) }
+    }
+
+    static func isSharedStorage(
+        _ url: URL,
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> Bool {
+        sharedStorage(for: url, volumeIsLocal: volumeIsLocal, home: home) != nil
+    }
+
     private static func providerForCloudStorageFolder(_ folder: String) -> Provider {
         let lower = folder.lowercased()
         if lower.hasPrefix("onedrive") || lower.hasPrefix("sharepoint") { return .oneDrive }

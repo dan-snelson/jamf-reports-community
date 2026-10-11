@@ -148,43 +148,48 @@ extension CLIBridge {
     ) async -> GenerateAllResult {
         // Each format resolves the report folder; a refused `output_dir` is said once per run.
         let onLine = Self.droppingRepeatedFolderWarnings(rawOnLine)
-        return await Self.runGenerateAll(
-            types: types,
-            onLine: onLine,
-            generateXLSX: {
-                if schoolMode {
-                    return try await self.schoolGenerate(profile: profile, csvPath: nil, onLine: onLine)
-                }
-                // A chosen HTML format is the run's one HTML report; `html.with_workbook`
-                // would write a second.
-                return try await self.generate(
-                    profile: profile, csvPath: nil, template: template,
-                    outputDir: outputDir, aiNarrative: aiNarrative,
-                    htmlWithWorkbook: !types.contains(.html), onLine: onLine
-                )
-            },
-            generateHTML: {
-                let outURL = self.reportFileURL(
-                    profile: profile, outputDir: outputDir, type: .html, onLine: onLine)
-                return try await self.generateHTML(
-                    profile: profile, outFile: outURL.path, template: template,
-                    aiNarrative: aiNarrative, onLine: onLine
-                )
-            },
-            generatePDF: {
-                let outURL = self.reportFileURL(
-                    profile: profile, outputDir: outputDir, type: .pdf, onLine: onLine)
-                return try await self.generatePDF(
-                    profile: profile, outFile: outURL.path, template: template, onLine: onLine
-                )
-            },
-            generateCSV: {
-                return try await self.exportInventoryCSV(
-                    profile: profile, outFile: nil, onLine: onLine
-                )
-            },
-            tighten: { WorkspacePermissionHardener.tighten(profile: profile) }
-        )
+        // The workbook step's `generate` checkpoints too; the run names each drift once.
+        return await SharedConfigPin.announcingOnce {
+            SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
+            return await Self.runGenerateAll(
+                types: types,
+                onLine: onLine,
+                generateXLSX: {
+                    if schoolMode {
+                        return try await self.schoolGenerate(
+                            profile: profile, csvPath: nil, onLine: onLine)
+                    }
+                    // A chosen HTML format is the run's one HTML report; `html.with_workbook`
+                    // would write a second.
+                    return try await self.generate(
+                        profile: profile, csvPath: nil, template: template,
+                        outputDir: outputDir, aiNarrative: aiNarrative,
+                        htmlWithWorkbook: !types.contains(.html), onLine: onLine
+                    )
+                },
+                generateHTML: {
+                    let outURL = self.reportFileURL(
+                        profile: profile, outputDir: outputDir, type: .html, onLine: onLine)
+                    return try await self.generateHTML(
+                        profile: profile, outFile: outURL.path, template: template,
+                        aiNarrative: aiNarrative, onLine: onLine
+                    )
+                },
+                generatePDF: {
+                    let outURL = self.reportFileURL(
+                        profile: profile, outputDir: outputDir, type: .pdf, onLine: onLine)
+                    return try await self.generatePDF(
+                        profile: profile, outFile: outURL.path, template: template, onLine: onLine
+                    )
+                },
+                generateCSV: {
+                    return try await self.exportInventoryCSV(
+                        profile: profile, outFile: nil, onLine: onLine
+                    )
+                },
+                tighten: { WorkspacePermissionHardener.tighten(profile: profile) }
+            )
+        }
     }
 
     /// `onLine` with repeats of the refused-`output_dir` warning (`WorkspacePaths.reportsDir`)

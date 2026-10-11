@@ -539,15 +539,17 @@ enum ConfigService {
     }
 
     /// Copies the file at `url` to `<name>.bak-<yyyyMMdd-HHmmss>` beside it, before the app
-    /// replaces or rewrites it. A copy that already holds the same bytes is returned instead;
-    /// a name taken by other text moves to the next free second. Keeps the returned copy and
-    /// the newest four others. Nil when there is no file.
+    /// replaces or rewrites it, with `notify.url` taken out (`scrubbedForBackup`): a webhook URL
+    /// is a credential, and the copies pile up beside a file that may be a synced team folder.
+    /// A copy that already holds the same text is returned instead; a name taken by other text
+    /// moves to the next free second. Keeps the returned copy and the newest four others. Nil
+    /// when there is no file.
     static func backUp(_ url: URL, now: Date = Date()) throws -> URL? {
         let manager = FileManager.default
         guard manager.fileExists(atPath: url.path) else { return nil }
         let directory = url.deletingLastPathComponent()
         let prefix = url.lastPathComponent + ".bak-"
-        let text = try Data(contentsOf: url)
+        let text = scrubbedForBackup(try Data(contentsOf: url))
         let copies = try backupNames(in: directory, prefix: prefix)
         var backup: URL
         if let same = copies.sorted().last(where: {
@@ -564,7 +566,10 @@ enum ConfigService {
                 stamp.addTimeInterval(1)
                 backup = directory.appendingPathComponent(prefix + formatter.string(from: stamp))
             }
-            try manager.copyItem(at: url, to: backup)
+            try text.write(to: backup, options: .atomic)
+            if let mode = try manager.attributesOfItem(atPath: url.path)[.posixPermissions] {
+                try manager.setAttributes([.posixPermissions: mode], ofItemAtPath: backup.path)
+            }
         }
         // Names carry local time, so the copy just made can sort before older ones.
         for old in copies.filter({ $0 != backup.lastPathComponent }).sorted().dropLast(4) {
@@ -577,6 +582,64 @@ enum ConfigService {
             }
         }
         return backup
+    }
+
+    /// `data` with the webhook URL taken out: the `url` line of the top-level `notify` block
+    /// reads `url: ""` followed by a comment that names the host only, and any other place the
+    /// same URL text appears (a comment, a second key) becomes `<removed>`. Everything else is
+    /// byte for byte as it was; a file with no URL, or that is not UTF-8, comes back unchanged.
+    /// A restored copy therefore has no usable webhook until the URL is entered again.
+    static func scrubbedForBackup(_ data: Data) -> Data {
+        guard let text = String(data: data, encoding: .utf8) else { return data }
+        // Any other webhook URL the file carries (an old one in a comment, a second block).
+        let swept = removingWebhookURLs(text)
+        guard let root = try? ConfigLoader.rawMapping(fromYAML: text),
+              let url = (ConfigLoader.rawValue(at: ["notify", "url"], in: root) as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !url.isEmpty else { return swept == text ? data : Data(swept.utf8) }
+        return Data(removingNotifyURL(url, from: swept).utf8)
+    }
+
+    /// Every incoming-webhook URL `LogRedactor` recognises, replaced with `<removed>`.
+    private static func removingWebhookURLs(_ text: String) -> String {
+        LogRedactor.webhookURLPatterns.reduce(text) { current, pattern in
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+            else { return current }
+            let range = NSRange(current.startIndex..., in: current)
+            return regex.stringByReplacingMatches(
+                in: current, range: range, withTemplate: "<removed>")
+        }
+    }
+
+    /// `notify.url`'s line written as `url: ""` with a comment naming only the host, and any
+    /// other copy of that text replaced with `<removed>`.
+    private static func removingNotifyURL(_ url: String, from text: String) -> String {
+        let host = URL(string: url)?.host.map { "https://\($0)/…" } ?? "its host"
+        var inNotify = false
+        var lines: [String] = []
+        for line in text.components(separatedBy: "\n") {
+            let first = line.first
+            if first != nil, first != " ", first != "\t", first != "#", first != "\r" {
+                inNotify = line.hasPrefix("notify:")
+            }
+            let body = line.drop { $0 == " " || $0 == "\t" }
+            guard inNotify, body.count < line.count, body.hasPrefix("url"),
+                  body.dropFirst(3).drop(while: { $0 == " " }).first == ":" else {
+                lines.append(line.replacingOccurrences(of: url, with: "<removed>"))
+                continue
+            }
+            let indent = String(line.prefix(line.count - body.count))
+            let ending = line.hasSuffix("\r") ? "\r" : ""
+            lines.append("\(indent)url: \"\"\(ending)")
+            lines.append("\(indent)# notify.url removed from this copy (was \(host))\(ending)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Whether the copy at `backup` had its webhook URL taken out (`scrubbedForBackup`).
+    static func backupOmitsWebhook(_ backup: URL) -> Bool {
+        ((try? String(contentsOf: backup, encoding: .utf8)) ?? "")
+            .contains("# notify.url removed from this copy")
     }
 
     /// `<prefix><yyyyMMdd-HHmmss>` names in `directory`; nothing else that shares the prefix.

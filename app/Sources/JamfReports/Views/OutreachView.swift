@@ -313,10 +313,13 @@ struct OutreachView: View {
             )
             let csv = StaleDeviceService.outreachCSV(snapshot)
             try csv.write(to: fileURL, atomically: true, encoding: .utf8)
-            workspace.toast = Toast(
-                message: "Exported \(snapshot.totalDevices) devices to \(filename)",
-                style: .success
-            )
+            let exported = "Exported \(snapshot.totalDevices) devices to \(filename)"
+            if let note = SharedConfigPin.outputFolderNote(
+                profile: workspace.profile, folder: outputDir) {
+                workspace.toast = Toast(message: exported + ". " + note, style: .warning)
+            } else {
+                workspace.toast = Toast(message: exported, style: .success)
+            }
             SystemActions.reveal(fileURL, profile: workspace.profile)
         } catch {
             workspace.toast = Toast(

@@ -197,6 +197,97 @@ final class ConfigSaveTypedTextTests: XCTestCase {
                                                  "config.yaml.broken-20200101-000000"]).sorted())
     }
 
+    private static let webhookConfig = """
+        # Team config, edit with care
+        columns:
+          computer_name: Typed Name # mine
+
+        notify:
+          enabled: true
+          provider: teams
+          url: "https://hooks.example.com/services/T0/B0/secret-token" # the team channel
+          detail: full
+
+        retention:
+          enabled: false
+        """ + "\n"
+
+    func testABackupHoldsNoWebhookURLButKeepsCommentsAndOtherBlocks() throws {
+        let (_, url) = try workspace(with: Self.webhookConfig)
+        let backup = try XCTUnwrap(ConfigService.backUp(url))
+        let copy = try String(contentsOf: backup, encoding: .utf8)
+        XCTAssertFalse(copy.contains("secret-token"))
+        XCTAssertFalse(copy.contains("services/T0"))
+        XCTAssertTrue(copy.contains(
+            "# notify.url removed from this copy (was https://hooks.example.com/…)"))
+        XCTAssertTrue(copy.contains("  url: \"\"\n"))
+        for kept in ["# Team config, edit with care", "computer_name: Typed Name # mine",
+                     "provider: teams", "detail: full", "retention:\n  enabled: false"] {
+            XCTAssertTrue(copy.contains(kept), kept)
+        }
+        XCTAssertTrue(ConfigService.backupOmitsWebhook(backup))
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("secret-token"),
+                      "the live file keeps its URL")
+    }
+
+    func testTheWebhookIsTakenOutOfCommentsAndOtherKeysToo() throws {
+        let text = "notify:\n  url: https://h.example.com/x/abc123\n"
+            + "# old: https://h.example.com/x/abc123\nalerts:\n"
+            + "  note: https://h.example.com/x/abc123\n"
+        let scrubbed = String(decoding: ConfigService.scrubbedForBackup(Data(text.utf8)),
+                              as: UTF8.self)
+        XCTAssertFalse(scrubbed.contains("abc123"), scrubbed)
+        XCTAssertTrue(scrubbed.contains("alerts:\n  note: <removed>"), scrubbed)
+    }
+
+    func testAnOlderWebhookURLInACommentIsTakenOutToo() throws {
+        let text = "notify:\n  url: https://h.example.com/x/abc123\n"
+            + "# was: https://hooks.slack.com/services/T0/B0/oldsecret\n"
+            + "# also: https://acme.webhook.office.com/webhookb2/oldteams\n"
+        let scrubbed = String(decoding: ConfigService.scrubbedForBackup(Data(text.utf8)),
+                              as: UTF8.self)
+        for secret in ["abc123", "oldsecret", "oldteams"] {
+            XCTAssertFalse(scrubbed.contains(secret), scrubbed)
+        }
+        let noNotify = "# was: https://hooks.slack.com/services/T0/B0/oldsecret\ncolumns: {}\n"
+        let swept = String(decoding: ConfigService.scrubbedForBackup(Data(noNotify.utf8)),
+                           as: UTF8.self)
+        XCTAssertFalse(swept.contains("oldsecret"), swept)
+    }
+
+    func testAFileWithNoWebhookOrWithCRLFComesBackByteForByte() throws {
+        let plain = Data("columns:\r\n  computer_name: A\r\n".utf8)
+        XCTAssertEqual(ConfigService.scrubbedForBackup(plain), plain)
+        let crlf = "notify:\r\n  url: https://h.example.com/x\r\n  enabled: true\r\n"
+        let scrubbed = String(decoding: ConfigService.scrubbedForBackup(Data(crlf.utf8)),
+                              as: UTF8.self)
+        XCTAssertEqual(
+            scrubbed,
+            "notify:\r\n  url: \"\"\r\n  # notify.url removed from this copy (was "
+                + "https://h.example.com/…)\r\n  enabled: true\r\n")
+    }
+
+    func testTheDedupeComparesTheScrubbedText() throws {
+        let (_, url) = try workspace(with: Self.webhookConfig)
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let first = try XCTUnwrap(ConfigService.backUp(url, now: now))
+        XCTAssertEqual(try ConfigService.backUp(url, now: now.addingTimeInterval(90)), first)
+        XCTAssertEqual(try backups(beside: url), [first.lastPathComponent])
+    }
+
+    func testARestoredCopyReadsAsAnUnusableWebhook() throws {
+        let (_, url) = try workspace(with: Self.webhookConfig)
+        let backup = try XCTUnwrap(ConfigService.backUp(url))
+        let restored = url.deletingLastPathComponent().appendingPathComponent("restored.yaml")
+        try FileManager.default.copyItem(at: backup, to: restored)
+        let config = try ConfigLoader.load(from: restored)
+        XCTAssertEqual(config.notify?.isEnabled, true)
+        XCTAssertEqual(config.notify?.isUsable, false)
+        let rows = ConfigDoctorService.valueRows(
+            config, raw: try ConfigLoader.rawMapping(fromYAML: String(contentsOf: restored)))
+        XCTAssertTrue(rows.contains { $0.id.contains("notify.url") }, "\(rows.map(\.id))")
+    }
+
     /// A copy holding the same bytes already is the copy; one made in the same second as
     /// another, with other text, takes the next free second rather than naming the old one.
     func testACopyIsMadeOnlyWhenNoCopyHoldsTheSameText() throws {

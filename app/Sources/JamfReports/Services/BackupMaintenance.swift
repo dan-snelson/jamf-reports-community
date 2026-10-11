@@ -18,13 +18,6 @@ enum BackupMaintenance {
     /// Age past which an orphaned `.tmp-*` staging dir is considered abandoned.
     static let staleTempAge: TimeInterval = 86_400  // 24 hours
 
-    /// `URLResourceValues.volumeIsLocal`; nil when the volume cannot be asked. The default of
-    /// the `volumeIsLocal` parameters below, so a test can stand in for an NFS mount.
-    @Sendable
-    static func isOnLocalVolume(_ url: URL) -> Bool? {
-        (try? url.resourceValues(forKeys: [.volumeIsLocalKey]))?.volumeIsLocal
-    }
-
     /// The profile's `shared_workspace.enabled`: true when set to true, or when config.yaml
     /// exists but cannot be loaded. False when there is no config.yaml.
     private static func sharedWorkspaceEnabled(profile: String) -> Bool {
@@ -47,19 +40,21 @@ enum BackupMaintenance {
     }
 
     /// Why `backupsRoot` counts as shared with other Macs, or nil for local storage.
-    /// A sync-provider path, a volume that is not local (NFS or autofs outside `/Volumes`)
-    /// and `shared_workspace.enabled: true` each suffice: pruning wrongly scoped to this Mac
-    /// only keeps backups, while pruning wrongly unscoped deletes another Mac's.
+    /// `CloudStorage.sharedStorage` (a sync-provider path, a volume that is not local, a sync
+    /// daemon's marker) and `shared_workspace.enabled: true` each suffice: pruning wrongly
+    /// scoped to this Mac only keeps backups, while pruning wrongly unscoped deletes another
+    /// Mac's.
     private static func sharedStorageDescription(
         _ backupsRoot: URL, profile: String,
         volumeIsLocal: @Sendable (URL) -> Bool?
     ) -> String? {
-        if let provider = CloudStorage.provider(for: backupsRoot) {
-            return "on \(provider.displayName)"
+        switch CloudStorage.sharedStorage(for: backupsRoot, volumeIsLocal: volumeIsLocal) {
+        case .provider(let provider): return "on \(provider.displayName)"
+        case .networkVolume: return "on a network volume"
+        case .syncMarker: return "in a folder a sync tool manages"
+        case nil: break
         }
-        if volumeIsLocal(backupsRoot) == false { return "on a network volume" }
-        if sharedWorkspaceEnabled(profile: profile) { return "in a shared workspace" }
-        return nil
+        return sharedWorkspaceEnabled(profile: profile) ? "in a shared workspace" : nil
     }
 
     /// `yyyyMMdd` stamp for scheduled-backup labels.
@@ -101,7 +96,7 @@ enum BackupMaintenance {
         profile: String,
         keep: Int,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil,
-        volumeIsLocal: @Sendable (URL) -> Bool? = BackupMaintenance.isOnLocalVolume
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume
     ) {
         guard let backupsRoot = backupsRoot(for: profile) else { return }
         let sharedWhere = sharedStorageDescription(
@@ -195,7 +190,7 @@ enum BackupMaintenance {
     @discardableResult
     static func cleanStaleTempDirs(
         profile: String, now: Date = Date(),
-        volumeIsLocal: @Sendable (URL) -> Bool? = BackupMaintenance.isOnLocalVolume
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume
     ) -> [String] {
         guard let backupsRoot = backupsRoot(for: profile) else { return [] }
         // Staleness here can only come from mtime — a `.tmp-<UUID>` name carries

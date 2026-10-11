@@ -311,4 +311,82 @@ final class FleetDriftTests: XCTestCase {
         let names = dashboard.sheetPlan.map { $0.name }
         XCTAssertFalse(names.contains("Fleet Drift"), "Fleet Drift should not appear without prior snapshot")
     }
+    // MARK: - Folder resolution
+
+    private let driftHeaders = "Computer Name,Serial Number,OS Version,Last Check-in,Department\n"
+
+    /// A workspace under a test root, a current CSV beside it and one prior export in `folder`.
+    private func driftFixture(
+        configYAML: String, priorFolder: (URL) -> URL
+    ) throws -> (config: ReportConfig, current: URL, workspace: URL) {
+        let root = try makeTempDir()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        setenv("JRC_TEST_WORKSPACES_ROOT", root.path, 1)
+        addTeardownBlock { unsetenv("JRC_TEST_WORKSPACES_ROOT") }
+        let workspace = root.appendingPathComponent("driftprofile", isDirectory: true)
+        let folder = priorFolder(workspace)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try configYAML.write(to: workspace.appendingPathComponent("config.yaml"),
+                             atomically: true, encoding: .utf8)
+        try (driftHeaders + "Mac2,BBB,13.0,2023-12-01,IT\n").write(
+            to: folder.appendingPathComponent("prior.csv"), atomically: true, encoding: .utf8)
+        let current = root.appendingPathComponent("current.csv")
+        try (driftHeaders + "Mac1,AAA,14.0,2024-01-01,IT\n").write(
+            to: current, atomically: true, encoding: .utf8)
+        var config = baseConfig()
+        config.jamfCli = try JSONDecoder().decode(
+            JamfCLIConfig.self, from: Data(#"{"profile":"driftprofile"}"#.utf8))
+        var charts = ChartsConfig()
+        charts.historicalCsvDir = ConfigLoader.rawValue(
+            at: ["charts", "historical_csv_dir"],
+            in: try ConfigLoader.rawMapping(fromYAML: configYAML)) as? String
+        config.charts = charts
+        return (config, current, workspace)
+    }
+
+    func testARelativeHistoricalDirIsTheWorkspacesFolderNotTheWorkingDirectory() throws {
+        let fixture = try driftFixture(
+            configYAML: "charts:\n  historical_csv_dir: snaps\n",
+            priorFolder: { $0.appendingPathComponent("snaps", isDirectory: true) })
+        let dashboard = try XCTUnwrap(CSVDashboard(
+            config: fixture.config, csvData: try Data(contentsOf: fixture.current),
+            workbook: Workbook(), currentCSVURL: fixture.current))
+        XCTAssertEqual(dashboard.priorSnapshot?.label, "prior.csv")
+    }
+
+    func testAnAbsoluteHistoricalDirOutsideTheWorkspaceNeedsTheOptIn() throws {
+        let outside = NSHomeDirectory() + "/jrc-drift-out-\(UUID().uuidString)"
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: outside) }
+        let fixture = try driftFixture(
+            configYAML: "charts:\n  historical_csv_dir: \"\(outside)\"\n",
+            priorFolder: { _ in URL(fileURLWithPath: outside, isDirectory: true) })
+        XCTAssertNil(CSVDashboard.priorSnapshotDir(config: fixture.config))
+
+        let optedIn = "output:\n  allow_absolute_paths: true\ncharts:\n"
+            + "  historical_csv_dir: \"\(outside)\"\n"
+        try optedIn
+            .write(to: fixture.workspace.appendingPathComponent("config.yaml"),
+                   atomically: true, encoding: .utf8)
+        XCTAssertEqual(CSVDashboard.priorSnapshotDir(config: fixture.config)?.path,
+                       URL(fileURLWithPath: outside).resolvingSymlinksInPath().path)
+    }
+
+    func testAnUnconfirmedHistoricalDirOnASharedWorkspaceReadsTheDefaultFolder() throws {
+        let outside = NSHomeDirectory() + "/jrc-drift-out-\(UUID().uuidString)"
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: outside) }
+        let yaml = "shared_workspace:\n  enabled: true\noutput:\n  allow_absolute_paths: true\n"
+            + "charts:\n  historical_csv_dir: \"\(outside)\"\n"
+        let fixture = try driftFixture(
+            configYAML: yaml,
+            priorFolder: { _ in URL(fileURLWithPath: outside, isDirectory: true) })
+        // First sight pins an absolute folder as unconfirmed, so it reads as the default.
+        XCTAssertEqual(CSVDashboard.priorSnapshotDir(config: fixture.config)?.lastPathComponent,
+                       "snapshots")
+        try SharedConfigPin.confirm(
+            profile: "driftprofile",
+            drifts: SharedConfigPin.check(profile: "driftprofile").drifts)
+        XCTAssertEqual(CSVDashboard.priorSnapshotDir(config: fixture.config)?.path,
+                       URL(fileURLWithPath: outside).resolvingSymlinksInPath().path)
+    }
 }

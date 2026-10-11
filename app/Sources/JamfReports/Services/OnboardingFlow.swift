@@ -1052,6 +1052,8 @@ final class OnboardingFlow {
         csvOutput.append(.init(
             timestamp: Date(), level: .info,
             text: "[info] kept a copy of the existing config.yaml as \(backup.lastPathComponent)"
+                + (ConfigService.backupOmitsWebhook(backup)
+                    ? "; its webhook URL is not kept, so enter it again after a restore" : "")
         ))
     }
 
@@ -1305,12 +1307,19 @@ final class OnboardingFlow {
     // MARK: - Config wiring helpers
 
     /// `protect.enabled` and `protect.profile`, through the scoped writer: every other key in
-    /// the block stays, and a comment there is copied out first and named in the report.
+    /// the block stays, and a comment there is copied out first and named in the report. A
+    /// profile this write changed is confirmed on this Mac: connecting Protect here is the
+    /// operator's own act, and an unconfirmed `protect.profile` stops Protect collection.
     @discardableResult
     internal func writeProtectConfig(
         profileSlug: String, protectProfileName: String
     ) throws -> ConfigSaveReport {
-        try Self.writeProductBlock("protect", profile: protectProfileName, for: profileSlug)
+        let report = try Self.writeProductBlock(
+            "protect", profile: protectProfileName, for: profileSlug)
+        SharedConfigPin.confirmWritten(
+            protectProfileName.trimmingCharacters(in: .whitespaces),
+            key: .protectProfile, profile: profileSlug)
+        return report
     }
 
     /// `school_cli.enabled` and `school_cli.profile`, the same way as `writeProtectConfig`.

@@ -11,9 +11,10 @@ import os
 /// every Mac sharing the folder must agree on them, but each Mac pins the values it was set up
 /// with in `AppSupport` and does not follow a later change until its operator confirms it.
 ///
-/// A local workspace is never pinned. Pinning applies when `shared_workspace.enabled` is true, the
-/// folder is on a sync provider or `/Volumes`, or a pin already exists; an opt-out written into
-/// the shared file never turns an existing pin off, since a peer could write it.
+/// A local workspace is never pinned. Pinning applies when `shared_workspace.enabled` is true,
+/// the folder is on shared storage (`CloudStorage.isSharedStorage`), or a pin already exists; an
+/// opt-out written into the shared file never turns an existing pin off, since a peer could
+/// write it.
 struct SharedConfigPin: Codable, Sendable, Equatable {
     var allowAbsolutePaths: Bool
     var outputDir: String
@@ -58,6 +59,14 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         /// `text(of:)` with everything a comparison needs: the webhook's full URL hash.
         fileprivate func token(of pin: SharedConfigPin) -> String {
             self == .notifyURL ? "\(pin.notifyURLHost) \(pin.notifyURLHash)" : text(of: pin)
+        }
+
+        /// The keys that name a folder the app reads or writes.
+        var isFolder: Bool {
+            switch self {
+            case .outputDir, .archiveDir, .dataDir, .historicalDir, .retentionArchiveDir: true
+            default: false
+            }
         }
 
         /// Place in `allCases`, which orders the rows and warnings.
@@ -106,14 +115,21 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     struct Drift: Sendable, Equatable {
         let key: Key
         let pinned: String
+        /// True when `pinned` is a note (first sight, unreadable pin) rather than a pinned value,
+        /// so a value that merely looks like a note is still shown as a value.
+        let pinnedIsNote: Bool
         /// What the row shows. The webhook shows host, port and a short fingerprint.
         let current: String
         /// What Confirm compares: the whole value, including the full URL hash.
         let currentToken: String
 
-        init(key: Key, pinned: String, current: String, currentToken: String? = nil) {
+        init(
+            key: Key, pinned: String, current: String, currentToken: String? = nil,
+            pinnedIsNote: Bool = false
+        ) {
             self.key = key
             self.pinned = pinned
+            self.pinnedIsNote = pinnedIsNote
             self.current = current
             self.currentToken = currentToken ?? current
         }
@@ -131,10 +147,11 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     }
 
     static let firstSightNote = "(first seen, not confirmed)"
+    static let unreadableNote = "(pin unreadable)"
 
     /// The pin for a workspace seen for the first time. What is already in the shared file may
     /// have been written by a peer, so a folder outside the workspace and a `delete` retention
-    /// are pinned as unconfirmed: headless runs use the safe value for them until one Confirm.
+    /// are pinned as unconfirmed: every run uses the safe value for them until one Confirm.
     /// The webhook host and the other keys are trust-on-first-use.
     static func firstPin(current: SharedConfigPin, workspace: URL) -> SharedConfigPin {
         var pin = current
@@ -289,8 +306,11 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     }
 
     /// Compares config.yaml with this Mac's pin. A shared workspace with no pin yet pins what it
-    /// holds now (the values the operator set up with) and reports no drift.
-    static func check(profile: String, appSupport: URL = AppSupport.directory()) -> Check {
+    /// holds now (the values the operator set up with) and reports no drift. `persist: false`
+    /// writes nothing: the pin a first sight or an upgrade would write is only compared against.
+    static func check(
+        profile: String, appSupport: URL = AppSupport.directory(), persist: Bool = true
+    ) -> Check {
         guard let workspace = ProfileService.workspaceURL(for: profile) else {
             return Check(workspace: nil, pinned: nil, drifts: [])
         }
@@ -303,7 +323,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             var notes: [String] = []
             let first = firstPin(current: current, workspace: workspace)
             do {
-                try save(first, profile: profile, appSupport: appSupport)
+                if persist { try save(first, profile: profile, appSupport: appSupport) }
             } catch {
                 notes.append("[warn] shared config could not be pinned on this Mac: "
                     + error.localizedDescription)
@@ -314,8 +334,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         case .unreadable:
             // Fail closed: with no pin to compare against, every key reads as changed.
             let drifts = Key.allCases.map {
-                Drift(key: $0, pinned: "(pin unreadable)", current: $0.text(of: current),
-                      currentToken: $0.token(of: current))
+                Drift(key: $0, pinned: unreadableNote, current: $0.text(of: current),
+                      currentToken: $0.token(of: current), pinnedIsNote: true)
             }
             return Check(workspace: workspace, pinned: nil, drifts: drifts)
         case .pin(let stored):
@@ -324,7 +344,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             if let upgraded = adoptingMissingKeys(stored, current: current, workspace: workspace) {
                 pinned = upgraded
                 do {
-                    try save(upgraded, profile: profile, appSupport: appSupport)
+                    if persist { try save(upgraded, profile: profile, appSupport: appSupport) }
                 } catch {
                     notes.append("[warn] shared config could not be pinned on this Mac: "
                         + error.localizedDescription)
@@ -345,7 +365,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             .filter { key in !changed.contains { $0.key == key } }
             .map {
                 Drift(key: $0, pinned: firstSightNote, current: $0.text(of: current),
-                      currentToken: $0.token(of: current))
+                      currentToken: $0.token(of: current), pinnedIsNote: true)
             }
         return (changed + waiting).sorted { $0.key.position < $1.key.position }
     }
@@ -353,8 +373,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     /// Whether a workspace is pinned. Unlike `SharedWorkspace.isEffectivelyShared`, which
     /// coordination uses, `shared_workspace.enabled: false` does not opt out: the file is
     /// writable by every peer, so an opt-out beside hostile values would switch pinning off.
-    static func appliesTo(sharedEnabled: Bool?, onSyncProvider: Bool, pinExists: Bool) -> Bool {
-        sharedEnabled == true || onSyncProvider || pinExists
+    static func appliesTo(sharedEnabled: Bool?, onSharedStorage: Bool, pinExists: Bool) -> Bool {
+        sharedEnabled == true || onSharedStorage || pinExists
     }
 
     /// `current(workspace:)` for a workspace that is pinned; nil for a local one.
@@ -365,7 +385,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             from: workspace.appendingPathComponent("config.yaml")))?.sharedWorkspace
         guard appliesTo(
             sharedEnabled: sharedConfig?.enabled,
-            onSyncProvider: CloudStorage.provider(for: workspace) != nil,
+            onSharedStorage: CloudStorage.isSharedStorage(workspace),
             pinExists: FileManager.default.fileExists(
                 atPath: storeURL(profile: profile, appSupport: appSupport).path))
         else { return nil }
@@ -405,8 +425,10 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             confirmed += 1
         }
         if unreadable, confirmed < Key.allCases.count { throw ConfirmError.changedSinceShown }
+        // Nothing still matched what the row showed: say so rather than report a confirmation.
+        if confirmed == 0, !drifts.isEmpty { throw ConfirmError.changedSinceShown }
         try save(pin, profile: profile, appSupport: appSupport)
-        removeOverrides(for: workspace)
+        invalidateOverrides(for: workspace)
     }
 
     /// Re-pins `keys` to what config.yaml holds now, for a save on this Mac that changed them.
@@ -430,7 +452,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             pin.unconfirmed.removeAll { $0 == key.rawValue }
         }
         try save(pin, profile: profile, appSupport: appSupport)
-        removeOverrides(for: workspace)
+        invalidateOverrides(for: workspace)
     }
 
     // MARK: - Which saves confirm
@@ -494,6 +516,32 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
               let text = try? String(contentsOf: url, encoding: .utf8) else { return }
         let keys = keysSet(inYAML: text)
         guard !keys.isEmpty else { return }
+        confirmBestEffort(profile: profile, keys: keys, appSupport: appSupport)
+    }
+
+    /// `confirm(profile:keys:)` for a write this Mac just made; a failure is logged, since the
+    /// write itself succeeded and the Doctor row still offers the Confirm.
+    /// Re-pins `key` to `written`, the value a save on this Mac just wrote, only while
+    /// config.yaml still holds it (a peer's edit landing in between is not confirmed), and
+    /// even when it equals the value before (it clears a peer's identical pending drift).
+    /// For keys whose token is their text; never the webhook.
+    static func confirmWritten(
+        _ written: String, key: Key, profile: String, appSupport: URL = AppSupport.directory()
+    ) {
+        guard key != .notifyURL else { return }
+        let drift = Drift(key: key, pinned: "", current: written)
+        do {
+            try confirm(profile: profile, drifts: [drift], appSupport: appSupport)
+        } catch {
+            let reason = error.localizedDescription
+            AppLogger.collect.warning(
+                "SharedConfigPin: did not confirm \(key.rawValue): \(reason, privacy: .public)")
+        }
+    }
+
+    static func confirmBestEffort(
+        profile: String, keys: Set<Key>, appSupport: URL = AppSupport.directory()
+    ) {
         do {
             try confirm(profile: profile, keys: keys, appSupport: appSupport)
         } catch {
@@ -536,9 +584,10 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         !check(profile: profile, appSupport: appSupport).isDrifted(.protectProfile)
     }
 
-    // MARK: - Headless runs
+    // MARK: - Folder overrides
 
-    /// Which path keys a headless run reads as their safe value.
+    /// Which path keys read as their safe value: the folders and the opt-in that differ from
+    /// this Mac's pin, or wait for a Confirm.
     struct PathOverrides: Sendable, Equatable {
         var outputDir = false
         var archiveDir = false
@@ -546,64 +595,66 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         var historicalDir = false
         var absolutePaths = false
         var isEmpty: Bool { self == PathOverrides() }
-    }
 
-    private struct State {
-        var headless = false
-        var overrides: [String: PathOverrides] = [:]
-    }
+        func union(_ other: PathOverrides) -> PathOverrides {
+            var merged = self
+            merged.outputDir = outputDir || other.outputDir
+            merged.archiveDir = archiveDir || other.archiveDir
+            merged.dataDir = dataDir || other.dataDir
+            merged.historicalDir = historicalDir || other.historicalDir
+            merged.absolutePaths = absolutePaths || other.absolutePaths
+            return merged
+        }
 
-    private static let state = OSAllocatedUnfairLock(initialState: State())
+        init() {}
 
-    /// `--tick`, `--scheduled-run` and the `jamf-reports` CLI call this first: their runs
-    /// then resolve a drifted folder to its safe value. The GUI does not, so its screens keep
-    /// showing what config.yaml says and Config Doctor carries the drift.
-    static func markHeadless(_ headless: Bool = true) {
-        state.withLock {
-            $0.headless = headless
-            if !headless { $0.overrides = [:] }
+        init(_ check: Check) {
+            outputDir = check.isDrifted(.outputDir)
+            archiveDir = check.isDrifted(.archiveDir)
+            dataDir = check.isDrifted(.dataDir)
+            historicalDir = check.isDrifted(.historicalDir)
+            absolutePaths = check.isDrifted(.allowAbsolutePaths)
         }
     }
 
-    @TaskLocal private static var inUnattendedScope = false
-
-    /// The drifts one run has already reported, so its collect and generate say each once.
-    final class RunAnnouncements: Sendable {
-        fileprivate let seen = OSAllocatedUnfairLock(initialState: Set<String>())
+    /// config.yaml's content digest: a peer's in-place edit that keeps the length and restores
+    /// the modification time (possible on SMB) still changes it.
+    private static func contentDigest(of url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    @TaskLocal private static var announcements: RunAnnouncements?
+    /// The pin's change marker (a per-Mac file no peer writes): an atomic replace changes the
+    /// inode, a plain write the time.
+    private struct FileStamp: Equatable, Sendable {
+        let modified: Date
+        let size: Int
+        let inode: Int
 
-    /// Runs one scheduled run: a checkpoint inside it reports each drifted key once. Outside
-    /// such a run (a button press in the app, one CLI command) every checkpoint reports.
-    static func announcingOnce<T>(_ body: () async -> T) async -> T {
-        await $announcements.withValue(RunAnnouncements()) { await body() }
-    }
-
-    /// Runs an automatic collect (catch-up, self-remediation, the background refresh): nobody
-    /// is at the keyboard, so inside `body` a checkpoint installs the safe path values as a
-    /// headless run does, and they are removed again afterwards.
-    ///
-    /// The override is process-wide for the workspace, not task-local: a task-local would be
-    /// lost in a `Task.detached` inside the engine, which would fall back to the unsafe
-    /// folders. So for the minutes the collect runs, GUI reads of that workspace (Reports,
-    /// Devices, a manual action started meanwhile) see the safe folders too; afterwards they
-    /// read config.yaml as typed again.
-    static func unattended<T: Sendable>(
-        profile: String, _ body: @Sendable () async throws -> T
-    ) async rethrows -> T {
-        defer {
-            if let workspace = ProfileService.workspaceURL(for: profile),
-               !state.withLock({ $0.headless }) {
-                removeOverrides(for: workspace)
-            }
+        init?(of url: URL) {
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  let modified = attributes[.modificationDate] as? Date else { return nil }
+            self.modified = modified
+            size = (attributes[.size] as? Int) ?? 0
+            inode = (attributes[.systemFileNumber] as? Int) ?? 0
         }
-        return try await $inUnattendedScope.withValue(true) { try await body() }
     }
 
-    /// Run at the start of a collect or generate: checks the pin, logs one `[warn]` per drifted
-    /// key (once per process for the same value), and in a headless run installs the safe
-    /// path values for `WorkspacePaths`.
+    private struct CachedOverrides: Sendable {
+        let profiles: [String]
+        let config: String?
+        let pins: [FileStamp?]
+        let overrides: PathOverrides
+    }
+
+    /// By workspace. A lookup hashes config.yaml and stats the pin while neither changed;
+    /// `WorkspacePaths` asks on every read, from about forty places.
+    private static let overridesCache = OSAllocatedUnfairLock(
+        initialState: [String: CachedOverrides]())
+
+    /// Run at the start of a collect or generate: checks the pin and logs one `[warn]` per
+    /// drifted key (once per scheduled run for the same value). The safe folders themselves
+    /// apply on every read in every context (`pathOverrides`), not only after this call.
     @discardableResult
     static func checkpoint(
         profile: String,
@@ -612,23 +663,12 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     ) -> Check {
         let result = check(profile: profile, appSupport: appSupport)
         guard let workspace = result.workspace else { return result }
-        let overrides = PathOverrides(
-            outputDir: result.isDrifted(.outputDir),
-            archiveDir: result.isDrifted(.archiveDir),
-            dataDir: result.isDrifted(.dataDir),
-            historicalDir: result.isDrifted(.historicalDir),
-            absolutePaths: result.isDrifted(.allowAbsolutePaths))
+        invalidateOverrides(for: workspace)
         for note in result.notes {
             AppLogger.collect.warning("\(note, privacy: .public)")
             onLine?(.init(timestamp: Date(), level: .warn, text: note))
         }
         let id = overrideID(workspace)
-        let unattendedRun = inUnattendedScope
-        state.withLock { state in
-            if state.headless || unattendedRun {
-                state.overrides[id] = overrides.isEmpty ? nil : overrides
-            }
-        }
         let fresh = result.drifts.filter { drift in
             announcements?.seen.withLock {
                 $0.insert("\(id)|\(drift.key.rawValue)|\(drift.currentToken)").inserted
@@ -643,11 +683,98 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         return result
     }
 
-    /// The safe value `WorkspacePaths` reads in place of config.yaml's, or nil for the file's.
-    static func safePathValue(workspace: URL, section: String, key: String) -> Any? {
-        guard let overrides = state.withLock({ $0.overrides[overrideID(workspace)] }) else {
+    /// The overrides in force for `workspace`, for every caller (a scheduled run, the CLI, a
+    /// button in the app). Empty for a local workspace, a folder that is not a profile's
+    /// workspace and a clean pin. A workspace with no pin yet is judged as its first sight
+    /// would be, without writing the pin.
+    static func pathOverrides(workspace: URL) -> PathOverrides {
+        let id = overrideID(workspace)
+        let support = AppSupport.resolved(home: FileManager.default.homeDirectoryForCurrentUser)
+        let digest = contentDigest(of: workspace.appendingPathComponent("config.yaml"))
+        let pinStamps = { (names: [String]) in
+            names.map { FileStamp(of: storeURL(profile: $0, appSupport: support)) }
+        }
+        if let cached = overridesCache.withLock({ $0[id] }), cached.config == digest,
+           cached.pins == pinStamps(cached.profiles) {
+            return cached.overrides
+        }
+        let candidates = profiles(forWorkspace: workspace)
+        // A candidate with a pin is this Mac's profile for the folder; first-sight judgement
+        // applies only when none has one (another folder name resolving here is not a profile).
+        let pinned = candidates.filter {
+            FileManager.default.fileExists(atPath: storeURL(profile: $0, appSupport: support).path)
+        }
+        let profiles = pinned.isEmpty ? candidates : pinned
+        guard !profiles.isEmpty else { return PathOverrides() }
+        let stamps = pinStamps(profiles)
+        let overrides = profiles.reduce(PathOverrides()) { merged, profile in
+            let check = check(profile: profile, appSupport: support, persist: false)
+            return merged.union(PathOverrides(check))
+        }
+        overridesCache.withLock {
+            $0[id] = CachedOverrides(
+                profiles: profiles, config: digest, pins: stamps, overrides: overrides)
+        }
+        return overrides
+    }
+
+    /// The profiles whose workspace folder is `workspace`, found by resolving each folder under
+    /// the workspaces root, so a profile folder that is a symlink to a folder of another name
+    /// still finds its pin. Several that resolve to one folder all apply; the stricter wins.
+    private static func profiles(forWorkspace workspace: URL) -> [String] {
+        let id = overrideID(workspace)
+        let matches = { (name: String) -> Bool in
+            ProfileService.workspaceURL(for: name).map { overrideID($0) == id } ?? false
+        }
+        let entries = (try? FileManager.default.contentsOfDirectory(
+            atPath: ProfileService.workspacesRoot().path)) ?? []
+        return entries.compactMap(ProfileName.name(fromPathComponent:)).filter(matches).sorted()
+    }
+
+    private static func invalidateOverrides(for workspace: URL) {
+        overridesCache.withLock { _ = $0.removeValue(forKey: overrideID(workspace)) }
+    }
+
+    /// The drifts one run has already reported, so its collect and generate say each once.
+    final class RunAnnouncements: Sendable {
+        fileprivate let seen = OSAllocatedUnfairLock(initialState: Set<String>())
+    }
+
+    @TaskLocal private static var announcements: RunAnnouncements?
+
+    /// Runs one scheduled run: a checkpoint inside it reports each drifted key once. Outside
+    /// such a run (a button press in the app, one CLI command) every checkpoint reports.
+    static func announcingOnce<T>(
+        isolation: isolated (any Actor)? = #isolation,
+        _ body: () async throws -> T
+    ) async rethrows -> T {
+        // Nested inside another run (a generate inside collect-then-generate): keep its record.
+        try await $announcements.withValue(
+            announcements ?? RunAnnouncements(), operation: body, isolation: isolation)
+    }
+
+    /// One sentence for an export a person started that landed in the workspace's default
+    /// folder because the shared config.yaml changed a folder key this Mac has not confirmed;
+    /// nil when `folder` is the one config.yaml names.
+    static func outputFolderNote(profile: String, folder: URL) -> String? {
+        guard let workspace = ProfileService.workspaceURL(for: profile) else { return nil }
+        let overrides = pathOverrides(workspace: workspace)
+        let key: String
+        if overrides.outputDir {
+            key = Key.outputDir.rawValue
+        } else if overrides.absolutePaths,
+                  folder.lastPathComponent == WorkspacePaths.generatedReportsDirName {
+            key = Key.allowAbsolutePaths.rawValue
+        } else {
             return nil
         }
+        return "Saved in the workspace's \(WorkspacePaths.generatedReportsDirName) folder: "
+            + "\(key) changed in the shared config.yaml, not confirmed on this Mac (Config Doctor)."
+    }
+
+    /// The safe value `WorkspacePaths` reads in place of config.yaml's, or nil for the file's.
+    static func safePathValue(workspace: URL, section: String, key: String) -> Any? {
+        let overrides = pathOverrides(workspace: workspace)
         switch (section, key) {
         case ("output", "output_dir") where overrides.outputDir: return ""
         case ("output", "archive_dir") where overrides.archiveDir: return ""
@@ -656,10 +783,6 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         case ("output", "allow_absolute_paths") where overrides.absolutePaths: return false
         default: return nil
         }
-    }
-
-    private static func removeOverrides(for workspace: URL) {
-        state.withLock { _ = $0.overrides.removeValue(forKey: overrideID(workspace)) }
     }
 
     private static func overrideID(_ workspace: URL) -> String {

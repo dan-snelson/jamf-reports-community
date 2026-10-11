@@ -76,7 +76,10 @@ struct Scaffold: AsyncParsableCommand {
     private func keepCopy(of url: URL) throws {
         guard let backup = try ConfigService.backUp(url) else { return }
         FileHandle.standardError.write(
-            Data("note: kept a copy of the existing file at \(backup.path)\n".utf8))
+            Data(("note: kept a copy of the existing file at \(backup.path)"
+                + (ConfigService.backupOmitsWebhook(backup)
+                    ? "; its webhook URL is not kept, so enter it again after a restore" : "")
+                + "\n").utf8))
     }
 }
 

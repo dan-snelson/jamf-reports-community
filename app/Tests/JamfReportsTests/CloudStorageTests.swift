@@ -17,6 +17,95 @@ final class CloudStorageTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempDir)
     }
 
+    // MARK: - Shared storage
+
+    func testAPlainLocalFolderIsNotSharedStorage() throws {
+        let folder = tempDir.appendingPathComponent("a/b", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        XCTAssertNil(CloudStorage.sharedStorage(for: folder, volumeIsLocal: { _ in true }))
+        XCTAssertFalse(CloudStorage.isSharedStorage(folder, volumeIsLocal: { _ in nil }))
+    }
+
+    func testANonLocalVolumeIsSharedStorage() throws {
+        XCTAssertEqual(
+            CloudStorage.sharedStorage(for: tempDir, volumeIsLocal: { _ in false }),
+            .networkVolume)
+    }
+
+    func testAProviderPathBeatsTheVolumeProbe() {
+        let url = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/CloudStorage/OneDrive-Org/jr")
+        XCTAssertEqual(CloudStorage.sharedStorage(for: url, volumeIsLocal: { _ in true }),
+                       .provider(.oneDrive))
+    }
+
+    func testASyncMarkerInTheFolderOrAnAncestorIsSharedStorage() throws {
+        let markers: [(String, Bool)] = [
+            (".stfolder", true), (".stignore", false), (".sync", true),
+            (".nextcloudsync.log", false), (".owncloudsync.log", false),
+            (".sync_58a3b2.db", false), ("._sync_58a3b2.db", false),
+        ]
+        for (marker, isDirectory) in markers {
+            let top = tempDir.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let folder = top.appendingPathComponent("deep/workspace", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = top.appendingPathComponent(marker, isDirectory: isDirectory)
+            if isDirectory {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            } else {
+                try Data().write(to: url)
+            }
+            XCTAssertEqual(
+                CloudStorage.sharedStorage(for: folder, volumeIsLocal: { _ in true }),
+                .syncMarker(marker), marker)
+        }
+    }
+
+    func testAMarkerInTheHomeFolderOrAboveDoesNotPinAWorkspace() throws {
+        let home = tempDir.appendingPathComponent("home", isDirectory: true)
+        let workspace = home.appendingPathComponent("Jamf-Reports/p", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        for dir in [home, tempDir!] {
+            try Data().write(to: dir.appendingPathComponent(".stignore"))
+        }
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".sync"), withIntermediateDirectories: true)
+        XCTAssertNil(CloudStorage.sharedStorage(
+            for: workspace, volumeIsLocal: { _ in true }, home: home))
+    }
+
+    func testAMarkerBetweenHomeAndTheWorkspaceStillPinsIt() throws {
+        let home = tempDir.appendingPathComponent("home", isDirectory: true)
+        let workspace = home.appendingPathComponent("Sync/Jamf-Reports/p", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent("Sync/.stfolder"), withIntermediateDirectories: true)
+        XCTAssertEqual(
+            CloudStorage.sharedStorage(for: workspace, volumeIsLocal: { _ in true }, home: home),
+            .syncMarker(".stfolder"))
+        try Data().write(to: workspace.appendingPathComponent(".stignore"))
+        XCTAssertNotNil(CloudStorage.sharedStorage(
+            for: workspace, volumeIsLocal: { _ in true }, home: home))
+    }
+
+    func testTheVolumeIsProbedOnTheSymlinkResolvedPath() throws {
+        let mount = tempDir.appendingPathComponent("mount", isDirectory: true)
+        try FileManager.default.createDirectory(at: mount, withIntermediateDirectories: true)
+        let link = tempDir.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: mount)
+        let remote = mount.resolvingSymlinksInPath().path
+        XCTAssertEqual(
+            CloudStorage.sharedStorage(for: link, volumeIsLocal: { $0.path != remote }),
+            .networkVolume)
+    }
+
+    func testAFileThatOnlyLooksLikeAMarkerIsNotOne() throws {
+        for name in ["sync_notes.db", ".sync_notes.txt", "stfolder"] {
+            try Data().write(to: tempDir.appendingPathComponent(name))
+        }
+        XCTAssertNil(CloudStorage.sharedStorage(for: tempDir, volumeIsLocal: { _ in true }))
+    }
+
     // MARK: - Canonical filename stamps
 
     func testSnapshotTimestampParsesCanonicalStem() {

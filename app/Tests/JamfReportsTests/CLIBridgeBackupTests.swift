@@ -71,6 +71,36 @@ final class CLIBridgeBackupTests: XCTestCase {
         XCTAssertFalse(collector.lines.isEmpty, "backup must emit at least one log line when jamf-cli is absent")
     }
 
+    // MARK: - Timeout
+
+    /// A backup that stalls is stopped at the limit and fails like any failed backup: one
+    /// [error] line naming the limit, a non-zero exit, and no folder (staging included) left
+    /// for the Backups screen or retention to read as a backup.
+    func test_backup_timeoutFailsAndLeavesNoBackupFolder() async throws {
+        let root = try makeTempDir()
+        setenv("JRC_TEST_WORKSPACES_ROOT", root.path, 1)
+        addTeardownBlock { unsetenv("JRC_TEST_WORKSPACES_ROOT") }
+        let profile = "backup-timeout-\(UUID().uuidString.prefix(8).lowercased())"
+        let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let stub = try SleepingCLIStub.make(in: try makeTempDir(), writesPartialFile: true)
+        let collector = LineCollector()
+
+        let exit = try await CLIBridge().backup(
+            profile: profile, label: "scheduled-test", timeout: 1, _testExecutable: stub
+        ) { collector.append($0) }
+
+        XCTAssertEqual(exit, CLIBridge.exitCodeTimedOut)
+        XCTAssertFalse(CLIBridge.backupOutputIsPrunable(exit: exit))
+        let texts = collector.lines.map(\.text)
+        XCTAssertEqual(texts.filter { $0.hasPrefix("[error] backup stopped after the 1 s limit") }.count,
+                       1, "expected one error line naming the limit; got: \(texts)")
+        let backupsRoot = workspace.appendingPathComponent("backups", isDirectory: true)
+        let left = try FileManager.default.contentsOfDirectory(atPath: backupsRoot.path)
+        XCTAssertEqual(left, [], "no staging or final folder may survive a timed-out backup")
+        XCTAssertEqual(BackupLibrary().list(profile: profile).count, 0)
+    }
+
     // MARK: - Final-directory name collision (#213)
 
     /// A free name is returned verbatim — BackupsView and BackupMaintenance read

@@ -37,6 +37,7 @@ CONFIG="${1:-debug}"
 APP_PATH="build/JamfReports.app"
 PKG_STAGING="build/pkg-staging"
 COMPONENT_PKG="build/JamfReports-component.pkg"
+COMPONENT_PLIST="build/JamfReports-component.plist"
 DISTRIBUTION_XML="build/Distribution.xml"
 PKG_UNSIGNED="build/JamfReports-unsigned.pkg"
 
@@ -104,15 +105,48 @@ cp -R "$APP_PATH" "$PKG_STAGING/JamfReports.app"
 # (com.apple.quarantine from the original .app download, com.apple.provenance).
 xattr -cr "$PKG_STAGING"
 
+# Pin the bundle as non-relocatable so an install always lands in /Applications,
+# whatever the build host's pkgbuild default is (it was relocatable before macOS 27).
+cat > "$COMPONENT_PLIST" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<array>
+    <dict>
+        <key>RootRelativeBundlePath</key>
+        <string>JamfReports.app</string>
+        <key>BundleIsRelocatable</key>
+        <false/>
+        <key>BundleIsVersionChecked</key>
+        <true/>
+        <key>BundleOverwriteAction</key>
+        <string>upgrade</string>
+        <key>BundleHasStrictIdentifier</key>
+        <true/>
+    </dict>
+</array>
+</plist>
+PLIST
+
 echo "→ building component pkg"
 rm -f "$COMPONENT_PKG"
 pkgbuild \
   --root "$PKG_STAGING" \
+  --component-plist "$COMPONENT_PLIST" \
   --identifier "$PKG_BUNDLE_ID" \
   --version "$PKG_VERSION" \
   --install-location "/Applications" \
   --ownership recommended \
   "$COMPONENT_PKG"
+
+# An empty <relocate/> means no bundle may be moved by the installer.
+RELOCATE_CHECK="$(mktemp -d)/expanded"
+pkgutil --expand "$COMPONENT_PKG" "$RELOCATE_CHECK"
+if ! grep -q '<relocate/>' "$RELOCATE_CHECK/PackageInfo"; then
+  echo "✗ component pkg would relocate the bundle (BundleIsRelocatable not applied)" >&2
+  exit 1
+fi
+rm -rf "$(dirname "$RELOCATE_CHECK")"
 
 echo "→ writing Distribution.xml"
 # `hostArchitectures="arm64"` refuses Intel Macs at install time: build-app.sh
@@ -183,7 +217,7 @@ if ! pkgutil --check-signature "$PKG_OUT" >/dev/null 2>&1; then
   exit 1
 fi
 
-rm -f "$PKG_UNSIGNED" "$COMPONENT_PKG" "$DISTRIBUTION_XML"
+rm -f "$PKG_UNSIGNED" "$COMPONENT_PKG" "$COMPONENT_PLIST" "$DISTRIBUTION_XML"
 rm -rf "$PKG_STAGING"
 
 # Notarize when: release mode, real identity, SKIP_NOTARIZE not set.

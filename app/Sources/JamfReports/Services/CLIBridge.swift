@@ -537,6 +537,8 @@ final class CLIBridge {
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async throws -> Int32 {
         try await ensureWorkspace(profile: profile, onLine: onLine)
+        // A Generate with no collect before it (the Overview, onboarding) still names a drift.
+        SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
         guard let workspace = ProfileService.workspaceURL(for: profile) else {
             let msg = "error: workspace URL unexpectedly nil for profile '\(profile)' after ensureWorkspace — this is a programmer error"
             onLine(LogLine(timestamp: Date(), level: .fail, text: msg))
@@ -859,10 +861,13 @@ final class CLIBridge {
         narrative: (() async -> String?)?,
         generate: (String?) async throws -> Int32
     ) async throws -> Int32 {
-        try await holdingGenerate {
-            let collectExit = try await collect()
-            guard collectExit == 0 else { return collectExit }
-            return try await generate(await narrative?())
+        // The collect and the generate each run the pin checkpoint; the run reports a drift once.
+        try await SharedConfigPin.announcingOnce {
+            try await holdingGenerate {
+                let collectExit = try await collect()
+                guard collectExit == 0 else { return collectExit }
+                return try await generate(await narrative?())
+            }
         }
     }
 

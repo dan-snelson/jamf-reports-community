@@ -143,8 +143,8 @@ enum SnapshotRetentionService {
         } catch {
             let typed = ConfigSchema.displayText(config?.resolvedArchiveDir ?? "")
             let msg = "[warn] retention.archive_dir \"\(typed)\" is not used: "
-                + "\(WorkspacePaths.refusal(of: error)). Archiving to _archive in the workspace "
-                + "instead."
+                + "\(WorkspacePaths.refusal(of: error, workspace: workspace)). Archiving to "
+                + "_archive in the workspace instead."
             AppLogger.collect.warning("\(msg, privacy: .private)")
             onLine(.init(timestamp: Date(), level: .warn, text: msg))
             return defaultArchive

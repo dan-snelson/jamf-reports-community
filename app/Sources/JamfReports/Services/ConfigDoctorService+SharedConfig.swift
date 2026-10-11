@@ -23,10 +23,10 @@ extension ConfigDoctorService {
             severity: .warn,
             title: "Shared config changed since this Mac pinned it",
             detail: lines.joined(separator: "\n"),
-            hint: "Another Mac sharing this workspace edited config.yaml. Until you confirm, "
-                + "scheduled runs and the command-line tool on this Mac use the safe value for "
-                + "each key (workspace Generated Reports folder, archive instead of delete, "
-                + "no webhook send).",
+            hint: "A Mac sharing this workspace edited config.yaml, or it was edited here. Until "
+                + "you confirm, every screen, report and run on this Mac uses the safe value "
+                + "for each key (workspace Generated Reports folder, archive instead of "
+                + "delete, no webhook send, no Protect collection).",
             action: .confirmSharedConfig(drifts)
         )]
     }

@@ -31,7 +31,6 @@ final class SharedConfigPinTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        SharedConfigPin.markHeadless(false)
         unsetenv("JRC_TEST_WORKSPACES_ROOT")
         try? fileManager.removeItem(at: root)
     }
@@ -274,7 +273,6 @@ final class SharedConfigPinTests: XCTestCase {
         try writeConfig(detail: "minimal", historicalDir: "snaps")
         _ = check()
         try writeConfig(detail: "full", historicalDir: outside)
-        SharedConfigPin.markHeadless()
         let result = SharedConfigPin.checkpoint(
             profile: profile, appSupport: appSupport, onLine: nil)
         XCTAssertEqual(result.drifts.map(\.key), [.historicalDir, .notifyDetail])
@@ -307,7 +305,6 @@ final class SharedConfigPinTests: XCTestCase {
 
     func testFirstSightKeepsAnAbsoluteFolderAndDeleteUnconfirmedUntilOneConfirm() throws {
         try writeConfig(outputDir: outside, allowAbsolute: true, retentionMode: "delete")
-        SharedConfigPin.markHeadless()
         let lines = LineBox()
         let result = SharedConfigPin.checkpoint(
             profile: profile, appSupport: appSupport, onLine: { lines.add($0.text) })
@@ -526,13 +523,13 @@ final class SharedConfigPinTests: XCTestCase {
 
     // MARK: - Headless folders
 
-    func testHeadlessChangedOutputDirFallsBackToTheWorkspaceWithOneWarn() async throws {
+    func testChangedOutputDirFallsBackToTheWorkspaceWithOneWarn() async throws {
         try writeConfig(outputDir: outside, allowAbsolute: true)
         _ = check()
+        try confirmAll()
         XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).path, outside)
 
         try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
-        SharedConfigPin.markHeadless()
         let lines = LineBox()
         let appSupport = self.appSupport!
         let profile = self.profile
@@ -561,42 +558,138 @@ final class SharedConfigPinTests: XCTestCase {
             of: "allow_absolute_paths: false", with: "allow_absolute_paths: true")
             .write(to: workspace.appendingPathComponent("config.yaml"),
                    atomically: true, encoding: .utf8)
-        SharedConfigPin.markHeadless()
         let drifted = SharedConfigPin.checkpoint(
             profile: profile, appSupport: appSupport, onLine: nil)
         XCTAssertEqual(drifted.drifts.map(\.key), [.allowAbsolutePaths, .dataDir])
         XCTAssertEqual(try WorkspacePaths.dataDir(for: profile).lastPathComponent, "jamf-cli-data")
     }
 
-    func testTheGUIKeepsReadingConfigYamlAsTyped() throws {
+    func testAChangedFolderReadsAsTheSafeValueForAPersonsOwnActionWithNoCheckpoint() throws {
         try writeConfig(outputDir: outside, allowAbsolute: true)
         _ = check()
+        try confirmAll()
+        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).path, outside)
         try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
-        SharedConfigPin.checkpoint(profile: profile, appSupport: appSupport, onLine: nil)
+        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).lastPathComponent,
+                       WorkspacePaths.generatedReportsDirName)
+    }
+
+    func testASymlinkedProfileFolderStillReadsTheSafeFolder() throws {
+        let real = root.appendingPathComponent("real-folder", isDirectory: true)
+        try fileManager.moveItem(at: workspace, to: real)
+        try fileManager.createSymbolicLink(at: workspace, withDestinationURL: real)
+        try writeConfig(outputDir: outside, allowAbsolute: true)
+        _ = check()
+        try confirmAll()
+        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).path, outside)
+        try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
+        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).lastPathComponent,
+                       WorkspacePaths.generatedReportsDirName)
+    }
+
+    func testAnInPlaceEditThatKeepsSizeAndTimeStillReadsAsDrift() throws {
+        try writeConfig(outputDir: outside + "-aaaa", allowAbsolute: true)
+        _ = check()
+        try confirmAll()
+        let config = workspace.appendingPathComponent("config.yaml")
+        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).path, outside + "-aaaa")
+        let stamp = try fileManager.attributesOfItem(atPath: config.path)[.modificationDate]
+        let text = try String(contentsOf: config, encoding: .utf8)
+        let handle = try FileHandle(forWritingTo: config)
+        let edited = text.replacingOccurrences(of: "-aaaa", with: "-bbbb")
+        try handle.write(contentsOf: Data(edited.utf8))
+        try handle.close()
+        try fileManager.setAttributes([.modificationDate: stamp as Any], ofItemAtPath: config.path)
+        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).lastPathComponent,
+                       WorkspacePaths.generatedReportsDirName)
+    }
+
+    func testAnExportSaysWhenThePinReplacedItsFolder() throws {
+        try writeConfig(outputDir: outside, allowAbsolute: true)
+        _ = check()
+        try confirmAll()
+        let confirmed = try WorkspacePaths.outputDir(for: profile)
+        XCTAssertNil(SharedConfigPin.outputFolderNote(profile: profile, folder: confirmed))
+        try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
+        let fallback = try WorkspacePaths.outputDir(for: profile)
+        let note = try XCTUnwrap(SharedConfigPin.outputFolderNote(profile: profile, folder: fallback))
+        XCTAssertTrue(note.contains("output.output_dir"), note)
+        XCTAssertTrue(note.contains("not confirmed on this Mac"), note)
+    }
+
+    func testTheSafeFolderHoldsUntilConfirmedWhateverRanBefore() throws {
+        try writeConfig(outputDir: outside, allowAbsolute: true)
+        _ = check()
+        try confirmAll()
+        try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
+        for _ in 0..<3 {
+            XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).lastPathComponent,
+                           WorkspacePaths.generatedReportsDirName)
+            SharedConfigPin.checkpoint(profile: profile, appSupport: appSupport, onLine: nil)
+        }
+        try confirmAll()
         XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).path, outside + "-peer")
     }
 
-    func testAnAutomaticGUICollectUsesSafeFoldersOnlyWhileItRuns() async throws {
+    func testALocalWorkspaceKeepsReadingConfigYamlAsTyped() throws {
+        try writeConfig(shared: false, outputDir: outside, allowAbsolute: true)
+        try writeConfig(shared: false, outputDir: outside + "-other", allowAbsolute: true)
+        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).path, outside + "-other")
+        XCTAssertNil(SharedConfigPin.load(profile: profile, appSupport: appSupport))
+    }
+
+    func testManyReadsNeverRewriteThePin() throws {
         try writeConfig(outputDir: outside, allowAbsolute: true)
         _ = check()
-        try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
-        let appSupport = self.appSupport!
-        let profile = self.profile
+        try confirmAll()
+        let pin = SharedConfigPin.storeURL(profile: profile, appSupport: appSupport)
+        let before = try Data(contentsOf: pin)
+        for _ in 0..<50 { _ = try WorkspacePaths.outputDir(for: profile) }
+        XCTAssertEqual(try Data(contentsOf: pin), before, "a read never rewrites the pin")
+    }
 
-        let during = try await SharedConfigPin.unattended(profile: profile) {
-            SharedConfigPin.checkpoint(profile: profile, appSupport: appSupport, onLine: nil)
-            return try WorkspacePaths.outputDir(for: profile).lastPathComponent
-        }
-        XCTAssertEqual(during, WorkspacePaths.generatedReportsDirName)
-        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).path, outside + "-peer",
-                       "a person's own action reads the typed value again afterwards")
+    func testAReadBeforeTheFirstCheckpointDoesNotWriteThePin() throws {
+        try writeConfig(outputDir: outside, allowAbsolute: true)
+        XCTAssertEqual(try WorkspacePaths.outputDir(for: profile).lastPathComponent,
+                       WorkspacePaths.generatedReportsDirName,
+                       "an absolute folder is unconfirmed at first sight")
+        XCTAssertNil(SharedConfigPin.load(profile: profile, appSupport: appSupport))
+    }
+
+    @MainActor
+    func testGUIGenerateLogsTheDriftOnceAndFallsBackToTheWorkspace() async throws {
+        try writeConfig(outputDir: outside, allowAbsolute: true)
+        _ = check()
+        try confirmAll()
+        try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
+        let lines = LineBox()
+        _ = await CLIBridge().generateAll(
+            types: [], outputDir: nil, profile: profile, onLine: { lines.add($0.text) })
+        let dir = WorkspacePaths.reportsDir(for: profile, onLine: { lines.add($0.text) })
+        XCTAssertEqual(lines.all, [
+            "[warn] shared config changed output.output_dir: confirm on this Mac (Config Doctor)",
+        ])
+        XCTAssertEqual(dir?.lastPathComponent, WorkspacePaths.generatedReportsDirName)
+    }
+
+    func testARefusedFolderNamesTheUnconfirmedOptInNotAMissingOne() throws {
+        try writeConfig(outputDir: outside, allowAbsolute: true)
+        _ = check()
+        try confirmAll()
+        try writeConfig(outputDir: outside, allowAbsolute: false)
+        let lines = LineBox()
+        let dir = WorkspacePaths.reportsDir(for: profile, onLine: { lines.add($0.text) })
+        XCTAssertEqual(dir?.lastPathComponent, WorkspacePaths.generatedReportsDirName)
+        let line = try XCTUnwrap(lines.all.first)
+        XCTAssertTrue(line.contains("changed in the shared config.yaml, not confirmed on this Mac"),
+                      line)
+        XCTAssertFalse(line.contains("is not true"), line)
     }
 
     func testConfirmingEndsTheFallback() throws {
         try writeConfig(outputDir: outside, allowAbsolute: true)
         _ = check()
         try writeConfig(outputDir: outside + "-peer", allowAbsolute: true)
-        SharedConfigPin.markHeadless()
         SharedConfigPin.checkpoint(profile: profile, appSupport: appSupport, onLine: nil)
         XCTAssertNotEqual(try WorkspacePaths.outputDir(for: profile).path, outside + "-peer")
         try confirmAll()

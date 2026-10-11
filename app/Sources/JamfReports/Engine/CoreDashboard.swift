@@ -3059,7 +3059,7 @@ struct CoreDashboard: Sendable {
         var row = 2
 
         // Generation metadata block
-        let profile = config.jamfCli?.resolvedProfile
+        let profile = provenance?.profile ?? config.jamfCli?.resolvedProfile
         let cliVersion = provenance?.jamfCLIVersion ?? "unknown"
         let metadataRows: [(String, String)] = [
             ("Generated", ts),

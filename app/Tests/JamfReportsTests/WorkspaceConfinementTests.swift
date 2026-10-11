@@ -257,3 +257,54 @@ final class WorkspaceConfinementTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: typed.path))
     }
 }
+
+// MARK: - Profile name in config.yaml
+
+final class ProfileMismatchDoctorTests: XCTestCase {
+
+    private func config(_ profile: String?) throws -> ReportConfig {
+        try ConfigLoader.loadFromString(profile.map { "jamf_cli:\n  profile: \($0)\n" } ?? "")
+    }
+
+    func testADifferentProfileIsAFailRowNamingBothAndTheFix() throws {
+        let rows = ConfigDoctorService.profileMismatchRows(
+            profile: "newname", config: try config("oldname"))
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.severity, .fail)
+        XCTAssertEqual(rows.first?.id, "config.profile_mismatch")
+        let text = (rows.first?.detail ?? "") + (rows.first?.hint ?? "")
+        XCTAssertTrue(text.contains("oldname") && text.contains("newname"), text)
+        XCTAssertTrue(rows.first?.hint?.contains("jamf_cli: profile line") == true)
+    }
+
+    func testBlankAndEqualProfilesAreFine() throws {
+        XCTAssertEqual(ConfigDoctorService.profileMismatchRows(
+            profile: "same", config: try config(nil)), [])
+        XCTAssertEqual(ConfigDoctorService.profileMismatchRows(
+            profile: "same", config: try config("same")), [])
+    }
+
+    func testACaseVariantIsSaidToDifferOnlyInCase() throws {
+        let rows = ConfigDoctorService.profileMismatchRows(
+            profile: "prod", config: try config("Prod"))
+        XCTAssertTrue(rows.first?.detail.contains("differ only in case") == true)
+    }
+
+    func testRunIncludesTheRowForAWorkspaceWhoseConfigNamesAnotherProfile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-mismatch-\(UUID().uuidString.prefix(8))",
+                                    isDirectory: true)
+        let workspace = root.appendingPathComponent("copied", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        try "jamf_cli:\n  profile: original\n".write(
+            to: workspace.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+
+        let report = ConfigDoctorService.run(profile: "copied", workspaceRoot: root)
+
+        XCTAssertTrue(report.rows.contains {
+            $0.id == "config.profile_mismatch" && $0.severity == .fail
+        })
+    }
+}

@@ -194,7 +194,7 @@ struct CSVDashboard: Sendable {
         }
 
         // Load prior snapshot for Fleet Drift if historical_csv_dir is configured.
-        if let historicalDir = Self.priorSnapshotDir(config: config), let csvURL = currentCSVURL {
+        if let historicalDir = Self.priorSnapshotDir(config: config, profile: profile), let csvURL = currentCSVURL {
             self.priorSnapshot = PriorCSVLoader.load(historicalDir: historicalDir, currentCSVURL: csvURL)
         } else {
             self.priorSnapshot = nil
@@ -205,10 +205,11 @@ struct CSVDashboard: Sendable {
     /// (`WorkspacePaths.historicalDir`), so a relative value is the workspace's, and an absolute
     /// one needs the opt-in, passes the deny-list and follows the shared-config pin. Nil when
     /// `charts.historical_csv_dir` is blank, there is no profile, or the folder is refused.
-    static func priorSnapshotDir(config: ReportConfig) -> URL? {
+    /// `profile` is the run's, never config.yaml's, which a peer on a shared workspace can edit.
+    static func priorSnapshotDir(config: ReportConfig, profile: String?) -> URL? {
         guard let typed = config.charts?.historicalCsvDir,
               !typed.trimmingCharacters(in: .whitespaces).isEmpty,
-              let profile = config.jamfCli?.resolvedProfile, !profile.isEmpty else { return nil }
+              let profile, !profile.isEmpty else { return nil }
         do {
             return try WorkspacePaths.historicalDir(for: profile)
         } catch {

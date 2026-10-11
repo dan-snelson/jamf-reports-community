@@ -3,8 +3,8 @@ import XCTest
 @testable import JamfReports
 
 /// The exit-code constants the auth guard and its callers branch on, and the apikey bypass
-/// (`CLIBridge.shouldSkipAuthProbe`). The guard itself calls `pro auth token`, which needs a real
-/// jamf-cli and takes no injected binary, so no test runs it.
+/// (`CLIBridge.shouldSkipAuthProbe`). The guard calls `pro auth token`; the timeout test injects a
+/// sleeping stub, and no test runs a real jamf-cli.
 @MainActor
 final class CLIBridgeAuthGuardTests: XCTestCase {
 
@@ -46,4 +46,35 @@ final class CLIBridgeAuthGuardTests: XCTestCase {
         XCTAssertFalse(CLIBridge.shouldSkipAuthProbe(for: ""))
         XCTAssertFalse(CLIBridge.shouldSkipAuthProbe(for: "APIKEY")) // case-sensitive
     }
+
+    // MARK: - Probe timeout
+
+    /// A probe that gets no answer is not a rejection: one warn line, no re-authenticate error,
+    /// and the guard lets the command run.
+    func test_authGuard_probeTimeoutWarnsOnceAndProceeds() async throws {
+        let dir = try SleepingCLIStub.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let stub = try SleepingCLIStub.make(in: dir)
+        let collector = GuardLineCollector()
+        let started = Date()
+
+        let proceed = await CLIBridge().authGuard(
+            profile: "timeout-probe", probeTimeout: 0.5, _testExecutable: stub
+        ) { collector.append($0) }
+
+        XCTAssertTrue(proceed, "a probe that timed out must not block the command")
+        let texts = collector.texts()
+        XCTAssertEqual(texts.filter { $0.hasPrefix("[warn] auth check timed out") }.count, 1,
+                       "expected exactly one timeout warn line; got: \(texts)")
+        XCTAssertFalse(texts.contains { $0.contains("[error]") || $0.contains("re-authenticate") },
+                       "a timeout must not read as rejected credentials; got: \(texts)")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 20)
+    }
+}
+
+private final class GuardLineCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    func append(_ line: CLIBridge.LogLine) { lock.lock(); lines.append(line.text); lock.unlock() }
+    func texts() -> [String] { lock.lock(); defer { lock.unlock() }; return lines }
 }

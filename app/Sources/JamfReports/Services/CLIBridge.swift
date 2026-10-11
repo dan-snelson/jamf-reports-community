@@ -884,6 +884,9 @@ final class CLIBridge {
     /// Returned by `runAndCapture(timeout:)` when it stopped the child. jamf-cli never exits
     /// with it; a signal-terminated child would otherwise read as exit 15.
     nonisolated static let exitCodeTimedOut: Int32 = -2
+    /// Limit on the `pro auth token` probe. jamf-cli leaves body transfer unbounded, so a
+    /// server that stalls mid-response would otherwise hold the tick lock until its give-up.
+    nonisolated static let tokenProbeTimeout: TimeInterval = 60
     /// Seconds a child gets to act on the timeout's SIGTERM before `runAndCapture` sends SIGKILL.
     nonisolated static let timeoutKillGrace: TimeInterval = 3
     /// Seconds `runAndCapture` waits for pipe EOF after the child exits normally, before it
@@ -994,8 +997,15 @@ final class CLIBridge {
     /// Returns `true` when it's safe to proceed. On failure, emits a `[error]` log
     /// line with a remediation hint and returns `false` — callers must return
     /// a non-zero exit code immediately without running any further API calls.
+    ///
+    /// A probe that gets no answer within `probeTimeout` is neither a rejection nor a pass:
+    /// the guard logs one `[warn]` and lets the command run, as `collect` does for
+    /// `AuthProbeResult.unconfirmed`. The command's own 401 then reports dead credentials.
+    /// `_testExecutable` is a test seam; production resolves jamf-cli.
     nonisolated func authGuard(
         profile: String,
+        probeTimeout: TimeInterval = CLIBridge.tokenProbeTimeout,
+        _testExecutable: URL? = nil,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> Bool {
         AppLogger.auth.debug("auth probe profile=\(profile, privacy: .public)")
@@ -1003,7 +1013,21 @@ final class CLIBridge {
             .first(where: { $0.name == profile })?
             .authMethod ?? ""
         guard !CLIBridge.shouldSkipAuthProbe(for: authMethod) else { return true }
-        let status = await tokenStatus(for: profile)
+        let probe = await probeToken(
+            for: profile, executable: _testExecutable, timeout: probeTimeout
+        )
+        let status: TokenStatus?
+        switch probe {
+        case .timedOut:
+            let msg = "[warn] auth check timed out after \(Int(probeTimeout.rounded(.up))) s for "
+                + "profile '\(profile)'; could not confirm the credentials. Continuing; the "
+                + "command reports a rejected credential itself."
+            AppLogger.auth.warning("\(msg, privacy: .public)")
+            onLine(.init(timestamp: Date(), level: .warn, text: msg))
+            return true
+        case .status(let result):
+            status = result
+        }
         if let status, status.isValid, !status.isExpired { return true }
         if ExecutableLocator.locate("jamf-cli") == nil {
             onLine(.init(
@@ -1051,6 +1075,12 @@ final class CLIBridge {
         )
     }
 
+    /// What `probeToken` found: the token status, or no answer within the time limit.
+    enum TokenProbe: Sendable {
+        case status(TokenStatus?)
+        case timedOut
+    }
+
     /// Fetch the token status for `profile` using `jamf-cli pro auth token --output json`.
     ///
     /// Returns a `TokenStatus` with `isValid: false` (never throws) when:
@@ -1058,10 +1088,24 @@ final class CLIBridge {
     /// - the profile slug is invalid
     /// - jamf-cli exits non-zero (unauthenticated, old version, unknown command)
     /// - JSON is missing or malformed
+    /// - the probe did not answer within `tokenProbeTimeout`
     nonisolated func tokenStatus(for profile: String) async -> TokenStatus? {
+        switch await probeToken(for: profile, executable: nil, timeout: Self.tokenProbeTimeout) {
+        case .status(let status): return status
+        case .timedOut: return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)
+        }
+    }
+
+    /// The probe behind `tokenStatus` and `authGuard`; the guard needs a timeout told apart
+    /// from a rejection. `executable` overrides the jamf-cli lookup (tests).
+    nonisolated func probeToken(
+        for profile: String,
+        executable: URL?,
+        timeout: TimeInterval
+    ) async -> TokenProbe {
         guard ProfileService.isValid(profile),
-              let bin = ExecutableLocator.locate("jamf-cli") else {
-            return nil
+              let bin = executable ?? ExecutableLocator.locate("jamf-cli") else {
+            return .status(nil)
         }
         // Subcommand: jamf-cli -p <profile> pro auth token --output json --no-input
         // Available since jamf-cli v1.9; older versions exit non-zero with "unknown command".
@@ -1072,7 +1116,8 @@ final class CLIBridge {
             (exitCode, data) = try await runAndCapture(
                 executable: bin,
                 arguments: args,
-                environment: Self.environmentForJamfCLI()
+                environment: Self.environmentForJamfCLI(),
+                timeout: timeout
             ) { _ in }
         } catch {
             // tokenStatus is the auth prober — codesign rejection or launch failure
@@ -1080,12 +1125,13 @@ final class CLIBridge {
             AppLogger.auth.warning(
                 "tokenStatus: runAndCapture threw for \(profile, privacy: .public): \(error.localizedDescription, privacy: .private)"
             )
-            return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)
+            return .status(TokenStatus.make(profile: profile, token: nil, expiresAt: nil))
         }
+        if exitCode == Self.exitCodeTimedOut { return .timedOut }
         guard exitCode == 0, !data.isEmpty else {
-            return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)
+            return .status(TokenStatus.make(profile: profile, token: nil, expiresAt: nil))
         }
-        return parseTokenStatus(profile: profile, data: data)
+        return .status(parseTokenStatus(profile: profile, data: data))
     }
 
     nonisolated func parseTokenStatus(profile: String, data: Data) -> TokenStatus {

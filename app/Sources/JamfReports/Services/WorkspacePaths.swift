@@ -430,7 +430,7 @@ enum WorkspacePaths {
 
         let text: String
         do {
-            text = try String(contentsOf: configURL, encoding: .utf8)
+            text = try ConfigLoader.readText(at: configURL)
         } catch {
             throw PathError.configReadError(configURL, error)
         }

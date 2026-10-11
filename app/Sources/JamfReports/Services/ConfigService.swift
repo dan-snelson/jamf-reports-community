@@ -276,7 +276,7 @@ struct ConfigFileStamp: Equatable, Sendable {
     func matches(_ url: URL) -> Bool {
         let now = Self.of(url)
         if now.modified == modified && now.size == size { return true }
-        guard let digest, let text = try? String(contentsOf: url, encoding: .utf8) else {
+        guard let digest, let text = try? ConfigLoader.readText(at: url) else {
             return false
         }
         return Self.digest(text) == digest
@@ -337,7 +337,7 @@ enum ConfigService {
 
         // Date and size are taken before the read, so a change made during it shows as one.
         var stamp = ConfigFileStamp.of(url)
-        let text = try String(contentsOf: url, encoding: .utf8)
+        let text = try ConfigLoader.readText(at: url)
         stamp.digest = ConfigFileStamp.digest(text)
         let document = try YAMLCodec.decode(text)
         if !document.repairedKeys.isEmpty {
@@ -368,7 +368,7 @@ enum ConfigService {
 
         var document: YAMLCodec.YAMLDocument
         if manager.fileExists(atPath: url.path) {
-            document = try YAMLCodec.decode(String(contentsOf: url, encoding: .utf8))
+            document = try YAMLCodec.decode(ConfigLoader.readText(at: url))
             try rejectCredentialKeys(in: document.root)
         } else if let existingDocument {
             document = existingDocument
@@ -413,7 +413,7 @@ enum ConfigService {
         var stamp = ConfigFileStamp.of(url)
         var document = YAMLCodec.emptyDocument()
         if FileManager.default.fileExists(atPath: url.path) {
-            let text = try String(contentsOf: url, encoding: .utf8)
+            let text = try ConfigLoader.readText(at: url)
             stamp.digest = ConfigFileStamp.digest(text)
             document = try YAMLCodec.decode(text)
             try rejectCredentialKeys(in: document.root)
@@ -549,11 +549,11 @@ enum ConfigService {
         guard manager.fileExists(atPath: url.path) else { return nil }
         let directory = url.deletingLastPathComponent()
         let prefix = url.lastPathComponent + ".bak-"
-        let text = scrubbedForBackup(try Data(contentsOf: url))
+        let text = scrubbedForBackup(try ConfigLoader.readData(at: url))
         let copies = try backupNames(in: directory, prefix: prefix)
         var backup: URL
         if let same = copies.sorted().last(where: {
-            (try? Data(contentsOf: directory.appendingPathComponent($0))) == text
+            (try? ConfigLoader.readData(at: directory.appendingPathComponent($0))) == text
         }) {
             backup = directory.appendingPathComponent(same)
         } else {
@@ -638,7 +638,7 @@ enum ConfigService {
 
     /// Whether the copy at `backup` had its webhook URL taken out (`scrubbedForBackup`).
     static func backupOmitsWebhook(_ backup: URL) -> Bool {
-        ((try? String(contentsOf: backup, encoding: .utf8)) ?? "")
+        ((try? ConfigLoader.readText(at: backup)) ?? "")
             .contains("# notify.url removed from this copy")
     }
 

@@ -613,7 +613,7 @@ enum ConfigDoctorService {
     /// missing or is not YAML.
     static func unknownKeyRows(profile: String, workspaceRoot: URL? = nil) -> [DoctorRow] {
         guard let url = try? ConfigService.configURL(for: profile, workspaceRoot: workspaceRoot),
-              let text = try? String(contentsOf: url, encoding: .utf8),
+              let text = try? ConfigLoader.readText(at: url),
               let root = try? ConfigLoader.rawMapping(fromYAML: text)
         else { return [] }
         return unknownKeyRows(ConfigSchema.unknownKeys(in: root))
@@ -666,7 +666,7 @@ enum ConfigDoctorService {
     /// does not. Nothing for a file that is missing or is not YAML.
     static func readerRows(profile: String, workspaceRoot: URL? = nil) -> [DoctorRow] {
         guard let url = try? ConfigService.configURL(for: profile, workspaceRoot: workspaceRoot),
-              let text = try? String(contentsOf: url, encoding: .utf8),
+              let text = try? ConfigLoader.readText(at: url),
               let document = try? YAMLCodec.decode(text),
               let root = try? ConfigLoader.rawMapping(fromYAML: text)
         else { return [] }

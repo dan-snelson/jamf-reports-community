@@ -60,8 +60,8 @@ enum SecurityPolicyConfigLoader {
     /// the policy the decoder produced, so the two cannot disagree.
     static func issues(profile: String) -> [SecurityPolicyIssue] {
         guard let workspace = ProfileService.workspaceURL(for: profile),
-              let text = try? String(
-                  contentsOf: workspace.appendingPathComponent("config.yaml"), encoding: .utf8),
+              let text = try? ConfigLoader.readText(
+                  at: workspace.appendingPathComponent("config.yaml")),
               let root = (try? YAMLCodec.decode(text))?.root.mapping,
               let block = settings(root).first(where: { $0.key == blockPath })?.node
         else { return [] }

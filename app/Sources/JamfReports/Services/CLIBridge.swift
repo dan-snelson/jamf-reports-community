@@ -2204,7 +2204,7 @@ final class CLIBridge {
         onLine: @Sendable @escaping (LogLine) -> Void
     ) throws {
         do {
-            let document = try YAMLCodec.decode(String(contentsOf: config, encoding: .utf8))
+            let document = try YAMLCodec.decode(ConfigLoader.readText(at: config))
             guard case .mapping(let root) = document.root else { return }
             let current = root.value(for: "jamf_cli")?.mapping?.value(for: "profile")?
                 .stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

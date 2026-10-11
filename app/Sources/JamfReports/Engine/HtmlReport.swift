@@ -54,7 +54,7 @@ struct HtmlReport: Sendable {
     /// reads as the decoder would read it.
     private func htmlConfig() -> HtmlConfig {
         let configURL = dataDir.deletingLastPathComponent().appendingPathComponent("config.yaml")
-        guard let text = try? String(contentsOf: configURL, encoding: .utf8),
+        guard let text = try? ConfigLoader.readText(at: configURL),
               let root = try? ConfigLoader.rawMapping(fromYAML: text)
         else { return HtmlConfig() }
         return HtmlConfig(

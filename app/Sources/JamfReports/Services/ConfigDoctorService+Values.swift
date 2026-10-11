@@ -12,7 +12,7 @@ extension ConfigDoctorService {
         profile: String, config: ReportConfig, workspaceRoot: URL? = nil
     ) -> [DoctorRow] {
         let url = try? ConfigService.configURL(for: profile, workspaceRoot: workspaceRoot)
-        let raw = url.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        let raw = url.flatMap { try? ConfigLoader.readText(at: $0) }
             .flatMap { try? ConfigLoader.rawMapping(fromYAML: $0) } ?? [:]
         return valueRows(config, raw: raw, workspace: url?.deletingLastPathComponent())
     }

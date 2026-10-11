@@ -730,7 +730,7 @@ enum DiagnosticBundleService {
         if isSymlink(configURL) {
             return [.skipped(path: "config.yaml", reason: "symlink — skipped")]
         }
-        guard let data = try? Data(contentsOf: configURL) else {
+        guard let data = try? ConfigLoader.readData(at: configURL) else {
             return [.skipped(path: "config.yaml", reason: "could not read config")]
         }
         var content = String(decoding: data, as: UTF8.self)

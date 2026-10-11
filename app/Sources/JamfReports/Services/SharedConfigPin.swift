@@ -207,7 +207,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     /// `RetentionConfig` and `NotifyConfig` read them. Nil when the file is missing or unreadable.
     static func current(workspace: URL) -> SharedConfigPin? {
         let url = workspace.appendingPathComponent("config.yaml")
-        guard let text = try? String(contentsOf: url, encoding: .utf8),
+        guard let text = try? ConfigLoader.readText(at: url),
               let root = try? ConfigLoader.rawMapping(fromYAML: text) else { return nil }
         func raw(_ section: String, _ key: String) -> Any? {
             ConfigLoader.rawValue(at: [section, key], in: root)
@@ -513,7 +513,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         at url: URL, profile: String? = nil, appSupport: URL = AppSupport.directory()
     ) {
         guard let profile = profile ?? Self.profile(forConfigAt: url),
-              let text = try? String(contentsOf: url, encoding: .utf8) else { return }
+              let text = try? ConfigLoader.readText(at: url) else { return }
         let keys = keysSet(inYAML: text)
         guard !keys.isEmpty else { return }
         confirmBestEffort(profile: profile, keys: keys, appSupport: appSupport)
@@ -620,7 +620,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     /// config.yaml's content digest: a peer's in-place edit that keeps the length and restores
     /// the modification time (possible on SMB) still changes it.
     private static func contentDigest(of url: URL) -> String? {
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        guard let data = try? ConfigLoader.readData(at: url) else { return nil }
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 

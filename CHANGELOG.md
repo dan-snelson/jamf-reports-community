@@ -7,6 +7,15 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-10-13
+
+On a shared team folder, each Mac now keeps the report folders, retention, Protect and webhook
+settings it was set up with until you confirm a change in Config Doctor. Every jamf-cli call has a
+time limit, so a server that stops answering no longer holds scheduled runs for hours, and two
+scheduled runs can no longer start together. Diagnostic bundles move to this Mac's Logs folder,
+HTML reports carry their own content-security policy, and Teams notifications no longer format
+text inside names.
+
 ### Changed
 
 - The integrity note at the foot of an HTML report now says it is a check for damage or a partial
@@ -141,7 +150,8 @@ versions in this repository map to git tags.
   naming the step, instead of blocking collects for hours.
 - Onboarding gives up with a clear message if jamf-cli stops responding, and sends its answers to
   the prompts one at a time.
-- The scheduled overdue digest now goes to each profile's own webhook, so one tenant's channel no longer lists another's schedules.
+- The scheduled overdue digest now goes to each profile's own webhook, so one tenant's channel no
+  longer lists another's schedules.
 - Exporting the inventory CSV from cached data is no longer blocked by an expired or rejected
   token.
 - When a Generate run's refresh fails, the message now says how to generate from the cached
@@ -199,10 +209,6 @@ versions in this repository map to git tags.
 - Check for update no longer blocks the window.
 - A pre-release jamf-cli now counts as older than its release, and the dashboard and the newer
   command-name behaviour treat a release candidate of their minimum version as below it.
-- Release tooling: the notary profile named for the app now also reaches the DMG step (it
-  worked only when the profile was called JamfReports-Notary), every release signature asks
-  for a secure timestamp, and a public release build stops instead of falling back to an
-  ad-hoc signature that would fail at notarization.
 - Scheduled runs no longer move a run log over 5 MB aside at the start of the next run, which
   left that run in Run History with an empty log and a file nothing cleaned up. Run History
   already reads only the end of a long log, and the newest 50 logs are kept. Log files an

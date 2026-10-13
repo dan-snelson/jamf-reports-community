@@ -371,7 +371,7 @@ because a failed listing exits non-zero. A
 is a missing permission). `isCollectDead` asks whether any kind landed, not whether any
 exited 0.
 
-**Collect timeouts (unreleased).** Every jamf-cli call `collect` makes has a limit, so a call
+**Collect timeouts (2.10).** Every jamf-cli call `collect` makes has a limit, so a call
 that accepts a request and never answers cannot hold the tick lock until its 6-hour give-up:
 `ReportEngine.collectKindTimeout` (60 minutes; Pro kinds through `invokeWithRetry`, the
 dashboard, each benchmark title, and the School and Protect loops), `deviceCallTimeout` and
@@ -398,7 +398,7 @@ same-day retry still try it. `runAndCapture` also stops waiting for pipe EOF
 `CLIBridge.eofGraceAfterExit` (3 s) after a normal exit, so a process the child left running
 cannot hold the call; it returns what was read.
 
-**Other jamf-cli calls (unreleased).** Three more calls that can run under the tick lock have
+**Other jamf-cli calls (2.10).** Three more calls that can run under the tick lock have
 limits: the `pro auth token` probe in `CLIBridge.authGuard` (`CLIBridge.tokenProbeTimeout`, 60 s;
 `probeToken` tells a timeout from a rejection, and a timeout logs one `[warn]` and lets the command
 run, as `collect` does for `AuthProbeResult.unconfirmed`, never the re-authenticate error),

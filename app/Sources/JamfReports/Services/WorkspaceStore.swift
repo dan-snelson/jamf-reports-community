@@ -939,8 +939,14 @@ final class WorkspaceStore {
     /// The file's stamp moves with the write only when the merge read the file this screen
     /// loaded (`readStamp`, from `ScaffoldService.mergeIntoConfig`). If it had changed on disk
     /// since, the screen's other values are still the old ones, so the stamp stays and the
-    /// next Save refuses (`changedOnDisk`) until the screen reloads.
-    func adoptScaffoldedColumns(from saved: ConfigState, readStamp: ConfigFileStamp) {
+    /// next Save refuses (`changedOnDisk`) until the screen reloads. The document and stamp it
+    /// then adopts are the merge's own (`savedDocument`, `savedStamp`), not a fresh read: a file
+    /// edited after the merge's save keeps a stamp that no longer matches, so the next Save
+    /// refuses instead of taking that edit as the screen's own.
+    func adoptScaffoldedColumns(
+        from saved: ConfigState, readStamp: ConfigFileStamp,
+        savedDocument: YAMLCodec.YAMLDocument, savedStamp: ConfigFileStamp
+    ) {
         guard !demoMode else { return }
         configState.columns = saved.columns
         configState.mobileColumns = saved.mobileColumns
@@ -950,10 +956,9 @@ final class WorkspaceStore {
         _savedState?.mobileColumns = saved.mobileColumns
         _savedState?.failuresCountColumn = saved.failuresCountColumn
         _savedState?.failuresListColumn = saved.failuresListColumn
-        if _loadedStamp?.isSameFile(as: readStamp) == true,
-           let reloaded = try? ConfigService.load(profile: profile) {
-            _loadedDoc = reloaded.document
-            _loadedStamp = reloaded.stamp
+        if _loadedStamp?.isSameFile(as: readStamp) == true {
+            _loadedDoc = savedDocument
+            _loadedStamp = savedStamp
         }
         rebuildColumnMappings()
     }

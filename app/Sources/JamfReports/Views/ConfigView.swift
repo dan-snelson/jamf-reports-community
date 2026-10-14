@@ -812,7 +812,9 @@ private struct ColumnsTab: View {
                 // reloadFromDisk() leaves the loaded config alone, so without this the
                 // Columns tab showed the old mappings and Save wrote them back.
                 if workspace.profile == profile {
-                    workspace.adoptScaffoldedColumns(from: merged, readStamp: outcome.readStamp)
+                    workspace.adoptScaffoldedColumns(
+                        from: merged, readStamp: outcome.readStamp,
+                        savedDocument: outcome.savedDocument, savedStamp: outcome.savedStamp)
                 }
             } catch {
                 await MainActor.run {

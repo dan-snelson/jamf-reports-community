@@ -297,6 +297,12 @@ text inside names.
   Contact and the kind of gap, and the security controls block lists the Macs behind the P0 count
   (and says how many of those gaps the device rows name). The Security Posture screen's Action
   Items card has an Open Devices button that opens Devices on the security-gap filter. (#276)
+- The overdue-schedule notification is no longer posted twice when the app and the background
+  item find a schedule overdue at the same moment. Whichever starts first claims the send, the
+  other waits for the next pass, and a failed send still retries.
+- A diagnostic bundle's config.yaml no longer carries free text. The IDs and linked findings of
+  exceptions are replaced like their descriptions and sign-offs already were, every copy of a
+  repeated `exceptions:` key is covered, and the `#` comments are left out of the staged copy.
 
 ### Security
 

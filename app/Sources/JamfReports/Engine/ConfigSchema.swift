@@ -49,6 +49,7 @@ enum ConfigSchema {
         "ai.external": "2.9",
         "ai.lock_on_device": "2.7.0",
         "branding.accent_dark": "2.9",
+        "charts.compliance_trend.bands": "2.10",
         "charts.os_adoption.enabled": "2.9",
         "collect_cadence": "2.3.0",
         "columns.warranty_expires": "2.6.1",
@@ -227,9 +228,7 @@ enum ConfigSchema {
         "output": Node(OutputConfig.CodingKeys.self, also: ["allow_absolute_paths"]),
         "charts": Node(ChartsConfig.CodingKeys.self, [
             "os_adoption": Node(OSAdoptionConfig.CodingKeys.self),
-            "compliance_trend": Node(ComplianceTrendConfig.CodingKeys.self, [
-                "bands": Node(ComplianceBandConfig.CodingKeys.self, list: true),
-            ]),
+            "compliance_trend": Node(ComplianceTrendConfig.CodingKeys.self),
             "device_state_trend": Node(DeviceStateTrendConfig.CodingKeys.self),
         ]),
         "branding": Node(BrandingConfig.CodingKeys.self),

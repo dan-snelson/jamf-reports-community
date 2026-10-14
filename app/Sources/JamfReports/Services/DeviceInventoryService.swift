@@ -1232,11 +1232,36 @@ extension DeviceInventoryService {
 /// ID, UDID, Platform ID, serial) and no identifier they both carry differs. A computer name
 /// never decides that alone, so two Macs that share a name stay two. A serial does not
 /// outrank a differing Jamf ID either: one serial can sit on two records.
+///
+/// An identifier value carried by more than `maxRecordsPerSharedIdentifier` records is a
+/// placeholder (a blank-ish serial such as `0`), not an identity: it stays on the records but
+/// no longer joins rows, which keeps the merge linear. A row left with no other identifier
+/// is placed by its name, like a row that carries none.
 struct DeviceRecordMerger {
+    /// The most records one identifier value may sit on and still join rows.
+    static let maxRecordsPerSharedIdentifier = 50
+
+    /// The records carrying one identifier value. Past the cap it keeps no members: the value
+    /// is shared, and listing thousands of records would cost O(n) per later upsert.
+    private struct Holders {
+        var members: [Int] = []
+        var isShared = false
+
+        mutating func add(_ idx: Int) {
+            guard !isShared, !members.contains(idx) else { return }
+            members.append(idx)
+            if members.count > DeviceRecordMerger.maxRecordsPerSharedIdentifier {
+                members = []
+                isShared = true
+            }
+        }
+    }
+
     private(set) var records: [DeviceInventoryRecord] = []
     /// Rows left out per source file because nothing told which Mac they described.
     private(set) var leftOutRows: [String: Int] = [:]
-    private var identifierIndex: [DeviceIdentifier: [String: [Int]]] = [:]
+    private var identifierIndex: [DeviceIdentifier: [String: Holders]] = [:]
+    /// Records by name, kept to two: callers only ask for none, one or several.
     private var nameIndex: [String: [Int]] = [:]
     private var usedIDs: Set<String> = []
 
@@ -1261,7 +1286,7 @@ struct DeviceRecordMerger {
 
     private func placement(of record: DeviceInventoryRecord) -> Placement {
         let nameKey = DeviceInventoryService.normalizedKey(record.name)
-        let identifiers = record.identifiers
+        let identifiers = record.identifiers.filter { !isShared($0.kind, $0.value) }
         if identifiers.isEmpty { return placementByName(nameKey) }
         let candidates = compatibleRecords(sharing: identifiers, with: record)
         if candidates.isEmpty {
@@ -1304,23 +1329,30 @@ struct DeviceRecordMerger {
     ) -> [Int: Bool] {
         var sharesStrong: [Int: Bool] = [:]
         for (kind, value) in identifiers {
-            for idx in identifierIndex[kind]?[value] ?? [] {
+            for idx in identifierIndex[kind]?[value]?.members ?? [] {
                 sharesStrong[idx] = (sharesStrong[idx] ?? false) || kind.isStrong
             }
         }
         return sharesStrong.filter { !records[$0.key].disagrees(with: record) }
     }
 
+    private func isShared(_ kind: DeviceIdentifier, _ value: String) -> Bool {
+        identifierIndex[kind]?[value]?.isShared ?? false
+    }
+
     /// Adds record `idx` to the identifier and name indexes. A merge only fills a blank, never
     /// changes a value, so nothing needs removing: O(1) per upsert.
     private mutating func index(_ idx: Int) {
-        for (kind, value) in records[idx].identifiers
-        where !identifierIndex[kind, default: [:]][value, default: []].contains(idx) {
-            identifierIndex[kind, default: [:]][value, default: []].append(idx)
+        for (kind, value) in records[idx].identifiers {
+            identifierIndex[kind, default: [:]][value, default: Holders()].add(idx)
         }
         let nameKey = DeviceInventoryService.normalizedKey(records[idx].name)
-        if !nameKey.isEmpty, !nameIndex[nameKey, default: []].contains(idx) {
-            nameIndex[nameKey, default: []].append(idx)
+        if !nameKey.isEmpty {
+            var holders = nameIndex[nameKey] ?? []
+            if holders.count < 2, !holders.contains(idx) {
+                holders.append(idx)
+                nameIndex[nameKey] = holders
+            }
         }
     }
 

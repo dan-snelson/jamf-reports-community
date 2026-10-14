@@ -160,8 +160,7 @@ extension ConfigDoctorService {
         return rows
     }
 
-    /// Mirrors what each reader accepts: `BrandingConfig.sanitizedAccentColor` for both reports,
-    /// and the chart reader's six digits with or without the `#`.
+    /// Mirrors what the reader accepts: `BrandingConfig.sanitizedAccentColor` for both reports.
     private static func colourValueRows(_ config: ReportConfig) -> [DoctorRow] {
         var rows: [DoctorRow] = []
         if let typed = config.branding?.resolvedAccentColor, !typed.isEmpty,
@@ -170,15 +169,6 @@ extension ConfigDoctorService {
                 "branding.accent_color",
                 "\(shown(typed)) is not a hex colour such as #2D5EA2. The workbook and the "
                     + "HTML report use #2D5EA2 instead.",
-                "Write it as #RRGGBB."))
-        }
-        for (index, band) in (config.charts?.complianceTrend?.bands ?? []).enumerated() {
-            let digits = band.color.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-            if digits.count == 6, UInt32(digits, radix: 16) != nil { continue }
-            rows.append(valueRow(
-                "charts.compliance_trend.bands[\(index)].color",
-                "\(shown(band.color)) is not a hex colour such as #4472C4. The chart uses its "
-                    + "default palette colour for this band.",
                 "Write it as #RRGGBB."))
         }
         return rows

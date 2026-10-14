@@ -818,27 +818,12 @@ struct OSAdoptionConfig: Decodable, Sendable {
 
 struct ComplianceTrendConfig: Decodable, Sendable {
     var enabled: Bool?
-    var bands: [ComplianceBandConfig]?
 
     /// Absent means on, as `config.example.yaml` documents; `false` turns the chart off.
     var isEnabled: Bool { enabled ?? true }
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case enabled, bands
-    }
-}
-
-struct ComplianceBandConfig: Decodable, Sendable {
-    let label: String
-    let minFailures: Int
-    let maxFailures: Int
-    let color: String
-
-    enum CodingKeys: String, CodingKey, CaseIterable {
-        case label
-        case minFailures = "min_failures"
-        case maxFailures = "max_failures"
-        case color
+        case enabled
     }
 }
 
@@ -1419,8 +1404,8 @@ enum ConfigLoader {
         }
 
         /// The YAML key path + problem, when the underlying error is a
-        /// `DecodingError` — e.g. `charts.compliance_trend.bands[0]: missing
-        /// 'label'`. Nil for non-decoding failures.
+        /// `DecodingError` — e.g. `compliance.baselines[0]: missing
+        /// 'name'`. Nil for non-decoding failures.
         var keyPathDetail: String? {
             guard case .decodeError(_, let underlying) = self else { return nil }
             return ConfigLoader.describeDecodingFailure(underlying)

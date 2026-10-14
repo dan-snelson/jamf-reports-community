@@ -41,7 +41,7 @@ final class OnboardingStartOverTests: XCTestCase {
     }
 
     private func makeFlow(
-        existing: Set<String> = [],
+        existing: Set<String>? = [],
         removed: Removed = Removed(),
         failing: Set<String> = []
     ) throws -> OnboardingFlow {
@@ -97,6 +97,25 @@ final class OnboardingStartOverTests: XCTestCase {
         flow.noteCreatedProfile("other")
         flow.noteCreatedProfile("other")
         XCTAssertEqual(flow.createdProfiles, ["other"])
+    }
+
+    func testAListingThatCannotBeReadMakesNoProfileNew() async throws {
+        let flow = try makeFlow(existing: nil)
+        let isNew = await flow.isNewProfile("acme")
+        XCTAssertFalse(isNew)
+    }
+
+    func testStartOverRemovesNothingWhenTheListingFailedBeforeTheProfileWasAdded() async throws {
+        let removed = Removed()
+        let flow = try makeFlow(existing: nil, removed: removed)
+        // What the register step does: record the name only when the profile was new.
+        if await flow.isNewProfile("acme") { flow.noteCreatedProfile("acme") }
+
+        XCTAssertFalse(flow.startOverRemovesSomething)
+        let problems = await flow.startOver()
+
+        XCTAssertEqual(problems, [])
+        XCTAssertEqual(removed.all, [])
     }
 
     // MARK: - Start over

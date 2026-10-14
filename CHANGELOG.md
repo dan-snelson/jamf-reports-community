@@ -102,7 +102,8 @@ text inside names.
 - First-launch setup has a way back. **Start over** returns to the welcome screen, so you no
   longer quit and reopen the app to try another connection. It asks before removing what setup
   created so far (the new workspace folder goes to the Trash, the new jamf-cli profile is removed)
-  and never touches a folder or profile that was already there. The Authenticate step no longer
+  and never touches a folder or profile that was already there, or one it could not confirm was
+  new because jamf-cli's profile list could not be read. The Authenticate step no longer
   repeats the connection-type choice on this path, and several setup screens are worded more
   plainly (the Jamf Account heading, the jamf-cli installer package, the Jamf School step).
 - The HTML report's "Macs to follow up" table lists the Macs with a reason first (no Jamf binary,

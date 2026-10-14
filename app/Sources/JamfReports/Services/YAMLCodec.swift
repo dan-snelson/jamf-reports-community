@@ -241,6 +241,27 @@ enum YAMLCodec {
         return blocks
     }
 
+    /// Every top-level copy of `key` in `lines`, as the lines it spans (counted from 0, end
+    /// exclusive), the same span `encode` replaces for the last copy.
+    static func topLevelBlockRanges(of key: String, in lines: [String]) -> [Range<Int>] {
+        lines.indices.compactMap { index in
+            guard topLevelKey(in: lines[index]) == key else { return nil }
+            return index..<endOfTopLevelBlock(in: lines, startingAt: index)
+        }
+    }
+
+    /// `text` without its `#` comments: a line that is only a comment is dropped, a trailing
+    /// comment is cut with its indentation kept. A `#` inside quotes or not after a space stays.
+    static func removingComments(from text: String) -> String {
+        text.components(separatedBy: "\n").compactMap { line -> String? in
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("#") { return nil }
+            let stripped = stripInlineComment(line)
+            guard stripped != line else { return line }
+            let indent = line.prefix { $0 == " " || $0 == "\t" }
+            return indent + stripped
+        }.joined(separator: "\n")
+    }
+
     private static func topLevelKey(in line: String) -> String? {
         guard !line.isEmpty,
               line.first != " ",

@@ -797,17 +797,17 @@ final class DiagnosticBundleServiceTests: XCTestCase {
             contentsOf: staging.appendingPathComponent("config.yaml"), encoding: .utf8)
     }
 
-    /// `signed_off_by` and `description` are typed by an admin: a person's name and a
-    /// justification, which no pattern can find. Everything else in the entry, and every line
-    /// outside the `exceptions:` block, stays as written.
+    /// `signed_off_by`, `description`, `id` and `linked_finding` are typed by an admin: a
+    /// person's name, a justification and two labels, which no pattern can find. Everything else
+    /// in the entry, and every line outside the `exceptions:` block, stays as written.
     func testStagedConfigReplacesTheFreeTextOfAnException() throws {
         let config = try stagedConfig("""
-        # Harbor tenant
         jamf_cli:
           profile: harbor
         exceptions:
           - id: EX-1
             description: Kiosk app cannot run on Tahoe until the vendor ships 3.2
+            linked_finding: acme-kiosk-waiver
             signed_off_by: Jane Q. Admin
             signed_off_date: 2026-03-01
             expires_date: 2026-12-31
@@ -819,9 +819,13 @@ final class DiagnosticBundleServiceTests: XCTestCase {
 
         XCTAssertFalse(config.contains("Jane Q. Admin"), config)
         XCTAssertFalse(config.contains("Kiosk app"), config)
+        XCTAssertFalse(config.contains("EX-1"), config)
+        XCTAssertFalse(config.contains("acme-kiosk-waiver"), config)
         XCTAssertTrue(config.contains("description: org-"), config)
         XCTAssertTrue(config.contains("signed_off_by: user-"), config)
-        for kept in ["# Harbor tenant", "  profile: harbor", "- id: EX-1",
+        XCTAssertTrue(config.contains("id: org-"), config)
+        XCTAssertTrue(config.contains("linked_finding: org-"), config)
+        for kept in ["  profile: harbor",
                      "signed_off_date: 2026-03-01", "expires_date: 2026-12-31",
                      "control_id: AC-2", "thresholds:", "  stale_device_days: 30"] {
             XCTAssertTrue(config.contains(kept), "\(kept) missing from: \(config)")
@@ -866,12 +870,71 @@ final class DiagnosticBundleServiceTests: XCTestCase {
         for leaked in ["Printer driver", "Sam Roe", "lab Macs", "Pat Doe"] {
             XCTAssertFalse(config.contains(leaked), "\(leaked) leaked into: \(config)")
         }
-        XCTAssertTrue(config.contains("EX-1") && config.contains("EX-2"))
+        XCTAssertFalse(config.contains("EX-1") || config.contains("EX-2"), config)
+    }
+
+    /// Only the last copy of a repeated key is the one the app reads, but the file still holds
+    /// the earlier copy, and it is as free of redaction as the first was.
+    func testEveryCopyOfARepeatedExceptionsKeyIsRedacted() throws {
+        let config = try stagedConfig("""
+        exceptions:
+          - id: EX-OLD
+            description: Old waiver for the Lab 4 iMacs
+            signed_off_by: Pat Doe
+        jamf_cli:
+          profile: harbor
+        exceptions:
+          - id: EX-NEW
+            description: Current waiver
+            signed_off_by: Sam Roe
+        thresholds:
+          stale_device_days: 30
+        """)
+
+        for leaked in ["EX-OLD", "Lab 4", "Pat Doe", "EX-NEW", "Current waiver", "Sam Roe"] {
+            XCTAssertFalse(config.contains(leaked), "\(leaked) leaked into: \(config)")
+        }
+        XCTAssertEqual(config.components(separatedBy: "exceptions:").count - 1, 2, config)
+        for kept in ["  profile: harbor", "thresholds:", "  stale_device_days: 30"] {
+            XCTAssertTrue(config.contains(kept), "\(kept) missing from: \(config)")
+        }
+    }
+
+    /// A comment is free text too, wherever it sits; a `#` inside a value is not a comment.
+    func testStagedConfigHasNoComments() throws {
+        let config = try stagedConfig("""
+        # Harbor tenant, owner Jane Q. Admin
+        jamf_cli:
+          profile: harbor   # prod for the Harbor team
+          # data_dir: /Users/jane/secret
+        html:
+          title: "Fleet report #1"
+        branding:
+          accent: '#2D5EA2'
+        exceptions:
+          # approved by Pat Doe
+          - id: EX-1
+            description: Waiver   # ticket INC-4411
+            signed_off_by: Sam Roe
+            control_id: AC-2
+        thresholds:
+          stale_device_days: 30  # CBP policy
+        """)
+
+        for leaked in ["Harbor tenant", "Jane", "prod for", "secret", "Pat Doe", "INC-4411",
+                       "CBP policy"] {
+            XCTAssertFalse(config.contains(leaked), "\(leaked) leaked into: \(config)")
+        }
+        XCTAssertFalse(config.contains(" # ") || config.contains("\n#"), config)
+        for kept in ["jamf_cli:", "  profile: harbor", "Fleet report #1", "'#2D5EA2'", "control_id: AC-2",
+                     "  stale_device_days: 30"] {
+            XCTAssertTrue(config.contains(kept), "\(kept) missing from: \(config)")
+        }
     }
 
     func testAConfigWithNoExceptionsIsStagedAsBefore() throws {
-        let config = try stagedConfig("# note\nclient_secret: topsecret123\nfoo: bar\n\n\n")
-        XCTAssertEqual(config, "# note\nclient_secret: REDACTED_CLIENT_SECRET\nfoo: bar\n\n\n")
+        let config = try stagedConfig("client_secret: topsecret123\nfoo: bar\n\n\n")
+        XCTAssertEqual(config, "client_secret: REDACTED_CLIENT_SECRET\nfoo: bar\n\n\n")
     }
 
     func testKeepUsernamesKeepsTheSignerButNotTheDescription() throws {

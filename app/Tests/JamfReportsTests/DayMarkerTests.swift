@@ -184,4 +184,84 @@ final class DayMarkerTests: XCTestCase {
             claimFile(workspace), staleAfter: DayMarker.claimStaleAfter))
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path), "nothing created through it")
     }
+
+    private final class Lines: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [String] = []
+        func append(_ line: String) { lock.lock(); items.append(line); lock.unlock() }
+        var all: [String] { lock.lock(); defer { lock.unlock() }; return items }
+    }
+
+    func testASkipForAFreshClaimIsLogged() async throws {
+        let workspace = try makeWorkspace()
+        XCTAssertTrue(try AutomationStateFile.claimExclusively(
+            claimFile(workspace), staleAfter: DayMarker.claimStaleAfter))
+        let lines = Lines()
+        let outcome = await DayMarker(name: "overdue-notify").sendOnce(
+            day: "2026-10-14", in: [workspace], onLine: { lines.append($0) }
+        ) { true }
+        XCTAssertEqual(outcome, .skipped)
+        XCTAssertEqual(lines.all.count, 1)
+        XCTAssertTrue(lines.all.first?.contains("another sender holds a claim") == true)
+    }
+
+    func testAFutureDatedClaimIsTakenOver() async throws {
+        let workspace = try makeWorkspace()
+        XCTAssertTrue(try AutomationStateFile.claimExclusively(
+            claimFile(workspace), staleAfter: DayMarker.claimStaleAfter))
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(86_400)],
+            ofItemAtPath: claimFile(workspace).path)
+        let sends = Counter()
+        let outcome = await DayMarker(name: "overdue-notify").sendOnce(
+            day: "2026-10-14", in: [workspace]) {
+            sends.increment()
+            return true
+        }
+        XCTAssertEqual(outcome, .sent)
+        XCTAssertEqual(sends.count, 1)
+    }
+
+    func testAClaimDatedWithinTheClockSkewToleranceStillHolds() throws {
+        let workspace = try makeWorkspace()
+        XCTAssertTrue(try AutomationStateFile.claimExclusively(
+            claimFile(workspace), staleAfter: DayMarker.claimStaleAfter))
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(60)],
+            ofItemAtPath: claimFile(workspace).path)
+        XCTAssertFalse(try AutomationStateFile.claimExclusively(
+            claimFile(workspace), staleAfter: DayMarker.claimStaleAfter))
+    }
+
+    func testAFolderAtTheClaimNameSendsAnywayWithAWarningAndIsLeftAlone() async throws {
+        let workspace = try makeWorkspace()
+        let inside = claimFile(workspace).appendingPathComponent("keep")
+        try FileManager.default.createDirectory(
+            at: claimFile(workspace), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: inside.path, contents: Data())
+        let marker = DayMarker(name: "overdue-notify")
+        let lines = Lines()
+        let sends = Counter()
+        for _ in 0..<2 {
+            let day = "2026-10-1\(sends.count + 4)"
+            let outcome = await marker.sendOnce(
+                day: day, in: [workspace], onLine: { lines.append($0) }
+            ) {
+                sends.increment()
+                return true
+            }
+            XCTAssertEqual(outcome, .sent)
+        }
+        XCTAssertEqual(sends.count, 2, "a folder at the name must not silence the digest")
+        XCTAssertEqual(lines.all.filter { $0.hasPrefix("[warn]") }.count, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: inside.path), "never entered")
+    }
+
+    func testClaimingOverAFolderThrowsInsteadOfReturningHeld() throws {
+        let workspace = try makeWorkspace()
+        try FileManager.default.createDirectory(
+            at: claimFile(workspace), withIntermediateDirectories: true)
+        XCTAssertThrowsError(try AutomationStateFile.claimExclusively(
+            claimFile(workspace), staleAfter: DayMarker.claimStaleAfter))
+    }
 }

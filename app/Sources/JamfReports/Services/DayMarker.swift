@@ -43,9 +43,12 @@ struct DayMarker: Sendable {
     /// the tick never both post the same digest between one's stamp read and the other's stamp.
     /// The stamp is re-read after the claim (a sender that finished in between has stamped and
     /// released), written only after a confirmed send and before the claim is released, so a
-    /// failed send leaves neither stamp nor claim and the next pass retries.
+    /// failed send leaves neither stamp nor claim and the next pass retries. A skip because
+    /// another sender holds a fresh claim, and a claim that cannot be made, are logged through
+    /// `AppLogger.webhook` and, for a headless caller, `onLine`.
     func sendOnce(
         day: String, in workspaces: [URL], now: Date = Date(),
+        onLine: (@Sendable (String) -> Void)? = nil,
         send: @Sendable () async -> Bool
     ) async -> SendOutcome {
         var claimed: [URL] = []
@@ -54,19 +57,31 @@ struct DayMarker: Sendable {
             let url = claimURL(in: workspace)
             do {
                 guard try AutomationStateFile.claimExclusively(
-                    url, staleAfter: Self.claimStaleAfter, now: now) else { return .skipped }
+                    url, staleAfter: Self.claimStaleAfter, now: now) else {
+                    log("[info] \(name) send skipped: another sender holds a claim younger "
+                        + "than \(Int(Self.claimStaleAfter / 60)) minutes", onLine)
+                    return .skipped
+                }
                 claimed.append(url)
             } catch {
-                // An unwritable folder cannot hold a claim; sending anyway keeps the alert.
-                let reason = error.localizedDescription
-                AppLogger.webhook.warning(
-                    "\(name, privacy: .public) claim failed: \(reason, privacy: .public)")
+                // A name that cannot hold a claim; sending anyway keeps the alert.
+                log("[warn] \(name) claim failed (\(error.localizedDescription)); "
+                    + "sending without it", onLine)
             }
         }
         if workspaces.contains(where: { isStamped(day, in: $0) }) { return .skipped }
         guard await send() else { return .failed }
         workspaces.forEach { stamp(day: day, in: $0) }
         return .sent
+    }
+
+    private func log(_ message: String, _ onLine: (@Sendable (String) -> Void)?) {
+        if message.hasPrefix("[warn]") {
+            AppLogger.webhook.warning("\(message, privacy: .public)")
+        } else {
+            AppLogger.webhook.notice("\(message, privacy: .public)")
+        }
+        onLine?(message)
     }
 
     private func claimURL(in workspace: URL) -> URL {

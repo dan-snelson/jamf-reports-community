@@ -56,6 +56,11 @@ final class OnboardingFlow {
     /// the Jamf Pro path, so nothing existing changes.
     static var pendingProductPath: ProductPath?
 
+    /// The same one-shot handoff for the Jamf Pro connection type: the chooser's "Connect with
+    /// Jamf Account" card sets `.platformGateway` so the Authenticate step opens on it. Nil keeps
+    /// the default, `.oauth2`.
+    static var pendingProConnectionType: ProConnectionType?
+
     // MARK: - Connection types
 
     enum ProConnectionType: String, CaseIterable, Identifiable {
@@ -65,8 +70,8 @@ final class OnboardingFlow {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .oauth2: "Standard (OAuth2)"
-            case .platformGateway: "Platform Gateway"
+            case .oauth2: "Jamf Pro server (OAuth2)"
+            case .platformGateway: "Jamf Account (Platform API, recommended for Jamf Cloud)"
             }
         }
     }
@@ -84,6 +89,15 @@ final class OnboardingFlow {
     /// so the flow only calls it off the main actor, never during a SwiftUI update.
     typealias InstallationProbe = @Sendable () -> JamfCLIInstaller.Installation?
 
+    /// The jamf-cli profile names that exist now. Launches jamf-cli, so it runs off the main actor.
+    typealias ProfileLister = @Sendable () -> Set<String>
+
+    /// Removes one jamf-cli profile: nil when it is gone, else what went wrong.
+    typealias ProfileRemover = @Sendable (String) async -> String?
+
+    /// Moves a profile's workspace folder to the Trash.
+    typealias WorkspaceTrasher = (String) throws -> Void
+
     enum FlowError: LocalizedError {
         case invalidProfile
         case profileCaseConflict(existing: String)
@@ -91,6 +105,7 @@ final class OnboardingFlow {
         case missingJamfCLI
         case missingWorkspace
         case csvOutsideAllowedZones
+        case csvMappingNotOffered
         case processFailed(String)
 
         var errorDescription: String? {
@@ -109,6 +124,8 @@ final class OnboardingFlow {
                 "Create the workspace before running this step."
             case .csvOutsideAllowedZones:
                 "Choose a CSV from ~/Documents, ~/Downloads, or ~/Desktop."
+            case .csvMappingNotOffered:
+                "A Jamf School workspace has no CSV to map: its reports come from jamf-cli."
             case .processFailed(let message):
                 message
             }
@@ -144,6 +161,11 @@ final class OnboardingFlow {
             case .tenant: "Tenant (legacy)"
             }
         }
+
+        /// Shown under the scope picker in onboarding and Update credentials.
+        static let caption = "Environment is the level to use: it reaches Jamf Pro, Blueprints, "
+            + "Compliance Benchmarks and DDM (needs jamf-cli 1.28 or later). Tenant is legacy: "
+            + "direct Jamf Pro endpoints only, with no Compliance Benchmarks or Blueprints."
 
         var idFieldLabel: String {
             switch self {
@@ -185,7 +207,6 @@ final class OnboardingFlow {
 
     // MARK: - Jamf School fields
 
-    var schoolEnabled = false
     var schoolURL = ""
     var schoolNetworkID = ""
     var schoolAPIKey = ""
@@ -215,6 +236,10 @@ final class OnboardingFlow {
     var isRunningFirstReport = false
 
     var lastError: String?
+    /// Workspace folders this run created (by profile name) and jamf-cli profiles it added, so
+    /// Start over removes exactly those: a folder or profile that existed before is never listed.
+    var createdWorkspaces: [String] = []
+    var createdProfiles: [String] = []
     var validationOutput: [CLIBridge.LogLine] = []
     var validationExitCode: Int32?
     /// The gateway's answer about a Platform API profile's scope ID; nil for OAuth2 profiles
@@ -224,7 +249,12 @@ final class OnboardingFlow {
     var firstReportOutput: [CLIBridge.LogLine] = []
 
     private let installer = JamfCLIInstaller()
+    /// Where a validated Platform API profile is recorded under its connection.
+    @ObservationIgnored var connectionStore = ConnectionStore()
     private let installationProbe: InstallationProbe
+    @ObservationIgnored let profileLister: ProfileLister
+    @ObservationIgnored let profileRemover: ProfileRemover
+    @ObservationIgnored let workspaceTrasher: WorkspaceTrasher
 
     // User data zones accepted by policy for the first CSV export.
     private var allowedCSVRoots: [URL] {
@@ -240,12 +270,24 @@ final class OnboardingFlow {
     /// there spins the main run loop into a nested layout that aborts AttributeGraph. The
     /// jamf-cli probe is `refreshJamfCLIStatus()`, which a view starts from `.task`.
     init(
-        installationProbe: @escaping InstallationProbe = { JamfCLIInstaller.currentInstallation() }
+        installationProbe: @escaping InstallationProbe = { JamfCLIInstaller.currentInstallation() },
+        profileLister: @escaping ProfileLister = OnboardingFlow.listJamfCLIProfiles,
+        profileRemover: @escaping ProfileRemover = OnboardingFlow.removeJamfCLIProfile,
+        workspaceTrasher: @escaping WorkspaceTrasher = {
+            try ProfileService.trashLocalWorkspace(profile: $0)
+        }
     ) {
         self.installationProbe = installationProbe
+        self.profileLister = profileLister
+        self.profileRemover = profileRemover
+        self.workspaceTrasher = workspaceTrasher
         if let pending = Self.pendingProductPath {
             productPath = pending
             Self.pendingProductPath = nil
+        }
+        if let pending = Self.pendingProConnectionType {
+            proConnectionType = pending
+            Self.pendingProConnectionType = nil
         }
     }
 
@@ -281,6 +323,15 @@ final class OnboardingFlow {
         }
     }
 
+    /// Only the Jamf Pro path maps a CSV: the scaffold reads Jamf Pro column names, and Jamf School
+    /// reports come from jamf-cli. On the School path the CSV step only writes config.yaml.
+    var offersCSVMapping: Bool { productPath == .pro }
+
+    /// A step's name on this path.
+    func label(for step: Step) -> String {
+        step == .csvMapping && !offersCSVMapping ? "Workspace config" : step.label
+    }
+
     /// 1-based position of `currentStep` within `stepSequence`.
     var stepPosition: Int { (stepSequence.firstIndex(of: currentStep) ?? 0) + 1 }
 
@@ -310,8 +361,8 @@ final class OnboardingFlow {
         case .validate:
             profileRegistered && !isValidatingConnection
         case .addProducts:
-            // Both products are optional — always advanceable.
-            !isConnectingProtect && !isConnectingSchool
+            // Protect is optional — always advanceable.
+            !isConnectingProtect
         case .schoolConnect:
             // A School-only workspace needs a real, successful School
             // connection: only then is `school_cli` written and detection
@@ -424,6 +475,21 @@ final class OnboardingFlow {
 
     func createWorkspace() throws {
         let profile = profileName.trimmed
+        let existed = ProfileService.workspaceURL(for: profile)
+            .map { FileManager.default.fileExists(atPath: $0.path) } ?? true
+        try Self.createWorkspaceFolders(for: profile)
+        if !existed, !createdWorkspaces.contains(profile) { createdWorkspaces.append(profile) }
+        // config.yaml is intentionally not written here. The CSV mapping step
+        // produces it via ScaffoldService.writeConfig; the skip path produces it via
+        // ScaffoldService.writeMinimalConfig. Writing a placeholder here would block
+        // scaffold (which refuses to overwrite an existing file).
+        workspaceCreated = true
+        lastError = nil
+    }
+
+    /// The folders of `profile`'s workspace, private to this user and kept out of Spotlight.
+    /// Add environments creates its workspaces through this too.
+    static func createWorkspaceFolders(for profile: String) throws {
         guard ProfileService.isValid(profile) else { throw FlowError.invalidProfile }
         guard let workspace = ProfileService.workspaceURL(for: profile) else {
             throw FlowError.invalidProfile
@@ -483,13 +549,6 @@ final class OnboardingFlow {
         // C-03 documented an inflection on 2026-05-01 where some writers got
         // the chmod and others didn't).
         WorkspacePermissionHardener.tighten(profile: profile)
-
-        // config.yaml is intentionally not written here. The CSV mapping step
-        // produces it via ScaffoldService.writeConfig; the skip path produces it via
-        // ScaffoldService.writeMinimalConfig. Writing a placeholder here would block
-        // scaffold (which refuses to overwrite an existing file).
-        workspaceCreated = true
-        lastError = nil
     }
 
     func registerJamfCLIProfile() async throws {
@@ -525,6 +584,7 @@ final class OnboardingFlow {
         }
 
         let noVerify = await noVerifyFlag(binary: binary)
+        let isNew = await isNewProfile(profileName.trimmed)
         let result = try await Self.runWithPTY(
             executable: binary,
             arguments: Self.proOAuth2Arguments(
@@ -539,6 +599,7 @@ final class OnboardingFlow {
             throw FlowError.processFailed(message)
         }
 
+        if isNew { noteCreatedProfile(profileName.trimmed) }
         profileRegistered = true
         connectionValidated = false
         validationExitCode = nil
@@ -556,33 +617,22 @@ final class OnboardingFlow {
         isRegisteringProfile = true
         defer { isRegisteringProfile = false }
 
-        var stdinData = Self.platformGatewayStdin(
-            clientID: platformClientID.trimmed, clientSecret: platformClientSecret
-        )
-        defer {
-            stdinData.resetBytes(in: 0..<stdinData.count)
-            clearPlatformSecrets()
-        }
+        defer { clearPlatformSecrets() }
 
         let noVerify = await noVerifyFlag(binary: binary)
-        let result = try await Self.runWithPTY(
-            executable: binary,
-            arguments: Self.platformGatewayArguments(
-                profile: profileName.trimmed,
-                gatewayURL: gatewayURL.trimmed,
-                scope: platformScope,
-                scopeID: platformScopeID.trimmed,
-                noVerify: noVerify
-            ),
-            stdin: stdinData
+        let isNew = await isNewProfile(profileName.trimmed)
+        try await Self.registerPlatformProfile(
+            binary: binary,
+            profile: profileName.trimmed,
+            gatewayURL: gatewayURL.trimmed,
+            scope: platformScope,
+            scopeID: platformScopeID.trimmed,
+            clientID: platformClientID.trimmed,
+            clientSecret: platformClientSecret,
+            noVerify: noVerify
         )
 
-        guard result.exitCode == 0 else {
-            let redacted = platformRedactedOutput(result.combined.trimmed)
-            let message = redacted.isEmpty ? "jamf-cli exited \(result.exitCode)." : redacted
-            throw FlowError.processFailed(message)
-        }
-
+        if isNew { noteCreatedProfile(profileName.trimmed) }
         profileRegistered = true
         connectionValidated = false
         validationExitCode = nil
@@ -591,7 +641,7 @@ final class OnboardingFlow {
         lastError = nil
     }
 
-    // MARK: - Add-products registration (Protect / School)
+    // MARK: - Registration (Protect on the Pro path, School on the School path)
 
     func registerProtectProfile() async {
         protectConnected = false
@@ -633,6 +683,7 @@ final class OnboardingFlow {
             clearProtectSecret()
         }
 
+        let isNew = await isNewProfile(name)
         do {
             let result = try await Self.runWithPTY(
                 executable: binary,
@@ -647,6 +698,7 @@ final class OnboardingFlow {
                 protectConnectionError = msg
                 return
             }
+            if isNew { noteCreatedProfile(name) }
         } catch {
             protectConnectionError = error.localizedDescription
             return
@@ -708,6 +760,7 @@ final class OnboardingFlow {
             clearSchoolAPIKey()
         }
 
+        let isNew = await isNewProfile(name)
         do {
             let result = try await Self.runWithPTY(
                 executable: binary,
@@ -722,6 +775,7 @@ final class OnboardingFlow {
                 schoolConnectionError = msg
                 return
             }
+            if isNew { noteCreatedProfile(name) }
         } catch {
             schoolConnectionError = error.localizedDescription
             return
@@ -740,7 +794,6 @@ final class OnboardingFlow {
         schoolConfigNote = try writeSchoolConfig(
             profileSlug: profileSlug, schoolProfileName: schoolProfileName).statusLine
         schoolConnected = true
-        schoolEnabled = true
     }
 
     /// Connect Jamf School as the workspace's PRIMARY product (School-only path).
@@ -750,8 +803,8 @@ final class OnboardingFlow {
     /// setup uses `profileName` and `writeSchoolConfig` wires
     /// `school_cli.enabled/profile = <profileName>` into that workspace's
     /// config.yaml, which is exactly what `ProfileProductType.detect` reads to
-    /// route the workspace to Jamf School. Reuses the same PTY machinery,
-    /// fields, and redaction as the Add-products Connect School button.
+    /// route the workspace to Jamf School. A Jamf Pro workspace never records a
+    /// School connection: a profile other than its own would route nothing to School.
     func connectSchoolAsPrimary() async {
         schoolProfileName = profileName.trimmed
         await registerSchoolProfile()
@@ -931,13 +984,40 @@ final class OnboardingFlow {
         return await ConnectionCheck.run(profile: profile, specNames: specNames, runner: runner)
     }
 
-    /// A rejected or unconfirmed ID stays unvalidated; an ID the gateway recognised validates even
-    /// when no Jamf Pro answered, which the banner reports as a warning.
+    /// Only an answering Jamf Pro validates. A rejected ID stays unvalidated, an unconfirmed one
+    /// offers Continue without validating, and an environment with no Jamf Pro is probably Jamf
+    /// School: the banner points to a School workspace and offers no way on with this profile.
     func applyConnectionCheck(_ verdict: ConnectionCheck.Verdict) {
         connectionCheck = verdict
         switch verdict {
-        case .accepted, .noJamfPro: connectionValidated = true
-        case .rejectedID, .undecided: connectionValidated = false
+        case .accepted: connectionValidated = true
+        case .rejectedID, .noJamfPro, .undecided: connectionValidated = false
+        }
+        if connectionValidated { recordConnectionMember(for: verdict) }
+    }
+
+    /// Records the validated profile under a Connection on this Mac (`ConnectionStore`). A write
+    /// failure is logged without the scope ID and does not fail setup: the profile works
+    /// without the grouping.
+    private func recordConnectionMember(for verdict: ConnectionCheck.Verdict) {
+        let profile = profileName.trimmed
+        let scopeID = platformScopeID.trimmed
+        guard proConnectionType == .platformGateway,
+              ProfileService.isValid(profile), !scopeID.isEmpty else { return }
+        let product: Connection.Member.Product
+        if case .accepted = verdict { product = .pro } else { product = .unknown }
+        do {
+            try connectionStore.recordMember(
+                profile: profile, scopeID: scopeID, product: product,
+                region: .region(forGatewayURL: gatewayURL.trimmed),
+                level: platformScope == .tenant ? .tenant : .environment)
+        } catch {
+            AppLogger.auth.warning(
+                """
+                OnboardingFlow: could not record the connection: \
+                \(error.localizedDescription, privacy: .private)
+                """
+            )
         }
     }
 
@@ -958,6 +1038,7 @@ final class OnboardingFlow {
         lastError = nil
 
         do {
+            guard offersCSVMapping else { throw FlowError.csvMappingNotOffered }
             let csvURL = try validatedCSVURL(url)
             guard let workspace = workspaceURL else { throw FlowError.missingWorkspace }
             let profile = profileName.trimmed
@@ -1037,8 +1118,10 @@ final class OnboardingFlow {
             SharedConfigPin.confirmWrittenConfig(at: outputConfig, profile: profile)
             csvOutput.append(.init(
                 timestamp: Date(), level: .ok,
-                text: "[ok] minimal config.yaml written — jamf-cli data is enough; add a CSV "
-                    + "later from Data Sources for per-device sheets"
+                text: offersCSVMapping
+                    ? "[ok] minimal config.yaml written — jamf-cli data is enough; add a CSV "
+                        + "later from Data Sources for per-device sheets"
+                    : "[ok] config.yaml written — Jamf School reports come from jamf-cli"
             ))
             csvMappingSkipped = true
         } catch {
@@ -1330,7 +1413,7 @@ final class OnboardingFlow {
         try Self.writeProductBlock("school_cli", profile: schoolProfileName, for: profileSlug)
     }
 
-    private static func writeProductBlock(
+    static func writeProductBlock(
         _ key: String, profile name: String, for profileSlug: String
     ) throws -> ConfigSaveReport {
         try ConfigService.saveBlock(key: key, profile: profileSlug) { root in
@@ -1342,18 +1425,6 @@ final class OnboardingFlow {
     }
 
     // MARK: - Per-product redaction helpers
-
-    private func platformRedactedOutput(_ text: String) -> String {
-        var redacted = text
-        if !platformClientSecret.isEmpty {
-            redacted = redacted.replacingOccurrences(of: platformClientSecret, with: "[redacted]")
-        }
-        let id = platformClientID.trimmed
-        if id.count >= 8 {
-            redacted = redacted.replacingOccurrences(of: id, with: "[redacted]")
-        }
-        return redacted
-    }
 
     private func protectRedactedOutput(_ text: String) -> String {
         var redacted = text

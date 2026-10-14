@@ -45,18 +45,18 @@ CLI step — Next stays disabled until the app detects it on `PATH` — even if 
 connect it to a real Jamf Pro tenant. The Authenticate step accepts a URL plus placeholder
 client ID/secret without contacting the server, and Validate lets you continue even when
 the connection check reports failure, so you can complete onboarding with placeholder Jamf
-Pro credentials and map a CSV at the CSV step. (Installs set up before the Connect Jamf
-School card can still use this same placeholder workaround, then connect Jamf School at
-**Add products**.)
+Pro credentials and map a CSV at the CSV step. (Jamf School is not
+connected from a Jamf Pro workspace: it gets its own workspace.)
 One honest caveat: scheduling and automation always collect via jamf-cli, so a CSV-only
 workspace can't use managed automation, alerts, or the dead-man switch — reports there
 are a manual export-CSV-then-Generate cycle.
 
 ## 3. Create a read-only API role
 
-`jamf-cli pro setup` (used in the next step) can create the API client for you, or you
-can create one yourself in Jamf Pro first (on jamf-cli 1.29 and later, supplying an
-existing client is the default). Either way, use a **read-only** role — this
+A direct Jamf Pro profile (`jamf-cli pro setup`, used in the next step) takes an API client
+you create yourself in Jamf Pro first, which jamf-cli 1.29 and later ask for by default. On
+Jamf Cloud, jamf-cli recommends a Jamf Account integration at the environment level instead
+(`jamf-cli platform setup`). Either way, use a **read-only** role — this
 project only reads data. See [Installation → Jamf Pro API permissions](https://github.com/tonyyo11/jamf-reports-community/wiki/01-Installation)
 for the exact privilege table.
 
@@ -80,15 +80,17 @@ full detail on each:
    the default, not a fixed one: **Settings → Workspace location** can move it to a
    shared team folder so several Macs build one pooled history — see
    [Security & Operational Considerations](https://github.com/tonyyo11/jamf-reports-community/wiki/10-Security-and-Operational-Considerations).
-4. **Authenticate** — connect Jamf Pro with your API client credentials (or a Platform
-   API scope — environment ID, or tenant ID for a legacy integration). The secret is
-   never persisted by the app; `jamf-cli` stores the resulting token in the macOS keychain.
+4. **Authenticate** — connect with a Jamf Account integration (Platform API, recommended
+   for Jamf Cloud; pick a region and enter the environment ID) or with your Jamf Pro API
+   client credentials (OAuth2, for on-prem, GovCloud or any instance). The secret is
+   never persisted by the app; `jamf-cli` keeps the credentials in the macOS keychain and
+   caches tokens on disk.
 5. **Validate** — the app confirms the connection works.
 6. **CSV mapping** — optionally add a Jamf Pro CSV export for the sheets that need
    per-device export columns (Stale Devices, Security Agents, custom Extension
    Attributes). You can **Skip for now** and add one later.
-7. **Add products (optional)** — connect Jamf Protect or Jamf School here if you use
-   them, or skip and add them later from the Data Sources screen.
+7. **Add products (optional)** — connect Jamf Protect here if you use it, or skip and add it
+   later from the Data Sources screen. Jamf School uses its own workspace.
 8. **First report** — for Jamf Pro, the app collects a snapshot (refresh and inventory
    data, not the per-device scans) and then generates a first report, so the dashboards
    have data to show. For Jamf School, this step only generates.

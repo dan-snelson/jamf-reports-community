@@ -53,12 +53,18 @@ extension HtmlReport {
         var totalDevices: Int = 0
         /// Macs in `computers` that are stale under the stale rule.
         var staleMacCount: Int = 0
+        /// Macs in `computers` that are unmanaged and have never checked in (`BinaryMissing`).
+        var binaryMissingCount: Int = 0
         /// Macs in `computers` that MDM reaches while their check-in or inventory lags.
         var contactGapCounts: [ContactGap: Int] = [:]
         /// P0 gaps as the newest daily summary counts them, else from the security snapshot.
         /// One figure for the tile, the attention list and the group headline, so a summary
         /// written by an older build cannot make the top of the report disagree with itself.
         var p0: Int?
+        /// The Macs whose device rows fail FileVault, SIP or Firewall, behind the P0 figure.
+        var p0Gaps = P0Gaps()
+        /// The mobile device snapshot, read only for a report that lists `.mobileFleet`.
+        var mobile: MobileFleetService.Snapshot?
     }
 
     /// Loads what the sections in `sections` and the figures at the top need.
@@ -112,8 +118,9 @@ extension HtmlReport {
         inputs.totalDevices = asInt(secData["total_devices"])
             ?? overviewDeviceCount(inputs.overview)
         inputs.staleMacCount = staleComputers(inputs.computers).count
+        inputs.binaryMissingCount = binaryMissingComputers(inputs.computers).count
         inputs.contactGapCounts = contactGapCounts(inputs.computers)
-        inputs.fleet = securityFleet()
+        (inputs.fleet, inputs.p0Gaps) = securityCounts()
         if !(config.securityAgents ?? []).isEmpty,
            let url = track("Extension attribute results", "ea-results"),
            let data = try? Data(contentsOf: url) {
@@ -126,6 +133,16 @@ extension HtmlReport {
                 label: "Daily summaries", kind: "snapshots/summaries", date: latest.parsedDate))
         }
         if sections.contains(.orgInfo) { inputs.catalogCounts = catalogCounts() }
+        if sections.contains(.mobileFleet) {
+            let mobile = MobileFleetService.load(dataDir: dataDir)
+            inputs.mobile = mobile
+            if mobile.totalDevices > 0 {
+                sources.append(.init(
+                    label: "Mobile devices", kind: MobileFleetService.deviceKind,
+                    date: mobile.sourceDates[MobileFleetService.deviceKind]
+                        ?? mobile.snapshotDate))
+            }
+        }
         inputs.sources = sources
         return inputs
     }

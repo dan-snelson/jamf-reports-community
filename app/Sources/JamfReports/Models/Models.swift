@@ -64,8 +64,22 @@ struct JamfCLIProfile: Identifiable, Sendable {
     let url: String
     let schedules: Int
     let status: Status
+    /// What jamf-cli reports, for display; compare through `auth`.
     var authMethod: String = ""
     var isDefault: Bool = false
+    var product: JamfCLIProduct = .unknown
+    /// For an `auth-method: platform` profile; nil for every other.
+    var platformLevel: PlatformScopeLevel?
+    /// Why the app cannot use this profile (`status == .error`); nil for a usable one.
+    var unusableReason: String?
+
+    /// The typed auth method; nil for an unusable profile or when jamf-cli reported none.
+    var auth: JamfCLIAuthMethod? {
+        unusableReason == nil ? JamfCLIAuthMethod(raw: authMethod) : nil
+    }
+
+    /// An organization-level integration reaches only Jamf Account, so it cannot report.
+    var isOrganizationLevel: Bool { platformLevel == .organization }
 }
 
 // MARK: - Schedules
@@ -615,9 +629,10 @@ struct DeviceInventoryRecord: Identifiable, Sendable, Hashable {
 
     /// Whether the Mac is stale under `rule`: its oldest counted date is more than `rule.days`
     /// old, so a Mac at exactly the threshold is not. A record with none of those dates keeps
-    /// the `stale` flag its sources set.
+    /// the `stale` flag its sources set. A Mac whose Jamf binary is missing is never stale: it
+    /// has its own state (`BinaryMissing`).
     func isStale(_ rule: StaleRule, now: Date = Date()) -> Bool {
-        rule.isStale(staleInputs, now: now)
+        !isBinaryMissing && rule.isStale(staleInputs, now: now)
     }
 
     /// `isStale` on the default basis, the last check-in alone.
@@ -630,9 +645,11 @@ struct DeviceInventoryRecord: Identifiable, Sendable, Hashable {
         rule.age(of: staleInputs, now: now)
     }
 
-    /// The contact gap the Mac shows, if any (`ContactGap.of`).
+    /// The contact gap the Mac shows, if any (`ContactGap.of`). A Mac whose Jamf binary is
+    /// missing shows none: its binary never checked in, which is a different finding.
     func contactGap(rule: StaleRule, gapDays: Int, now: Date = Date()) -> ContactGap? {
-        ContactGap.of(
+        guard !isBinaryMissing else { return nil }
+        return ContactGap.of(
             checkIn: checkInDate, inventory: inventoryDate, contact: contactDate,
             staleDays: rule.days, gapDays: gapDays, now: now)
     }
@@ -681,6 +698,9 @@ struct DeviceInventorySnapshot: Sendable {
     func staleCount(_ rule: StaleRule, now: Date = Date()) -> Int {
         devices.filter { $0.isStale(rule, now: now) }.count
     }
+
+    /// Macs enrolled but without the Jamf binary (`BinaryMissing`), counted apart from stale.
+    var binaryMissingCount: Int { devices.filter(\.isBinaryMissing).count }
 
     /// The Macs MDM reaches whose check-in or inventory has fallen behind, by kind.
     func contactGaps(

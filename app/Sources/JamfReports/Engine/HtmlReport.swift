@@ -44,6 +44,9 @@ struct HtmlReport: Sendable {
     /// Renders every `<details>` open and leaves out the expand and collapse buttons, for
     /// the PDF export, whose renderer runs no script.
     var expandAll: Bool = false
+    /// The PDF's file name when this page is rendered into one; its footer then says how to
+    /// check that file (its manifest and the run log), not the temporary HTML it came from.
+    var pdfFileName: String? = nil
 
     // MARK: - HTML local config
 
@@ -218,7 +221,8 @@ struct HtmlReport: Sendable {
                 + "</p>"
             : ""
         return .shown(HtmlSectionFormatters.block(
-            id: "security-controls", title: "Security controls", body: tiles + note))
+            id: "security-controls", title: "Security controls",
+            body: tiles + note + buildP0GapTable(inputs.p0Gaps, p0: inputs.p0)))
     }
 
     /// The compliance hero and the devices with the most failures. Omitted when the
@@ -803,16 +807,18 @@ struct HtmlReport: Sendable {
         return FileManager.newestSnapshot(among: candidates)
     }
 
-    /// The `security` snapshot's counts under the workspace's policy: the same fleet the
-    /// workbook and summary.json grade by. Nil without a decodable summary section.
-    func securityFleet() -> SecurityFleetCounts? {
+    /// The `security` snapshot's counts under the workspace's policy (the same fleet the
+    /// workbook and summary.json grade by; nil without a decodable summary section) and the
+    /// Macs behind its P0 gaps, from one decode.
+    func securityCounts() -> (fleet: SecurityFleetCounts?, p0Gaps: P0Gaps) {
         guard let data = loadJSONData(kind: "security"),
               let items = try? JSONDecoder().decode([SecurityReportItem].self, from: data)
-        else { return nil }
+        else { return (nil, P0Gaps()) }
         let policy = config.resolvedSecurityPolicy
-        return SecurityFleetCounts.build(
-            items: items, hardware: HardwareEncryption.index(dataDir: dataDir, for: policy),
-            policy: policy)
+        let hardware = HardwareEncryption.index(dataDir: dataDir, for: policy)
+        return (
+            SecurityFleetCounts.build(items: items, hardware: hardware, policy: policy),
+            P0Gaps.build(items: items, hardware: hardware, policy: policy))
     }
 
     func overviewDeviceCount(_ overview: [[String: Any]]) -> Int {

@@ -99,7 +99,7 @@ struct ReportEngine: Sendable {
                 + (config.charts?.isEnabled == true ? [Self.chartsSheetName] : []),
             onLine: onLine)
         let (writtenCore, coreFailures, unimplementedSheets) =
-            registry.writeSelected(template: template, sheets: sheets)
+            registry.writeSelected(template: template, sheets: sheets, onLine: onLine)
         for sheetID in unimplementedSheets {
             let msg = "[warn] template '\(template.identifier)': SheetID '\(sheetID.rawValue)' " +
                       "has no writer in CoreDashboard — skipped (engine follow-up required)"
@@ -531,6 +531,9 @@ struct ReportEngine: Sendable {
     /// measured value replaced by nil), preserving the PR-18 protection against a partial
     /// collect clobbering a good summary.
     static func freshSummaryIsBetter(existing: DailySummary, fresh: DailySummary) -> Bool {
+        // A run that read no Macs (their sources absent or past max_cache_age_hours) must not
+        // replace a day that counted them with a mobile-only point.
+        if fresh.totalDevices == 0, existing.totalDevices > 0 { return false }
         if existing.complianceIsProxy == true && fresh.complianceIsProxy == false { return true }
         let existingHasBands = !(existing.mscpBands?.isEmpty ?? true)
         let freshHasBands = !(fresh.mscpBands?.isEmpty ?? true)
@@ -791,14 +794,22 @@ struct ReportEngine: Sendable {
             totalDevices = rows.reduce(0) { $0 + $1.count }
         }
 
-        guard totalDevices > 0 else { return nil }
-
         // Mobile device count for the "Managed Devices" trend/tile — nil (not
         // 0) when the mobile-devices-list snapshot is absent or undecodable;
         // most tenants that only manage Macs will never populate this.
         var mobileDeviceCount: Int? = nil
         if let mobileData = cachedData(kind: "mobile-devices-list") {
             mobileDeviceCount = MobileFleetService.deviceCount(fromMobileDevicesListData: mobileData)
+        }
+
+        // A fleet with no Macs still gets a point when it manages mobile devices. A Mac
+        // figure computed over 0 Macs would be 0 or NaN, never "unmeasured", so none is taken.
+        guard totalDevices > 0 else {
+            guard let mobile = mobileDeviceCount, mobile > 0 else { return nil }
+            return Self.mobileOnlySummary(
+                date: date, mobileDeviceCount: mobile,
+                collectionSources: liveKinds != nil && !sourceStatus.isEmpty ? sourceStatus : nil,
+                collectedByHost: Self.collectingHostLabel(dataDir: dataDir))
         }
 
         // Stale count from device-compliance under the stale rule (`StaleRule`): the row's
@@ -1013,6 +1024,19 @@ struct ReportEngine: Sendable {
             securityScoreBasis: score.basis,
             securityAgentCoverage: agentCoveragePct.isEmpty ? nil : agentCoveragePct
         )
+    }
+
+    /// The day's summary for a fleet with no Macs and some mobile devices: `totalDevices` is
+    /// 0 and every Mac figure is nil, which every reader treats as unmeasured (never 0%).
+    static func mobileOnlySummary(
+        date: String, mobileDeviceCount: Int,
+        collectionSources: [String: String]?, collectedByHost: String?
+    ) -> DailySummary {
+        DailySummary(
+            date: date, totalDevices: 0, fileVaultPct: nil, compliancePct: nil,
+            staleCount: nil, osCurrentPct: nil, crowdstrikePct: nil, patchPct: nil,
+            source: "jamf-cli", collectionSources: collectionSources,
+            mobileDeviceCount: mobileDeviceCount, collectedByHost: collectedByHost)
     }
 
     /// The score's sources from what the summary writer already read, plus the `computers`
@@ -1604,6 +1628,15 @@ struct ReportEngine: Sendable {
     static let authProbeTimeout: TimeInterval = JamfCLIProbe.defaultTimeout
 
     /// How a failed attempt's exit code reads in a log line.
+    /// Why one title's definitions did not land, for its `[warn]` line: a run that never
+    /// started, an exit code (worded by `exitText`), or exit 0 with nothing on stdout.
+    static func patchDefinitionFailureText(_ result: (Int32, Data)?) -> String {
+        guard let (code, data) = result else { return "failed (jamf-cli did not start)" }
+        if code == CLIBridge.exitCodeTimedOut { return "timed out" }
+        if code == 0 && data.isEmpty { return "failed (no data returned)" }
+        return "failed (\(exitText(code)))"
+    }
+
     static func exitText(_ code: Int32) -> String {
         code == CLIBridge.exitCodeTimedOut
             ? "timed out (jamf-cli did not answer and was stopped)"
@@ -1629,7 +1662,7 @@ struct ReportEngine: Sendable {
     /// profile (`auth-method: oauth2`) these four fail on every run forever —
     /// silently before 2.7.0, and as a permanently red health strip plus an
     /// hourly retry loop after it. The views that render them are already
-    /// gated on `PlatformCapabilityService`; collect now agrees.
+    /// gated on the profile's auth method (`JamfCLIProfile.auth`); collect agrees.
     static let platformOnlyKinds: Set<String> = [
         "compliance-devices",
         "compliance-rules",
@@ -1650,9 +1683,10 @@ struct ReportEngine: Sendable {
     /// for an unknown method. Unknown fails toward collecting: never skip a
     /// kind because we could not ask.
     static func nonPlatformAuthMethod(_ authMethod: String?) -> String? {
-        guard let method = authMethod?.trimmingCharacters(in: .whitespaces).lowercased(),
-              !method.isEmpty, method != "platform" else { return nil }
-        return method
+        guard let method = JamfCLIAuthMethod(raw: authMethod), !method.isPlatform else {
+            return nil
+        }
+        return method.rawValue
     }
 
     /// Every snapshot kind `collect` produces, in the order the engine
@@ -2098,6 +2132,13 @@ struct ReportEngine: Sendable {
 
         // Resolved once per run, not per kind — it spawns `config list`.
         let profileAuth = ProfileAuthMethod.resolve(profile: profile, binary: bin)
+        // One line instead of a failure per kind: no Jamf Pro command can work at this level.
+        if profileAuth?.isOrganizationLevel == true {
+            let refusal = ReportEngineError.organizationLevelProfile(profile)
+            onLine(.init(
+                timestamp: Date(), level: .fail, text: "[error] \(refusal.localizedDescription)"))
+            throw refusal
+        }
         let nonPlatformAuth = Self.nonPlatformAuthMethod(profileAuth?.authMethod)
         let tenantLevel = profileAuth?.isTenantLevel == true
         let collectSkip = Self.collectSkipKinds(loadedConfig?.jamfCli?.collectSkip)
@@ -2468,6 +2509,35 @@ struct ReportEngine: Sendable {
                     "--days", String(max(staleDays, 1))]
         if let category, !category.isEmpty { args += ["--checks", category] }
         return args
+    }
+
+    /// The commands a Jamf School collect runs, in order (`schoolCollect`; Data Sources lists
+    /// them through `CollectSourcesPlan`).
+    static func schoolCommandMatrix(profile: String) -> [(args: [String], kind: String)] {
+        [
+            (["-p", profile, "school", "overview", "--output", "json"], "school-overview"),
+            (["-p", profile, "school", "devices", "list", "--output", "json"], "school-devices"),
+            (["-p", profile, "school", "device-groups", "list", "--output", "json"],
+             "school-device-groups"),
+            (["-p", profile, "school", "users", "list", "--output", "json"], "school-users"),
+            (["-p", profile, "school", "classes", "list", "--output", "json"], "school-classes"),
+            (["-p", profile, "school", "apps", "list", "--output", "json"], "school-apps"),
+            (["-p", profile, "school", "profiles", "list", "--output", "json"], "school-profiles"),
+            (["-p", profile, "school", "locations", "list", "--output", "json"], "school-locations"),
+            (["-p", profile, "school", "ibeacons", "list", "--output", "json"], "school-ibeacons"),
+            (["-p", profile, "school", "dep-devices", "list", "--output", "json"], "school-dep-devices"),
+        ]
+    }
+
+    /// The commands a Jamf Protect collect runs, in order (`protectCollect`).
+    static func protectCommandMatrix(profile: String) -> [(args: [String], kind: String)] {
+        [
+            (["-p", profile, "protect", "overview", "--output", "json"], "protect-overview"),
+            (["-p", profile, "protect", "alerts", "list", "--output", "json"], "protect-alerts"),
+            (["-p", profile, "protect", "computers", "list", "--output", "json"], "protect-computers"),
+            (["-p", profile, "protect", "insights", "list", "--output", "json"], "protect-insights"),
+            (["-p", profile, "protect", "plans", "list", "--output", "json"], "protect-plans"),
+        ]
     }
 
     /// The jamf-cli commands `collect` fetches and the snapshot kind each
@@ -3028,7 +3098,7 @@ struct ReportEngine: Sendable {
             let timedOut = captureResult?.0 == CLIBridge.exitCodeTimedOut
             timeoutStreak = timedOut ? timeoutStreak + 1 : 0
             guard let (exitCode, data) = captureResult, exitCode == 0, !data.isEmpty else {
-                let what = timedOut ? "timed out" : "failed"
+                let what = Self.patchDefinitionFailureText(captureResult.map { ($0.0, $0.1) })
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] patch-definitions: title \(titleId) \(what) — skipping"))
                 if timeoutStreak >= limits.stopAfterTimeouts {
@@ -3289,9 +3359,10 @@ struct ReportEngine: Sendable {
         )
         // The PDF renderer runs no script, so every group is rendered open rather than
         // left for a print handler, and the expand and collapse buttons are left out.
-        let report = htmlReport(
+        var report = htmlReport(
             config: config, dataDir: dataDir, profile: profileName.isEmpty ? nil : profileName,
             template: template, expandAll: true, locateJamfCLI: locateJamfCLI)
+        report.pdfFileName = outputURL.lastPathComponent
         try await report.generate(
             outputURL: tmpHTML,
             profileName: profileName,
@@ -3326,8 +3397,9 @@ struct ReportEngine: Sendable {
     /// - `.compact` — No modifications; minimal page count.
     /// - `.standard` — Adds a `<style>` block with `main > section { page-break-after: auto; }`
     ///   so the browser engine places natural breaks between major sections.
-    /// - `.sectionPerPage` — Adds `page-break-before: always` to each detail group (and the
-    ///   audit appendix), so At a glance and Needs attention share the first page.
+    /// - `.sectionPerPage` — Adds `page-break-before: always` to each detail group except the
+    ///   jamf-cli dashboard note, so At a glance, Needs attention and that note share the
+    ///   first pages.
     ///   This produces one section per page regardless of content height, suitable for formal
     ///   auditor deliverables.
     ///
@@ -3344,7 +3416,9 @@ struct ReportEngine: Sendable {
         case .sectionPerPage:
             let style = """
             <style>
-            main > section.group-section:has(> details.group) { page-break-before: always; }
+            main > section.group-section:has(> details.group:not(.dashboard)) {
+              page-break-before: always;
+            }
             </style>
             """
             return html.replacingOccurrences(of: "</head>", with: "\(style)\n</head>")
@@ -3374,19 +3448,7 @@ struct ReportEngine: Sendable {
         }
         let dataDir = try workspacePaths.dataDir(for: profile)
 
-        let commands: [(args: [String], kind: String)] = [
-            (["-p", profile, "school", "overview", "--output", "json"], "school-overview"),
-            (["-p", profile, "school", "devices", "list", "--output", "json"], "school-devices"),
-            (["-p", profile, "school", "device-groups", "list", "--output", "json"],
-             "school-device-groups"),
-            (["-p", profile, "school", "users", "list", "--output", "json"], "school-users"),
-            (["-p", profile, "school", "classes", "list", "--output", "json"], "school-classes"),
-            (["-p", profile, "school", "apps", "list", "--output", "json"], "school-apps"),
-            (["-p", profile, "school", "profiles", "list", "--output", "json"], "school-profiles"),
-            (["-p", profile, "school", "locations", "list", "--output", "json"], "school-locations"),
-            (["-p", profile, "school", "ibeacons", "list", "--output", "json"], "school-ibeacons"),
-            (["-p", profile, "school", "dep-devices", "list", "--output", "json"], "school-dep-devices"),
-        ]
+        let commands = schoolCommandMatrix(profile: profile)
 
         for line in collectPlanLines(profile: profile, running: commands.map(\.kind)) {
             onLine(.init(timestamp: Date(), level: .info, text: line))
@@ -3472,13 +3534,7 @@ struct ReportEngine: Sendable {
             throw ReportEngineError.invalidProfile(profile)
         }
 
-        let commands: [(args: [String], kind: String)] = [
-            (["-p", profile, "protect", "overview", "--output", "json"], "protect-overview"),
-            (["-p", profile, "protect", "alerts", "list", "--output", "json"], "protect-alerts"),
-            (["-p", profile, "protect", "computers", "list", "--output", "json"], "protect-computers"),
-            (["-p", profile, "protect", "insights", "list", "--output", "json"], "protect-insights"),
-            (["-p", profile, "protect", "plans", "list", "--output", "json"], "protect-plans"),
-        ]
+        let commands = protectCommandMatrix(profile: profile)
 
         for line in collectPlanLines(profile: profile, running: commands.map(\.kind)) {
             onLine(.init(timestamp: Date(), level: .info, text: line))
@@ -4257,6 +4313,8 @@ enum ReportEngineError: Error, LocalizedError {
     case invalidProfile(String)
     /// config.yaml's `jamf_cli.profile` names a profile other than the one the run is for.
     case profileMismatch(named: String, run: String)
+    /// `profile` is an organization-level Platform integration, which reaches no report data.
+    case organizationLevelProfile(String)
     case snapshotParseError(String)
     /// Raised during collect when `use_cached_data=false` and a live call fails.
     case collectFailed(kind: String, exitCode: Int32)
@@ -4304,6 +4362,9 @@ enum ReportEngineError: Error, LocalizedError {
                 + "'\(ConfigSchema.displayText(named))' but this run is for "
                 + "'\(ConfigSchema.displayText(run))'; nothing was generated. Set "
                 + "jamf_cli.profile back to '\(ConfigSchema.displayText(run))'."
+        case .organizationLevelProfile(let profile):
+            return "Nothing was collected for profile '\(ConfigSchema.displayText(profile))'. "
+                + PlatformScopeLevel.organizationLevelReason
         case .snapshotParseError(let kind):
             return "No cached snapshot found for '\(kind)'. Run collect first."
         case .collectFailed(let kind, let code):

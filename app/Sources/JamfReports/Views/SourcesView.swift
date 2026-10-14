@@ -22,53 +22,27 @@ struct SourcesView: View {
     @State private var doctorOutcome: CLIDoctorService.Outcome?
     @State private var doctorRunning = false
     @State private var cliBridge = CLIBridge()
-    @State private var showingProductConnect: ProductConnectSheet? = nil
+    @State private var showingProtectConnect = false
+    @State private var connectedProducts = ConnectedProducts.none
+    @State private var cliProfileNames: [String]?
     @State private var showingEAWalkthrough = false
     @State private var showingReauth = false
+    @State private var sourcesPlan: CollectSourcesPlan?
+    /// Newest snapshot per kind, read off the main actor when the plan is built.
+    @State private var cachedAt: [String: Date] = [:]
+    @State private var expandedProducts: Set<CollectSourcesPlan.Product> = []
 
-    enum ProductConnectSheet: Identifiable {
-        case protect, school
-        var id: String {
-            switch self { case .protect: "protect"; case .school: "school" }
-        }
+    private var isSchoolWorkspace: Bool {
+        sourcesPlan?.sources.first?.product == .school
     }
 
-    private struct CLICommand: Identifiable {
-        let id = UUID()
-        let label: String
-        let status: String
+    /// The plan's commands that run, and of those the ones with a snapshot.
+    private var runningSources: [CollectSourcesPlan.Source] {
+        sourcesPlan?.sources.filter { $0.skipReason == nil } ?? []
     }
 
-    private struct CLICommandDefinition {
-        let label: String
-        let cacheNames: [String]
-    }
-
-    private let cliCommandDefinitions: [CLICommandDefinition] = [
-        .init(label: "pro overview",                cacheNames: ["overview"]),
-        // Collect writes `computers`; the other two are older names still read.
-        .init(
-            label: "pro computers list (incl. SECURITY section)",
-            cacheNames: ["computers", "computers-list", "computers_list"]
-        ),
-        .init(label: "pro report ea-results --all", cacheNames: ["ea-results", "ea_results"]),
-        .init(label: "pro report patch-status",     cacheNames: ["patch-status", "patch_status"]),
-        .init(label: "pro report app-status",       cacheNames: ["app-status", "app_status"]),
-        .init(label: "pro report update-status",    cacheNames: ["update-status", "update_status"]),
-        .init(
-            label: "protect overview",
-            cacheNames: ["protect-overview", "protect_overview"]
-        ),
-    ]
-
-    private var cliCommands: [CLICommand] {
-        cliCommandDefinitions.map { definition in
-            CLICommand(label: definition.label, status: cacheStatus(for: definition.cacheNames))
-        }
-    }
-
-    private var cachedCLICommandCount: Int {
-        cliCommandDefinitions.filter { latestCacheDate(for: $0.cacheNames) != nil }.count
+    private var cachedSourceCount: Int {
+        runningSources.filter { cachedAt[$0.kind] != nil }.count
     }
 
     var body: some View {
@@ -94,15 +68,15 @@ struct SourcesView: View {
                 csvCard
             }
             doctorCard
-            capabilityCard
+            ConnectionCard()
+            // Both are Jamf Pro: the matrix lists `pro` commands, and a School workspace never
+            // collects Protect (`ProfileProductType.detect`).
+            if !isSchoolWorkspace { capabilityCard }
             familiesCard
-            additionalProductsCard
+            if !isSchoolWorkspace { additionalProductsCard }
         }
-        .sheet(item: $showingProductConnect) { kind in
-            ProductConnectSheetView(
-                product: kind,
-                profileSlug: workspace.profile
-            )
+        .sheet(isPresented: $showingProtectConnect, onDismiss: reloadConnectedProducts) {
+            ProductConnectSheetView(profileSlug: workspace.profile)
         }
         .sheet(isPresented: $showingEAWalkthrough) {
             CSVEAWalkthroughSheet(profile: workspace.profile)
@@ -112,7 +86,10 @@ struct SourcesView: View {
                 profileSlug: workspace.profile,
                 prefillURL: activeProfileServerURL,
                 prefillAuthMethod: activeProfileAuthMethod,
-                onSaved: { runDoctor() }
+                onSaved: {
+                    workspace.credentialsChanged()
+                    runDoctor()
+                }
             )
         }
         .onAppear {
@@ -145,7 +122,7 @@ struct SourcesView: View {
         } message: {
             Text("This removes the CSV file from disk.")
         }
-        .alert("Clear Inbox Error", isPresented: $showClearError) {
+        .alert("CSV Inbox Error", isPresented: $showClearError) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(clearError ?? "Unknown error")
@@ -191,10 +168,10 @@ struct SourcesView: View {
                     SectionHeader(title: "jamf-cli · live")
                     Spacer()
                     Pill(
-                        text: cachedCLICommandCount == 0
+                        text: cachedSourceCount == 0
                             ? "No cache"
-                            : "\(cachedCLICommandCount) cached",
-                        tone: cachedCLICommandCount == 0 ? .muted : .teal
+                            : "\(cachedSourceCount) cached",
+                        tone: cachedSourceCount == 0 ? .muted : .teal
                     )
                 }
                 // One line when it fits; otherwise the cache path takes its own line
@@ -219,28 +196,100 @@ struct SourcesView: View {
                 .foregroundStyle(Theme.Text.tertiary(contrast))
                 scopeCaption
 
-                VStack(spacing: 0) {
-                    ForEach(Array(cliCommands.enumerated()), id: \.element.id) { idx, c in
-                        // The label wraps at its full height: truncated, it still
-                        // reserved the wrapped height below the cards row.
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Mono(text: c.label, color: Theme.Text.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Text(c.status)
-                                .font(.caption)
-                                .foregroundStyle(Theme.Text.tertiary(contrast))
-                                .fixedSize()
-                        }
-                        .padding(.vertical, 6)
-                        if idx < cliCommands.count - 1 {
-                            Divider().background(Theme.Hairline.standard)
-                        }
-                    }
-                }
+                sourcesList
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// What a full collect runs for this workspace, a group per product, from the same lists
+    /// the collects run (`CollectSourcesPlan`).
+    @ViewBuilder
+    private var sourcesList: some View {
+        if let plan = sourcesPlan {
+            Text("What a full collect runs for this workspace.")
+                .font(.caption)
+                .foregroundStyle(Theme.Text.tertiary(contrast))
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(CollectSourcesPlan.Product.allCases, id: \.self) { product in
+                    let sources = plan.sources(for: product)
+                    if !sources.isEmpty { sourceGroup(product, sources) }
+                }
+            }
+        } else {
+            Text("Reading what this workspace collects…")
+                .font(.caption)
+                .foregroundStyle(Theme.Text.tertiary(contrast))
+        }
+    }
+
+    private func sourceGroup(
+        _ product: CollectSourcesPlan.Product, _ sources: [CollectSourcesPlan.Source]
+    ) -> some View {
+        DisclosureGroup(isExpanded: Binding(
+            get: { expandedProducts.contains(product) },
+            set: { open in
+                if open { expandedProducts.insert(product) } else { expandedProducts.remove(product) }
+            }
+        )) {
+            VStack(spacing: 0) {
+                ForEach(sources) { source in
+                    sourceRow(source)
+                    if source.id != sources.last?.id {
+                        Divider().background(Theme.Hairline.standard)
+                    }
+                }
+            }
+        } label: {
+            HStack(alignment: .firstTextBaseline) {
+                Text(product.rawValue)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.Text.primary)
+                Spacer()
+                Text(Self.groupSummary(sources, cachedAt: cachedAt))
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+            }
+        }
+    }
+
+    private func sourceRow(_ source: CollectSourcesPlan.Source) -> some View {
+        // The label wraps at its full height: truncated, it still reserved the wrapped
+        // height below the cards row.
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Mono(text: source.command,
+                 color: source.skipReason == nil ? Theme.Text.secondary
+                    : Theme.Text.tertiary(contrast))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(Self.sourceStatus(source, cachedAt: cachedAt[source.kind]))
+                .font(.caption)
+                .foregroundStyle(Theme.Text.tertiary(contrast))
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 220, alignment: .trailing)
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// "12 run · 10 cached · 4 skipped", each part only when it is not zero.
+    nonisolated static func groupSummary(
+        _ sources: [CollectSourcesPlan.Source], cachedAt: [String: Date]
+    ) -> String {
+        let running = sources.filter { $0.skipReason == nil }
+        let cached = running.filter { cachedAt[$0.kind] != nil }.count
+        let skipped = sources.count - running.count
+        var parts = ["\(running.count) run"]
+        if cached > 0 { parts.append("\(cached) cached") }
+        if skipped > 0 { parts.append("\(skipped) skipped") }
+        return parts.joined(separator: " · ")
+    }
+
+    nonisolated static func sourceStatus(
+        _ source: CollectSourcesPlan.Source, cachedAt: Date?
+    ) -> String {
+        if let reason = source.skipReason { return "skipped: \(reason)" }
+        guard let cachedAt else { return "not cached" }
+        return "cached \(FileDisplay.date(cachedAt))"
     }
 
     private func cliProfileLine(label: String) -> some View {
@@ -330,6 +379,13 @@ struct SourcesView: View {
                                 Spacer(minLength: 8)
                                 Pill(text: f.status.rawValue, tone: tone(for: f.status))
                                 Menu {
+                                    if f.status != .archived {
+                                        Button {
+                                            archiveInboxFile(f)
+                                        } label: {
+                                            Label("Archive", systemImage: "archivebox")
+                                        }
+                                    }
                                     Button(role: .destructive) {
                                         pendingClearFile = f
                                         pendingClearProfile = workspace.profile
@@ -354,6 +410,13 @@ struct SourcesView: View {
                             }
                         }
                     }
+                }
+
+                if !csvFiles.isEmpty {
+                    Text(CSVInboxService.statusCaption)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 HStack(spacing: 8) {
@@ -515,7 +578,7 @@ struct SourcesView: View {
 
     /// The active profile's recorded auth method, for selecting the reauth form.
     private var activeProfileAuthMethod: String {
-        workspace.profiles.first(where: { $0.name == workspace.profile })?.authMethod ?? ""
+        workspace.activeCLIProfile?.auth?.rawValue ?? ""
     }
 
     @ViewBuilder
@@ -734,9 +797,19 @@ struct SourcesView: View {
             // The demo workspace, never this Mac's: no folder is read.
             csvFiles = DemoData.inboxFiles(for: workspace.profile)
             families = DemoData.snapshotFamilies(for: workspace.profile)
+            connectedProducts = .none
+            sourcesPlan = CollectSourcesPlan.build(.init(
+                product: .jamfPro, profile: workspace.profile,
+                protectProfile: DemoData.org.profile + "-protect"))
+            cachedAt = Dictionary(uniqueKeysWithValues: (sourcesPlan?.sources ?? []).compactMap {
+                source in DemoData.cacheDate(for: [source.kind], profile: workspace.profile)
+                    .map { (source.kind, $0) }
+            })
             resolutionError = nil
             return
         }
+        reloadConnectedProducts()
+        reloadSourcesPlan()
         csvFiles = CSVInboxService().list(profile: workspace.profile)
         families = SnapshotArchiveService().families(profile: workspace.profile)
 
@@ -750,6 +823,57 @@ struct SourcesView: View {
             resolutionError = "Couldn't resolve this profile's workspace folders: "
                 + "\(error.localizedDescription). Check the profile name and that "
                 + "\(rootPath) exists and is writable."
+        }
+    }
+
+    private func reloadConnectedProducts() {
+        connectedProducts = workspace.demoMode
+            ? .none : ConnectedProducts.read(profile: workspace.profile)
+        guard let named = connectedProducts.protectProfile else {
+            cliProfileNames = nil
+            return
+        }
+        // `workspace.profiles` leaves out a profile that only serves as Protect's login, so
+        // jamf-cli's own list is the answer. Read off the main actor: it runs `config list`.
+        let profile = workspace.profile
+        Task {
+            let names = await Task.detached {
+                ProfileService.discoverJamfCLIProfiles(scheduleCounts: [:]).map(\.name)
+            }.value
+            guard profile == workspace.profile,
+                  connectedProducts.protectProfile == named else { return }
+            cliProfileNames = names
+        }
+    }
+
+    /// Builds the plan and reads each kind's newest snapshot off the main actor: resolving the
+    /// auth method runs `jamf-cli config list` (cached per profile), and the snapshot folders
+    /// may sit on a synced share.
+    private func reloadSourcesPlan() {
+        let profile = workspace.profile
+        let version = workspace.jamfCLIVersion
+        let skipExpensive = UserDefaults.standard.bool(forKey: "skipExpensiveCollections")
+        Task {
+            let (plan, dates) = await Task.detached(priority: .userInitiated) {
+                let config = ProfileService.workspaceURL(for: profile).flatMap {
+                    try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
+                }
+                let detected = ProfileProductType.detect(from: config, profile: profile)
+                let auth = detected.type == .jamfPro
+                    ? ProfileAuthMethod.resolve(profile: profile) : nil
+                let plan = CollectSourcesPlan.build(.init(
+                    product: detected.type, profile: profile,
+                    protectProfile: ConnectedProducts.read(profile: profile).protectProfile,
+                    staleDays: config?.thresholds?.resolvedStaleDays ?? 30,
+                    installedVersion: version, skipExpensive: skipExpensive,
+                    authMethod: auth?.authMethod, tenantLevel: auth?.isTenantLevel == true,
+                    collectSkip: ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip)))
+                return (plan, Self.newestSnapshots(
+                    kinds: plan.sources.map(\.kind), profile: profile))
+            }.value
+            guard profile == workspace.profile, !workspace.demoMode else { return }
+            sourcesPlan = plan
+            cachedAt = dates
         }
     }
 
@@ -770,6 +894,18 @@ struct SourcesView: View {
         } catch {
             clearError = "Couldn't remove the inbox file: \(error.localizedDescription). "
                 + "It may be open in another app or read-only."
+            showClearError = true
+        }
+    }
+
+    private func archiveInboxFile(_ file: InboxFile) {
+        guard !workspace.demoMode else { return }
+        let profile = workspace.profile
+        do {
+            try CSVInboxService().archive(file, profile: profile)
+            reload()
+        } catch {
+            clearError = "Couldn't archive the inbox file: \(error.localizedDescription)"
             showClearError = true
         }
     }
@@ -860,27 +996,31 @@ struct SourcesView: View {
         }
     }
 
-    private func cacheStatus(for cacheNames: [String]) -> String {
-        guard let date = latestCacheDate(for: cacheNames) else { return "not cached" }
-        return "cached \(FileDisplay.date(date))"
-    }
+    /// Older builds wrote these kinds under other folder names; their snapshots still count.
+    private nonisolated static let legacyCacheNames: [String: [String]] = [
+        "computers": ["computers-list", "computers_list"],
+        "ea-results": ["ea_results"], "patch-status": ["patch_status"],
+        "app-status": ["app_status"], "update-status": ["update_status"],
+        "protect-overview": ["protect_overview"],
+    ]
 
-    private func latestCacheDate(for cacheNames: [String]) -> Date? {
-        if workspace.demoMode {
-            return DemoData.cacheDate(for: cacheNames, profile: workspace.profile)
-        }
-        guard let root = WorkspacePathGuard.root(for: workspace.profile) else { return nil }
-        let configured = (try? WorkspacePaths.dataDir(for: workspace.profile))
+    /// The newest snapshot date of each kind under `profile`'s data folder, read through the
+    /// workspace path guard. A kind with no snapshot is absent.
+    nonisolated static func newestSnapshots(kinds: [String], profile: String) -> [String: Date] {
+        guard let root = WorkspacePathGuard.root(for: profile) else { return [:] }
+        let configured = (try? WorkspacePaths.dataDir(for: profile))
             ?? root.appendingPathComponent("jamf-cli-data", isDirectory: true)
-        
-        guard let validatedDataDir = WorkspacePathGuard.validate(configured, under: root) else {
-            return nil
+        guard let dataDir = WorkspacePathGuard.validate(configured, under: root) else { return [:] }
+        var dates: [String: Date] = [:]
+        for kind in kinds {
+            let names = [kind] + (legacyCacheNames[kind] ?? [])
+            if let newest = names.flatMap({
+                cacheDates(for: $0, dataDir: dataDir, root: root)
+            }).max() {
+                dates[kind] = newest
+            }
         }
-
-        let dates = cacheNames.flatMap { cacheName in
-            cacheDates(for: cacheName, dataDir: validatedDataDir, root: root)
-        }
-        return dates.max()
+        return dates
     }
 
     /// The demo's own workspace path in demo mode, not this Mac's root, which
@@ -917,40 +1057,35 @@ struct SourcesView: View {
                         .font(.system(size: 16))
                     SectionHeader(title: "Additional Products")
                 }
-                Text("Connect Jamf Protect or Jamf School to extend report coverage for the active workspace.")
+                Text("Connect Jamf Protect to extend report coverage for the active workspace.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                     .fixedSize(horizontal: false, vertical: true)
 
-                // Both set up a real jamf-cli connection and write config.yaml.
-                HStack(spacing: 10) {
-                    PNPButton(
-                        title: "Add Jamf Protect",
-                        icon: "shield.lefthalf.filled",
-                        size: .sm
-                    ) {
-                        guard !workspace.demoMode else { return }
-                        showingProductConnect = .protect
-                    }
-                    .disabled(workspace.demoMode)
-                    .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
-                    PNPButton(
-                        title: "Add Jamf School",
-                        icon: "graduationcap.fill",
-                        size: .sm
-                    ) {
-                        guard !workspace.demoMode else { return }
-                        showingProductConnect = .school
-                    }
-                    .disabled(workspace.demoMode)
-                    .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
-                }
+                // Sets up a real jamf-cli connection and writes config.yaml.
+                ProtectProductControl(
+                    workspace: workspace.profile,
+                    state: ProtectConnection.state(
+                        configured: connectedProducts.protectProfile,
+                        cliProfiles: cliProfileNames),
+                    demoMode: workspace.demoMode,
+                    onConnect: { showingProtectConnect = true },
+                    onDisconnected: reloadConnectedProducts)
+
+                Text("Jamf School uses its own workspace: choose Add Jamf School workspace in "
+                    + "the sidebar's workspace menu.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func cacheDates(for cacheName: String, dataDir: URL, root: URL) -> [Date] {
+    /// JSON snapshots, and the jamf-cli dashboard's page, the one kind saved as HTML.
+    private nonisolated static func cacheDates(
+        for cacheName: String, dataDir: URL, root: URL
+    ) -> [Date] {
         let directory = dataDir.appendingPathComponent(cacheName, isDirectory: true)
         var candidates: [URL] = []
         if let validatedDirectory = WorkspacePathGuard.validate(directory, under: root),
@@ -976,7 +1111,7 @@ struct SourcesView: View {
         }
 
         return candidates.compactMap { candidate in
-            guard candidate.pathExtension.lowercased() == "json",
+            guard ["json", "html"].contains(candidate.pathExtension.lowercased()),
                   !candidate.lastPathComponent.contains(".partial"),
                   let validated = WorkspacePathGuard.validate(candidate, under: root),
                   let values = try? validated.resourceValues(

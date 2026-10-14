@@ -47,18 +47,35 @@ extension HtmlReport {
             <a href="https://github.com/tonyyo11/jamf-reports-community"
             >tonyyo11/jamf-reports-community</a></p>
           <p class="verify-footer" style="margin-top:8px;font-size:11px;opacity:0.7">
-            Integrity check, not a signature. SHA-256 <code>\(placeholder)</code> is stored in
-            this file, so it detects damage or a partial copy, not a deliberate edit (anyone
-            who edits the file can recompute it). To check: replace the hash here and in the
-            <code>report-sha256</code> meta tag with 64 zeros, then run
-            <code>shasum -a 256 \(verifyFilename)</code>. To show the file is unchanged since
-            it was generated, compare with the <code>[ok] sha256:</code> line in the run log,
-            kept outside this file.
+            \(integrityNote(placeholder: placeholder, htmlFileName: verifyFilename))
           </p>
         </footer>
         \(buildScript())
         </body>
         </html>
+        """
+    }
+
+    /// The footer's integrity note. The HTML page carries its own hash; a PDF cannot (its
+    /// text is the page's), so it points to the PDF's manifest and the run log instead.
+    func integrityNote(placeholder: String, htmlFileName: String) -> String {
+        if let pdf = pdfFileName.map(HtmlSectionFormatters.escapeHTML) {
+            return """
+            Integrity check, not a signature. This PDF's SHA-256 is in \
+            <code>\(pdf).manifest.txt</code> beside it and in the <code>[ok] sha256:</code> line \
+            of the run log that generated it. To check, run <code>shasum -a 256 \(pdf)</code> \
+            and compare. A match shows the file is unchanged since it was generated; the run \
+            log, kept outside the report folder, is the reference to trust.
+            """
+        }
+        return """
+        Integrity check, not a signature. SHA-256 <code>\(placeholder)</code> is stored in \
+        this file, so it detects damage or a partial copy, not a deliberate edit (anyone \
+        who edits the file can recompute it). To check: replace the hash here and in the \
+        <code>report-sha256</code> meta tag with 64 zeros, then run \
+        <code>shasum -a 256 \(htmlFileName)</code>. To show the file is unchanged since \
+        it was generated, compare with the <code>[ok] sha256:</code> line in the run log, \
+        kept outside this file.
         """
     }
 
@@ -206,6 +223,7 @@ extension HtmlReport {
         .glance-change.worse { color: var(--red); }
         .glance-change.flat, .glance-change.none { color: var(--subtext); }
         .glance-was { margin-left: 0.5rem; color: var(--subtext); }
+        .glance-sub { font-size: 0.75rem; color: var(--subtext); margin-top: 0.15rem; }
         .attention-list { list-style: none; }
         .attention-list li { background: var(--card); border: 1px solid var(--border);
                              border-left: 4px solid var(--yellow); border-radius: 6px;
@@ -330,6 +348,19 @@ extension HtmlReport {
           /* A heading stays with what it introduces, and a box shorter than a page is not
              cut by a page break. The engine leaves a longer one to break where it must. */
           h2, h3, h4, details > summary { break-after: avoid; page-break-after: avoid; }
+          /* WebKit's print ignores break-after: avoid. A heading's box takes in room for a
+             few lines below it (padding), which the next element then overlaps (negative
+             margin), and the box is never split: when those lines do not fit, the heading
+             moves to the next page with them. */
+          h2, h3, details.group > summary {
+            break-inside: avoid; page-break-inside: avoid;
+            padding-bottom: 9rem; margin-bottom: -8.4rem;
+          }
+          /* A table never runs past the page: print cannot scroll it, so it was cut off.
+             Long values wrap where the table renderer marks them (`breakable`). */
+          .block { overflow: visible; }
+          .block table { font-size: 0.8rem; }
+          .block td { overflow-wrap: break-word; }
           .glance-tile, .tile, .count-card, .compliance-hero, .attention-list li, .block {
             break-inside: avoid; page-break-inside: avoid;
           }

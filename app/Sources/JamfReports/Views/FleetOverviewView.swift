@@ -21,7 +21,7 @@ struct FleetOverviewView: View {
     }
 
     private var visibleRows: [FleetProfileOverview] {
-        issuesOnly ? rows.filter { fleetProfileHasIssue($0.summary) } : rows
+        issuesOnly ? rows.filter(\.hasIssue) : rows
     }
 
     private var profileKey: String {
@@ -113,7 +113,7 @@ struct FleetOverviewView: View {
     }
 
     private var issueCount: Int {
-        rows.filter { fleetProfileHasIssue($0.summary) }.count
+        rows.filter(\.hasIssue).count
     }
 
     private var stabilitySpark: [Double] {
@@ -144,7 +144,7 @@ struct FleetOverviewView: View {
                         .padding(8)
                     }
                 }
-            StatTile(label: "Devices", value: "\(totalDevices)", sub: "Latest successful summaries",
+            StatTile(label: "Macs", value: "\(totalDevices)", sub: "Latest successful summaries",
                      fillsHeight: true)
             StatTile(
                 label: "Stability",
@@ -205,7 +205,7 @@ struct FleetOverviewView: View {
                                 .font(.system(size: 9, weight: .bold))
                                 .foregroundStyle(Theme.Colors.goldBright)
                         }
-                        Text(fleetProfileIssueReasons(row.summary).joined(separator: " · "))
+                        Text(row.issues.map(\.reason).joined(separator: " · "))
                             .font(.caption)
                             .foregroundStyle(Theme.Colors.warn)
                             .fixedSize(horizontal: false, vertical: true)
@@ -214,7 +214,7 @@ struct FleetOverviewView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(
-                    "\(row.profile): \(fleetProfileIssueReasons(row.summary).joined(separator: ", "))"
+                    "\(row.profile): \(row.issues.map(\.reason).joined(separator: ", "))"
                 )
             }
         }
@@ -254,23 +254,63 @@ struct FleetOverviewView: View {
                     Spacer()
                 }
             } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 270), spacing: 12, alignment: .top)],
-                    alignment: .leading,
-                    spacing: 12
-                ) {
-                    ForEach(visibleRows) { row in
-                        Button {
-                            drilledProfile = row.profile
-                        } label: {
-                            FleetProfileCard(row: row)
-                                .fleetDrillDownChrome()
+                VStack(alignment: .leading, spacing: 20) {
+                    ForEach(rowGroups) { group in
+                        VStack(alignment: .leading, spacing: 10) {
+                            if let title = group.title { SectionHeader(title: title) }
+                            profileCards(group.rows)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Open \(row.profile) fleet details")
-                        .help("Open \(row.profile) fleet details")
                     }
                 }
+            }
+        }
+    }
+
+    private struct RowGroup: Identifiable {
+        let id: String
+        /// Nil when no connection exists, so the grid keeps its one headerless list.
+        let title: String?
+        let rows: [FleetProfileOverview]
+    }
+
+    /// The visible rows under their connections, then the profiles in none. With no
+    /// connection there is a single group with no header.
+    private var rowGroups: [RowGroup] {
+        let grouping = workspace.initializedConnectionGrouping
+        guard grouping.hasConnections else {
+            return [RowGroup(id: "all", title: nil, rows: visibleRows)]
+        }
+        let byProfile = Dictionary(
+            visibleRows.map { ($0.profile, $0) }, uniquingKeysWith: { first, _ in first })
+        var groups = grouping.sections.map { section in
+            RowGroup(
+                id: section.id.uuidString, title: section.connection.name,
+                rows: section.entries.compactMap { byProfile[$0.profile.name] })
+        }
+        if !grouping.ungrouped.isEmpty {
+            groups.append(RowGroup(
+                id: "ungrouped", title: "Other workspaces",
+                rows: grouping.ungrouped.compactMap { byProfile[$0.name] }))
+        }
+        return groups.filter { !$0.rows.isEmpty }
+    }
+
+    private func profileCards(_ rows: [FleetProfileOverview]) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 270), spacing: 12, alignment: .top)],
+            alignment: .leading,
+            spacing: 12
+        ) {
+            ForEach(rows) { row in
+                Button {
+                    drilledProfile = row.profile
+                } label: {
+                    FleetProfileCard(row: row)
+                        .fleetDrillDownChrome()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open \(row.profile) fleet details")
+                .help("Open \(row.profile) fleet details")
             }
         }
     }
@@ -300,7 +340,7 @@ struct FleetOverviewView: View {
 
                 HStack(spacing: 12) {
                     StatTile(
-                        label: "Devices",
+                        label: "Macs",
                         value: row.summary.map { "\($0.totalDevices)" } ?? "--",
                         sub: "Latest successful summary"
                     )
@@ -529,7 +569,7 @@ struct FleetOverviewView: View {
                         .accessibilityHidden(true)
                     SectionHeader(title: "Issues on This Profile")
                 }
-                ForEach(fleetProfileIssues(row.summary)) { issue in
+                ForEach(row.issues) { issue in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(issue.reason)
                             .font(.callout.weight(.semibold))
@@ -576,7 +616,8 @@ struct FleetOverviewView: View {
                 return FleetProfileOverview(
                     profile: profile.name,
                     summary: summaries.last,
-                    summaries: summaries
+                    summaries: summaries,
+                    isSchool: profile.product == .school
                 )
             }
         }.value
@@ -626,8 +667,11 @@ private struct FleetProfileOverview: Identifiable, Sendable {
     let profile: String
     let summary: DailySummary?
     var summaries: [DailySummary] = []
+    /// A Jamf School workspace writes no daily summary, so none of the summary issues applies.
+    var isSchool = false
 
-    var hasIssue: Bool { fleetProfileHasIssue(summary) }
+    var issues: [FleetProfileIssue] { isSchool ? [] : fleetProfileIssues(summary) }
+    var hasIssue: Bool { !issues.isEmpty }
 }
 
 private struct StabilityTrendPoint: Identifiable, Sendable {
@@ -645,7 +689,7 @@ private struct FleetProfileCard: View {
         row.summary?.stabilityIndex
     }
 
-    private var hasIssue: Bool { fleetProfileHasIssue(row.summary) }
+    private var hasIssue: Bool { row.hasIssue }
     private var hasNoSummary: Bool { row.summary == nil }
 
     var body: some View {
@@ -696,7 +740,7 @@ private struct FleetProfileCard: View {
 
                 HStack(alignment: .firstTextBaseline, spacing: 18) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Kicker(text: "Devices")
+                        Kicker(text: "Macs")
                         Text(row.summary.map { "\($0.totalDevices)" } ?? "--")
                             .font(Theme.Fonts.serif(percentSize, weight: .bold))
                             .foregroundStyle(Theme.Colors.fg)
@@ -738,14 +782,14 @@ private struct FleetProfileCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .accessibilityLabel(
-                        "Issues: \(fleetProfileIssueReasons(row.summary).joined(separator: ", "))"
+                        "Issues: \(row.issues.map(\.reason).joined(separator: ", "))"
                     )
                 }
         }
     }
 
     private var issueCaption: String {
-        let reasons = fleetProfileIssueReasons(row.summary)
+        let reasons = row.issues.map(\.reason)
         let label = reasons.count == 1 ? "Issue" : "Issues"
         return "\(label): \(reasons.joined(separator: " · "))"
     }
@@ -807,24 +851,6 @@ private func stabilityTone(_ value: Double?) -> Pill.Tone {
     if value >= 85 { return .teal }
     if value >= 70 { return .warn }
     return .danger
-}
-
-/// Returns true when the profile summary indicates an actionable issue:
-/// - No summary yet (workspace needs a first run)
-/// - Stability index below the warn threshold (< 70%)
-/// - Any stale devices in the fleet
-/// - FileVault below 90% (material encryption gap)
-/// - Patch compliance below 80%
-///
-/// Stability already captures compliance + patch + stale in one composite score;
-/// the individual thresholds catch cases where one metric is bad but others
-/// keep stability above 70.
-func fleetProfileHasIssue(_ summary: DailySummary?) -> Bool {
-    !fleetProfileIssues(summary).isEmpty
-}
-
-func fleetProfileIssueReasons(_ summary: DailySummary?) -> [String] {
-    fleetProfileIssues(summary).map(\.reason)
 }
 
 /// One flagged condition with the context the badge alone can't carry:

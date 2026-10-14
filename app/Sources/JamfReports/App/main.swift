@@ -153,14 +153,17 @@ func notifyOverdueSchedulesHeadless(
             overdue: batch.issues
         )
         let count = batch.issues.count
-        let sent = await WebhookNotifier.sendFailed(
-            config: batch.notify,
-            title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
-            facts: facts
-        )
-        guard sent else { continue }
-        // Stamp only on a successful send so a transient webhook failure retries next run.
-        for target in batch.targets { marker.stamp(day: today, in: target.workspace) }
+        let outcome = await marker.sendOnce(
+            day: today, in: batch.targets.map(\.workspace)
+        ) {
+            await WebhookNotifier.sendFailed(
+                config: batch.notify,
+                title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
+                facts: facts
+            )
+        }
+        // Stamped only after a confirmed send, so a transient webhook failure retries next run.
+        guard outcome == .sent else { continue }
         print("[info] overdue schedule digest posted headlessly for "
             + "\(batch.profiles.joined(separator: ", ")) (\(count) overdue)")
     }

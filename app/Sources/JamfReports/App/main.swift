@@ -198,6 +198,7 @@ private func jamfCLIVersionBelowFloor() -> String? {
     return installed
 }
 
+
 /// True unless `value` looks like another flag — guards `args[idx + 1]` reads
 /// against silently consuming a missing value's own flag name (e.g.
 /// `--profile --all-profiles` taking "--all-profiles" as the profile).
@@ -267,19 +268,19 @@ private func scheduledRunSingleBody(
     // not followed (folders, retention, webhook); the run says which and carries on.
     SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
 
-    // Version-floor preflight (v2.2.0 Phase 3): abort loudly when an installed
-    // jamf-cli is below the supported floor, before any collect/backup, so a
-    // scheduled run never silently writes data from an unsupported binary.
-    // jamf-cli-only generates from cache and never calls jamf-cli, so it is
-    // exempt; an absent jamf-cli is also exempt (the collect path handles it).
+    // Version-floor preflight (v2.2.0 Phase 3; split in 2.10): below the runnable floor a
+    // scheduled run stops before any collect/backup, so it never writes data from a binary
+    // the app cannot drive; below the supported floor it warns and carries on. jamf-cli-only
+    // generates from cache and never calls jamf-cli, so it is exempt; an absent jamf-cli is
+    // also exempt (the collect path handles it).
     if mode != .jamfCLIOnly, let belowVersion = jamfCLIVersionBelowFloor() {
-        let message = "[error] jamf-cli \(belowVersion) is below the supported floor "
-            + "\(JamfCLIInstaller.minimumSupportedVersion) — aborting '\(profile)' to avoid "
-            + "writing data from an unsupported binary. Run: brew upgrade jamf-cli"
-        fputs(message + "\n", stderr)
-        recorder?.record(message)
-        recorder?.finish(exitCode: 1)
-        return 1
+        let line = JamfCLIInstaller.floorLine(installed: belowVersion, profile: profile)
+        fputs(line.text + "\n", stderr)
+        recorder?.record(line.text)
+        if line.stops {
+            recorder?.finish(exitCode: 1)
+            return 1
+        }
     }
 
     // Load config once, before the backup branch (product-type routing needs

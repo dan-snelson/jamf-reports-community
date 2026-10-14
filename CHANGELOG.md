@@ -87,6 +87,10 @@ text inside names.
   folder; bundles made by earlier builds stay where they are.
 - The per-title patch definition files the patch release-date lookup used to save under
   `jamf-cli-data/patch-definitions/` are no longer written; nothing read them.
+- The minimum supported jamf-cli is now 1.29.0. Jamf Account environments need 1.28, the
+  renamed resources need 1.29, and 1.24 to 1.27 cannot run the security report. An older jamf-cli
+  from 1.18.0 still runs: Settings shows a notice and each scheduled run logs a warning, so no
+  schedule stops. Update jamf-cli from Settings.
 
 ### Fixed
 

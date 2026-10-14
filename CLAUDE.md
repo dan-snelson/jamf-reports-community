@@ -1296,7 +1296,9 @@ dependency floor), unrelated to app versioning.
 
 ## jamf-cli JSON Shapes (v1.18.0)
 
-The Swift engine parses these exact shapes. Minimum supported jamf-cli is **v1.18.0**.
+The Swift engine parses these exact shapes. Minimum supported jamf-cli is **v1.29.0** (2.10;
+`JamfCLIInstaller.minimumSupportedVersion`); scheduled runs still use anything from **v1.18.0**
+(`minimumRunnableVersion`), the oldest the app can drive.
 Older versions are not supported — older fallback branches were removed in W21 (patch-status
 `installed/total` shape). The `update-status` older shape is preserved pending live
 verification against a tenant with active update plans.
@@ -1304,8 +1306,12 @@ verification against a tenant with active update plans.
 The floor was bumped to 1.16.1 (from 1.14.0) on 2026-05-08 to pick up the platform-section
 nil-guard in `pro device <id>` (PR #185). v1.15 added URL normalization at all entry points,
 which complements `WorkspaceStore.consoleURL`'s defensive scheme prepend. JamfCLIInstaller
-surfaces a Settings notice when the detected jamf-cli is below this floor; the app does not
-hard-fail — most code paths still work, the warning is to nudge updates.
+surfaces a Settings notice when the detected jamf-cli is below the supported floor, and a scheduled
+run logs one `[warn]` line (`JamfCLIInstaller.floorLine`) and carries on; only a binary below the
+runnable floor stops a scheduled collect or backup with `[error]`. 2.10 raised the supported floor
+to 1.29.0 for environment-scope Platform profiles (1.28), the spec-derived resource names (1.29)
+and `pro report security`, which 1.24–1.27 sent to the Security Cloud gate. The version gates for
+1.28, 1.29 and 1.31 stay until the runnable floor moves (epic #226).
 
 **`pro report security --output json`**
 ```json

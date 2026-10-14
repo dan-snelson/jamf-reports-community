@@ -130,9 +130,12 @@ final class JamfCLIInstallerTests: XCTestCase {
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.14.0"))
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.15.0"))
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.16.0"))
-        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.16.1"),
-                      "1.16.1 is below the new floor 1.18.0")
-        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.17.9"))
+        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.16.1"))
+        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.18.0"))
+        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.28.9"),
+                      "1.28.9 is below the 2.10 floor 1.29.0")
+        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.29.0-rc1"),
+                      "a pre-release of the floor counts as below it")
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("v1.14.0"))
     }
 
@@ -153,15 +156,37 @@ final class JamfCLIInstallerTests: XCTestCase {
     }
 
     func test_isBelowMinimumSupported_acceptsCurrentAndNewer() {
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("1.18.0"),
-                       "1.18.0 is the floor — should not flag")
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("1.18.1"))
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("1.18.10"),
-                       "1.18.10 is above the floor 1.18.0")
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("1.19.0"))
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("2.0.0"),
-                       "2.0.0 is above the floor 1.18.0")
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("v1.18.0"))
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("1.29.0"),
+                       "1.29.0 is the floor — should not flag")
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("1.29.1"))
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("1.33.0"))
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("2.0.0"))
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("v1.29.0"))
+    }
+
+    /// A scheduled run stops only below the runnable floor (1.18.0, the first with the
+    /// flags collect passes); between it and the supported floor it warns and carries on.
+    func test_isBelowMinimumRunnable_staysAtOneEighteen() {
+        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumRunnable("1.17.9"))
+        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumRunnable("1.18.0-rc1"))
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumRunnable("1.18.0"))
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumRunnable("1.28.9"))
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumRunnable(nil))
+        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumRunnable("garbage"))
+    }
+
+    func test_floorLine_warnsBetweenTheFloorsAndStopsBelowTheRunnableOne() {
+        let warn = JamfCLIInstaller.floorLine(installed: "1.24.0", profile: "prod")
+        XCTAssertFalse(warn.stops, "1.18–1.28 must keep scheduled runs going")
+        XCTAssertTrue(warn.text.hasPrefix("[warn] "), warn.text)
+        XCTAssertTrue(warn.text.contains("1.29.0"), warn.text)
+        XCTAssertFalse(warn.text.contains("[partial]"),
+                       "a warning must not read as a partial run")
+
+        let stop = JamfCLIInstaller.floorLine(installed: "1.17.0", profile: "prod")
+        XCTAssertTrue(stop.stops)
+        XCTAssertTrue(stop.text.hasPrefix("[error] "), stop.text)
+        XCTAssertTrue(stop.text.contains("aborting 'prod'"), stop.text)
     }
 
     func test_isBelowMinimumSupported_returnsFalseOnUnknownInput() {

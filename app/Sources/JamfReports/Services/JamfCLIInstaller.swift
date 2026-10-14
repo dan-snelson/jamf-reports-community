@@ -126,8 +126,8 @@ final class JamfCLIInstaller {
 
     /// Minimum supported jamf-cli version. Bumping this is a documentation +
     /// soft-warning change — the app does NOT hard-fail on older binaries
-    /// because most code paths still work; we surface a Settings notice so
-    /// users on older releases know to update.
+    /// because most code paths still work; Settings shows a notice and every scheduled
+    /// run logs a `[warn]` line so users on older releases know to update.
     ///
     /// Floor history:
     /// - 2026-04: 1.14.0 — when CoreDashboard's W21 work removed pre-v1.4
@@ -138,16 +138,51 @@ final class JamfCLIInstaller {
     /// - 2026-05-31: 1.18.0 — canonical `computer-groups-smart-groups` subcommand
     ///   + `--no-hints`/`--no-version-check` flags + `specProVersion` in
     ///   `jamf-cli version -o json`.
-    nonisolated static let minimumSupportedVersion: String = "1.18.0"
+    /// - 2026-10-14: 1.29.0 (2.10) — environment-scope Platform profiles (1.28), the
+    ///   spec-derived resource names whose old spellings stop after 2027-03-09, and
+    ///   `pro report security`, which 1.24–1.27 sent to the Security Cloud gate. Below it a
+    ///   run carries on with a warning; only `minimumRunnableVersion` refuses one.
+    nonisolated static let minimumSupportedVersion: String = "1.29.0"
+
+    /// The oldest jamf-cli a scheduled run uses at all, and the first with the
+    /// `--no-hints`/`--no-version-check` flags `collect` passes. Below it a scheduled
+    /// collect or backup stops rather than write data from a binary the app cannot drive.
+    nonisolated static let minimumRunnableVersion: String = "1.18.0"
 
     /// Returns true when `installedVersion` is below `minimumSupportedVersion`
-    /// (a pre-release of the minimum, `1.18.0-rc1`, counts as below).
+    /// (a pre-release of the minimum, `1.29.0-rc1`, counts as below).
     /// Returns false if the installed version is unknown/unparseable so we
     /// don't nag users when version detection itself failed.
     nonisolated static func isBelowMinimumSupported(_ installedVersion: String?) -> Bool {
+        isBelow(installedVersion, minimumSupportedVersion)
+    }
+
+    /// Returns true when `installedVersion` is below `minimumRunnableVersion`; false for an
+    /// unknown or unparseable version, as `isBelowMinimumSupported` does.
+    nonisolated static func isBelowMinimumRunnable(_ installedVersion: String?) -> Bool {
+        isBelow(installedVersion, minimumRunnableVersion)
+    }
+
+    /// The scheduled-run line for a jamf-cli below the supported floor: an `[error]` that stops
+    /// the run below `minimumRunnableVersion`, else a `[warn]`, and the run carries on.
+    nonisolated static func floorLine(
+        installed: String, profile: String
+    ) -> (text: String, stops: Bool) {
+        if isBelowMinimumRunnable(installed) {
+            return ("[error] jamf-cli \(installed) is below \(minimumRunnableVersion), the "
+                + "oldest Jamf Reports can run — aborting '\(profile)' to avoid writing data "
+                + "from an unsupported binary. Update jamf-cli in Settings or with "
+                + "brew upgrade jamf-cli.", true)
+        }
+        return ("[warn] jamf-cli \(installed) is older than the supported "
+            + "\(minimumSupportedVersion); some sources may be skipped or incomplete. "
+            + "Update jamf-cli in Settings or with brew upgrade jamf-cli.", false)
+    }
+
+    private nonisolated static func isBelow(_ installedVersion: String?, _ floor: String) -> Bool {
         guard let installedVersion,
               !versionParts(installedVersion).isEmpty else { return false }
-        return compareVersions(installedVersion, minimumSupportedVersion) == .orderedAscending
+        return compareVersions(installedVersion, floor) == .orderedAscending
     }
 
     /// First release whose `config add-profile --auth-method platform` accepts

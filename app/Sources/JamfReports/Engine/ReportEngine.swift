@@ -2127,7 +2127,7 @@ struct ReportEngine: Sendable {
         // Scope: pro namespace only. school/protect namespace flag support is unverified;
         // those collect paths are left unmodified until confirmed via `school --help`.
         let supportsQuietFlags = detectedVersion.map {
-            !JamfCLIInstaller.isBelowMinimumSupported($0)
+            !JamfCLIInstaller.isBelowMinimumRunnable($0)
         } ?? false
 
         // Resolved once per run, not per kind — it spawns `config list`.

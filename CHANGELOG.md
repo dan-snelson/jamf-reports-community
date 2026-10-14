@@ -293,6 +293,9 @@ text inside names.
   Contact and the kind of gap, and the security controls block lists the Macs behind the P0 count
   (and says how many of those gaps the device rows name). The Security Posture screen's Action
   Items card has an Open Devices button that opens Devices on the security-gap filter. (#276)
+- Devices stays fast when thousands of Macs carry the same placeholder serial number. A serial
+  or ID that more than 50 Macs share no longer joins rows from different sources; a row left
+  with nothing else to go on is matched by computer name, as a row with no serial is.
 
 ### Security
 

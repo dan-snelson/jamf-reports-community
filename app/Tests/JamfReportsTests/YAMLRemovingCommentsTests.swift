@@ -9,7 +9,8 @@ final class YAMLRemovingCommentsTests: XCTestCase {
     private func strip(_ line: String) -> String { YAMLCodec.removingComments(from: line) }
 
     func testAnApostropheInAPlainValueDoesNotHideTheComment() {
-        XCTAssertEqual(strip("description: Don't stop # ticket INC-4411"), "description: Don't stop")
+        XCTAssertEqual(
+            strip("description: Don't stop # ticket INC-4411"), "description: Don't stop")
         XCTAssertEqual(strip("  - name: O'Brien's Mac # owner"), "  - name: O'Brien's Mac")
         XCTAssertEqual(strip("don't: x # note"), "don't: x")
     }

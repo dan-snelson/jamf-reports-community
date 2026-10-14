@@ -370,7 +370,9 @@ enum ScaffoldService {
     /// config.yaml through `mergeColumns`, then save. Agents, custom EAs and thresholds are not
     /// touched. The report counts what reached the file; `state` is what was saved;
     /// `saveReport` is what the save left as typed or did not keep; `readStamp` is the file
-    /// as the merge read it, for a Config screen to tell whether it merged what it loaded.
+    /// as the merge read it, for a Config screen to tell whether it merged what it loaded;
+    /// `savedDocument` and `savedStamp` are what the save wrote, so the screen adopts those and
+    /// never re-reads a file an outside edit may have changed since.
     ///
     /// - Throws: If the CSV cannot be read or the config cannot be loaded or saved.
     static func mergeIntoConfig(
@@ -379,7 +381,8 @@ enum ScaffoldService {
         workspaceRoot: URL? = nil
     ) throws -> (
         report: ColumnMergeReport, familyLabel: String, state: ConfigState,
-        saveReport: ConfigSaveReport, readStamp: ConfigFileStamp
+        saveReport: ConfigSaveReport, readStamp: ConfigFileStamp,
+        savedDocument: YAMLCodec.YAMLDocument, savedStamp: ConfigFileStamp
     ) {
         let sample = try readSample(from: csvURL)
         let result = try matchColumns(from: csvURL, profile: profile)
@@ -416,7 +419,7 @@ enum ScaffoldService {
             workspaceRoot: workspaceRoot)
         return (
             report, isMobile ? "mobile device export" : "computer export", loaded.state,
-            saved.report, loaded.stamp)
+            saved.report, loaded.stamp, saved.document, saved.stamp)
     }
 
     // MARK: - Private helpers

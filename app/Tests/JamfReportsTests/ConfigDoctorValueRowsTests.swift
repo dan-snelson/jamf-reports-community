@@ -237,15 +237,8 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         let found = try rows("""
         branding:
           accent_color: red
-        charts:
-          compliance_trend:
-            bands:
-              - {label: Pass, min_failures: 0, max_failures: 0, color: "#4472C4"}
-              - {label: Low, min_failures: 1, max_failures: 10, color: blue}
         """)
-        XCTAssertEqual(
-            titles(found),
-            ["branding.accent_color", "charts.compliance_trend.bands[1].color"])
+        XCTAssertEqual(titles(found), ["branding.accent_color"])
         XCTAssertEqual(
             detail(found, "branding.accent_color"),
             "\"red\" is not a hex colour such as #2D5EA2. The workbook and the HTML report use "
@@ -253,14 +246,11 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         XCTAssertEqual(titles(try rows("branding:\n  accent_color: \"#2D5EA2FF\"\n")),
                        ["branding.accent_color"], "both reports take #RGB or #RRGGBB only")
         XCTAssertEqual(try rows("branding:\n  accent_color: \"#abc\"\n"), [])
-        XCTAssertEqual(
-            detail(found, "charts.compliance_trend.bands[1].color"),
-            "\"blue\" is not a hex colour such as #4472C4. The chart uses its default "
-                + "palette colour for this band.")
         XCTAssertEqual(try rows("branding:\n  accent_color: \"#2D5EA2\"\n"), [])
-        XCTAssertEqual(try rows("charts:\n  compliance_trend:\n    bands:\n      - "
-                                + "{label: A, min_failures: 0, max_failures: 0, color: FF00AA}\n"),
-                       [], "the chart reader accepts six digits without the #")
+        XCTAssertEqual(
+            try rows("charts:\n  compliance_trend:\n    bands:\n      - "
+                     + "{label: A, min_failures: 0, max_failures: 0, color: blue}\n"),
+            [], "bands is retired: its colours are not read, so they are not checked")
     }
 
     func testTextTakenFromTheFileIsCappedAndStrippedBeforeItReachesARow() {

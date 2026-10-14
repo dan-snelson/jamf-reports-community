@@ -87,6 +87,11 @@ text inside names.
   folder; bundles made by earlier builds stay where they are.
 - The per-title patch definition files the patch release-date lookup used to save under
   `jamf-cli-data/patch-definitions/` are no longer written; nothing read them.
+- The Charts tab no longer draws the Compliance Band Distribution chart. It compared each day's
+  compliance percentage with failure-count bands, so it never showed device counts. The mSCP/STIG
+  band trend chart shows the devices in each band over time and now follows the first baseline
+  that has data. `charts.compliance_trend.enabled: false` leaves that chart out, and the
+  `charts.compliance_trend.bands` setting is no longer read; the next Customize save removes it.
 
 ### Fixed
 

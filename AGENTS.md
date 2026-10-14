@@ -178,8 +178,8 @@ Every decoded key has a reader. 2.9 wired two keys that had none and removed six
 `thresholds.checkin_overdue_days` is the Check-in Health sheet's overdue cut-off (a Mac whose
 last contact is more than that many days ago, through `DeviceComplianceRow.isStale(atDays:)`;
 a row with no day count falls back to jamf-cli's `stale` flag), and
-`charts.compliance_trend.enabled: false` leaves the compliance band chart out of the Charts tab
-(absent is on). `jamf_cli.enabled`, `jamf_cli.allow_live_overview`, `charts.os_adoption.enabled`,
+`charts.compliance_trend.enabled: false` leaves the mSCP/STIG band trend chart out of the Charts
+tab (absent is on; 2.10: it gates that chart, since the band chart it once gated is gone). `jamf_cli.enabled`, `jamf_cli.allow_live_overview`, `charts.os_adoption.enabled`,
 `branding.accent_dark`, `platform.enabled` and `thresholds.profile_error_critical` are gone,
 with the Config screen's Accent dark field, Platform API switch and Profile error critical
 field. A config.yaml that still holds one loads as before. The app wrote five of them itself,
@@ -187,7 +187,7 @@ so each is a retired key (`ConfigSchema.retiredKeys`: key path to the release th
 reading it; add a key there when its reader goes; it also lists the keys earlier builds read
 or wrote and later removed: `collect_cadence` 2.3.0, `output.export_pptx` 2.4.0,
 `columns.warranty_expires` 2.6.1, `ai.lock_on_device` 2.7.0, `protect.data_dir` and
-`school_columns` 2.8.1, `ai.external` 2.9; `school_columns` and `output.export_pptx` were written
+`school_columns` 2.8.1, `ai.external` 2.9, `charts.compliance_trend.bands` 2.10; `school_columns` and `output.export_pptx` were written
 but never read by the engine): Config Doctor words it "No longer read
 since 2.9" as a suggestion, not an unknown-key warning, and the From config.yaml tab lists it
 with the same note. A save that rewrites the block holding one removes it
@@ -837,15 +837,20 @@ charts:
   os_adoption:
     per_major_charts: true          # OS adoption chart on the Charts tab (on when absent)
   compliance_trend:
-    enabled: true                   # false leaves the chart out (on when absent)
-    bands:                          # failure count buckets — customize labels/colors
-      - {label: "Pass", min_failures: 0, max_failures: 0, color: "#4472C4"}
+    enabled: true                   # false leaves the mSCP/STIG band trend out (on when absent)
   device_state_trend:
     enabled: true                   # managed/unmanaged + stale counts over time
 ```
 
-Charts require `columns.operating_system` (OS adoption) and
-`compliance.failures_count_column` (compliance trend).
+Charts require `columns.operating_system` (OS adoption) and `compliance.baselines` or
+`compliance.failures_count_column` (the mSCP/STIG donuts and band trend, which charts the first
+baseline with data from dated `ea-results` snapshots through `MSCPChartDataBuilder`).
+
+**Retired 2.10:** `charts.compliance_trend.bands` and the "Compliance Band Distribution" chart it
+drove are gone. That chart tested each day's compliance percentage against failure-count bands and
+plotted 1.0 for the band it landed in, so it never showed device counts; the mSCP/STIG band trend
+covers it with fixed bands. `bands` is a retired key (`ConfigSchema.retiredKeys`), so `ChartsConfigWriter`
+drops it on the next Customize save.
 
 ### branding config (2.9)
 

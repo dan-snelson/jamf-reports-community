@@ -1189,11 +1189,11 @@ struct ReportEngine: Sendable {
     /// - `charts.os_adoption.per_major_charts` — draws the OS adoption chart, one bar per major
     ///   OS version (using `ChartPalette.majorVersionColors`). On when the key is absent, as
     ///   the Customize screen shows it; `false` turns it off.
-    /// - `charts.compliance_trend.bands` — uses band labels/colors for compliance stacked area;
-    ///   `charts.compliance_trend.enabled: false` turns the chart off.
+    /// - `charts.compliance_trend.enabled: false` leaves the mSCP/STIG band trend chart out
+    ///   (absent is on); the donuts stay.
     /// - `charts.device_state_trend.enabled` — renders managed/stale trend line chart.
     /// - `compliance.baselines` — when configured, appends mSCP/STIG compliance donut(s) and
-    ///   a band trend stackplot even when the summaries dir is empty (first-run case).
+    ///   a band trend stackplot (first baseline with data) even when the summaries dir is empty (first-run case).
     ///
     /// - Parameters:
     ///   - workbook: Workbook to append the "Charts" sheet to.
@@ -1303,30 +1303,6 @@ struct ReportEngine: Sendable {
                 }
             }
 
-            // --- Compliance trend (stacked area with configurable bands) ---
-            if let trend = config.charts?.complianceTrend, trend.isEnabled,
-               let bands = trend.bands, !bands.isEmpty {
-                let bandSeries: [ChartSeries] = bands.enumerated().compactMap { (idx, band) in
-                    let color = cgColorFromHex(band.color) ?? ChartPalette.color(for: idx)
-                    let pts = summaries.compactMap { s -> (date: Date, value: Double)? in
-                        guard let pct = s.compliancePct else { return nil }
-                        let within = pct >= Double(band.minFailures) && pct <= Double(band.maxFailures)
-                        return within ? (s.parsedDate, 1.0) : nil
-                    }
-                    return pts.isEmpty ? nil : ChartSeries(label: band.label, color: color, points: pts)
-                }
-                if !bandSeries.isEmpty {
-                    if let png = ChartRenderer.stackedAreaChart(
-                        series: bandSeries, title: "Compliance Band Distribution"
-                    ) {
-                        ws.insertImage(row: embedRow, col: 0, data: png,
-                                       filename: "compliance_bands.png")
-                        embedRow += 20
-                        writePNG(png, kind: "compliance-bands", profile: profile, to: pngOutputDir)
-                    }
-                }
-            }
-
             // --- OS adoption (on unless per_major_charts is false, like the Customize screen) ---
             if config.charts?.osAdoption?.perMajorCharts ?? ChartsOptions.defaults.perMajorCharts {
                 var majorData: [String: Double] = [:]
@@ -1366,6 +1342,7 @@ struct ReportEngine: Sendable {
         embedRow = renderMSCPCharts(
             workbook: workbook, ws: ws, embedRow: embedRow,
             mscpResults: mscpResults, baselines: baselines, summaries: summaries,
+            trendEnabled: config.charts?.complianceTrend?.isEnabled ?? true,
             profile: profile, pngOutputDir: pngOutputDir
         )
         _ = embedRow  // final row count not needed outside this scope
@@ -1382,6 +1359,7 @@ struct ReportEngine: Sendable {
         mscpResults: [MSCPComplianceService.BaselineResult],
         baselines: [ComplianceBaselineConfig],
         summaries: [DailySummary],
+        trendEnabled: Bool,
         profile: String,
         pngOutputDir: URL?
     ) -> Int {
@@ -1412,9 +1390,11 @@ struct ReportEngine: Sendable {
             }
         }
 
-        // Band trend stackplot — uses primary baseline (first with data).
-        guard let primaryBaseline = baselines.first,
-              let primaryResult = mscpResults.first, primaryResult.devicesWithData > 0
+        // Band trend stackplot — the first baseline with data (`evaluate` returns one result
+        // per baseline, in order).
+        guard trendEnabled,
+              let primaryBaseline = zip(baselines, mscpResults)
+                  .first(where: { $0.1.devicesWithData > 0 })?.0
         else { return embedRow }
 
         let points = MSCPChartDataBuilder.buildSeries(
@@ -1449,17 +1429,6 @@ struct ReportEngine: Sendable {
 
     private func sanitizeForFilename(_ s: String) -> String {
         ExportNaming.sanitize(s).prefix(32).description
-    }
-
-    /// Parse a hex color string (#RRGGBB) into a `CGColor`. Returns nil on malformed input.
-    private func cgColorFromHex(_ hex: String) -> CGColor? {
-        let h = hex.trimmingCharacters(in: .init(charactersIn: "#"))
-        guard h.count == 6,
-              let rgb = UInt32(h, radix: 16) else { return nil }
-        let r = CGFloat((rgb >> 16) & 0xFF) / 255
-        let g = CGFloat((rgb >> 8) & 0xFF) / 255
-        let b = CGFloat(rgb & 0xFF) / 255
-        return CGColor(red: r, green: g, blue: b, alpha: 1)
     }
 
     /// Routes through `WorkspacePaths.historicalDir(for:)` so that

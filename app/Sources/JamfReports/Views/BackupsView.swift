@@ -17,6 +17,7 @@ struct BackupsView: View {
     @State private var diffMode: DiffMode = .summary
     @State private var backupExitCode: Int32?
     @State private var diffExitCode: Int32?
+    @State private var diffIncludesProtect = false
     @State private var isRunningBackup = false
     @State private var isRunningDiff = false
     @State private var showingDiff = false
@@ -95,6 +96,7 @@ struct BackupsView: View {
             header
             summary
             errorBanner
+            protectBanner
             backupsTable
             logCard
         }
@@ -204,6 +206,21 @@ struct BackupsView: View {
         if let errorMessage {
             InlineBanner(icon: "exclamationmark.triangle.fill", tone: .warn) {
                 Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.secondary)
+            }
+        }
+    }
+
+    /// What the latest backup did about Jamf Protect; absent for a workspace without it.
+    @ViewBuilder
+    private var protectBanner: some View {
+        if let protect = latestBackup?.protect {
+            InlineBanner(
+                icon: protect.isIncomplete ? "exclamationmark.triangle.fill" : "shield",
+                tone: protect.isIncomplete ? .warn : .info
+            ) {
+                Text(protect.protectSummary)
                     .font(.footnote)
                     .foregroundStyle(Theme.Text.secondary)
             }
@@ -370,6 +387,11 @@ struct BackupsView: View {
                 }
                 .keyboardShortcut(.cancelAction)
             }
+            if diffIncludesProtect {
+                Text("Jamf Protect is not compared: this diff covers Jamf Pro objects only.")
+                    .font(Theme.Fonts.mono(10.5))
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+            }
             if !diffParseFailed && !diffGroups.isEmpty {
                 HStack(spacing: 10) {
                     Text(diffHeadline)
@@ -530,6 +552,7 @@ struct BackupsView: View {
         diffParseFailed = false
         diffMode = .summary
         diffExitCode = nil
+        diffIncludesProtect = backup.includesProtectFiles || latest.includesProtectFiles
         errorMessage = nil
         showingDiff = true
         isRunningDiff = true

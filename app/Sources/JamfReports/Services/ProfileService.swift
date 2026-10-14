@@ -419,13 +419,34 @@ enum ProfileService {
         _testTimeout: TimeInterval = JamfCLIProbe.defaultTimeout,
         _testConfigURL: URL? = nil
     ) -> [JamfCLIProfile] {
+        listJamfCLIProfiles(
+            scheduleCounts: scheduleCounts, _testBinaryOverride: _testBinaryOverride,
+            _testTimeout: _testTimeout, _testConfigURL: _testConfigURL) ?? []
+    }
+
+    /// `discoverJamfCLIProfiles`, but nil when neither `config list` nor jamf-cli's config file
+    /// could be read: "could not ask", which is not the same answer as "has no profiles". A
+    /// caller that acts on a profile being absent (Start over's "was this profile new?") must
+    /// treat nil as unknown.
+    static func listJamfCLIProfiles(
+        scheduleCounts: [String: Int],
+        _testBinaryOverride: URL? = nil,
+        _testTimeout: TimeInterval = JamfCLIProbe.defaultTimeout,
+        _testConfigURL: URL? = nil
+    ) -> [JamfCLIProfile]? {
         #if DEBUG
         // A test never reads this Mac's ~/.config/jamf-cli/config.yaml, the fallback when no
         // jamf-cli is found; one that checks discovery passes its own binary.
-        if _testBinaryOverride == nil, NSClassFromString("XCTestCase") != nil { return [] }
+        if _testBinaryOverride == nil, NSClassFromString("XCTestCase") != nil { return nil }
         #endif
-        guard let binary = _testBinaryOverride ?? ExecutableLocator.locate("jamf-cli") else {
+        let fallback: () -> [JamfCLIProfile]? = {
+            if let url = _testConfigURL {
+                return fallbackConfigProfiles(scheduleCounts: scheduleCounts, configURL: url)
+            }
             return fallbackConfigProfiles(scheduleCounts: scheduleCounts)
+        }
+        guard let binary = _testBinaryOverride ?? ExecutableLocator.locate("jamf-cli") else {
+            return fallback()
         }
 
         // M-01: refuse to spawn a tampered jamf-cli even for `config list`.
@@ -433,7 +454,7 @@ enum ProfileService {
         // the same recovery path used when the binary is absent or launch
         // fails. The user still sees their profiles; nothing un-trusted runs.
         if CLIBridge.codesignGate(executable: binary, onLine: CLIBridge.noOpOnLine) != nil {
-            return fallbackConfigProfiles(scheduleCounts: scheduleCounts)
+            return fallback()
         }
 
         // SF-10/B-13: JamfCLIProbe pins a minimal environment so DYLD_*, SSL_CERT_FILE,
@@ -445,12 +466,12 @@ enum ProfileService {
             arguments: ["config", "list", "--output", "json"],
             timeout: _testTimeout
         ), output.exitCode == 0 else {
-            return fallbackConfigProfiles(scheduleCounts: scheduleCounts)
+            return fallback()
         }
         let data = output.stdout
 
         guard let decoded = try? JSONDecoder().decode([JamfCLIConfigProfile].self, from: data) else {
-            return fallbackConfigProfiles(scheduleCounts: scheduleCounts)
+            return fallback()
         }
         // `config list` leaves out the `product:` key; the file has it.
         let fromFile = readConfigFile(at: _testConfigURL ?? defaultConfigFileURL)
@@ -574,14 +595,14 @@ enum ProfileService {
         return parseConfigFile(text)
     }
 
-    /// Reads profiles straight from jamf-cli's config file when `config list`
-    /// can't run. `configURL` is a test seam; production callers omit it.
+    /// Reads profiles straight from jamf-cli's config file when `config list` can't run; nil
+    /// when the file can't be read. `configURL` is a test seam; production callers omit it.
     static func fallbackConfigProfiles(
         scheduleCounts: [String: Int],
         configURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/jamf-cli/config.yaml")
-    ) -> [JamfCLIProfile] {
-        guard let configured = readConfigFile(at: configURL) else { return [] }
+    ) -> [JamfCLIProfile]? {
+        guard let configured = readConfigFile(at: configURL) else { return nil }
         return rows(for: configured, scheduleCounts: scheduleCounts, configFileRead: true)
     }
 

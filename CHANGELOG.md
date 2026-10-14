@@ -57,10 +57,11 @@ text inside names.
   and tells you the jamf-cli profile stays until `jamf-cli config remove-profile <name>` removes
   it. A line under the Protect control says Jamf Protect uses its own API client from Jamf
   Protect, not your Jamf Account integration. (#271)
-- Add environments can try an ID again with the same label. A jamf-cli profile left behind by an
-  attempt that could not confirm the ID (or was refused) is registered again when it is in no
-  connection and has no workspace; a name that is a member, has a workspace or is not a Platform
-  profile is still refused. (#271)
+- Add environments can try an ID again with the same label. A jamf-cli profile that this app
+  registered in an earlier attempt, and could not confirm the ID for, is registered again when it
+  is in no connection and has no workspace. A profile made any other way, such as in Terminal, a
+  member, a name with a workspace or one that is not a Platform profile, is refused and left
+  untouched. (#271)
 
 ### Changed
 
@@ -102,7 +103,8 @@ text inside names.
 - First-launch setup has a way back. **Start over** returns to the welcome screen, so you no
   longer quit and reopen the app to try another connection. It asks before removing what setup
   created so far (the new workspace folder goes to the Trash, the new jamf-cli profile is removed)
-  and never touches a folder or profile that was already there. The Authenticate step no longer
+  and never touches a folder or profile that was already there, or one it could not confirm was
+  new because jamf-cli's profile list could not be read. The Authenticate step no longer
   repeats the connection-type choice on this path, and several setup screens are worded more
   plainly (the Jamf Account heading, the jamf-cli installer package, the Jamf School step).
 - The HTML report's "Macs to follow up" table lists the Macs with a reason first (no Jamf binary,

@@ -158,7 +158,8 @@ final class ProfileSlugCaseTests: XCTestCase {
 
         """.utf8).write(to: config)
 
-        let rows = ProfileService.fallbackConfigProfiles(scheduleCounts: [:], configURL: config)
+        let rows = try XCTUnwrap(
+            ProfileService.fallbackConfigProfiles(scheduleCounts: [:], configURL: config))
         let byName = Dictionary(uniqueKeysWithValues: rows.map { ($0.name, $0) })
 
         XCTAssertEqual(rows.count, 5, "unusable profiles stay listed so Settings can say why")

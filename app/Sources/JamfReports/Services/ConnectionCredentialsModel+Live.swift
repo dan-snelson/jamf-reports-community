@@ -43,12 +43,15 @@ extension ConnectionCredentialsModel {
             })
     }
 
-    /// A Platform profile that an earlier attempt registered and never made a member: not in
-    /// any connection and with no workspace folder. Anything else may be in use.
+    /// A Platform profile that an earlier Add environments attempt in this app registered and
+    /// never made a member: recorded as unconfirmed by a connection, in no connection as a
+    /// member, and with no workspace folder. A profile made in Terminal, or anything else, may
+    /// be in use and holds credentials this app did not write.
     static func isLeftoverPlatformProfile(
         _ profile: JamfCLIProfile, connections: [Connection], workspaceExists: Bool
     ) -> Bool {
         !workspaceExists && profile.auth?.isPlatform == true
+            && connections.contains { $0.unconfirmedProfiles.contains(profile.name) }
             && !connections.contains { $0.members.contains { $0.profile == profile.name } }
     }
 }

@@ -169,6 +169,34 @@ final class ProfileProductTests: XCTestCase {
         XCTAssertEqual(found.map(\.product), [.unknown])
     }
 
+    func testListingIsNilWhenNeitherConfigListNorTheFileCanBeRead() throws {
+        let failing = root.appendingPathComponent("failing-stub-\(UUID().uuidString.prefix(6))")
+        try "#!/bin/sh\nexit 1\n".write(to: failing, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: failing.path)
+        let absent = root.appendingPathComponent("absent.yaml")
+
+        XCTAssertNil(ProfileService.listJamfCLIProfiles(
+            scheduleCounts: [:], _testBinaryOverride: failing, _testConfigURL: absent))
+        XCTAssertTrue(ProfileService.discoverJamfCLIProfiles(
+            scheduleCounts: [:], _testBinaryOverride: failing, _testConfigURL: absent).isEmpty)
+    }
+
+    func testListingFallsBackToTheFileAndAnEmptyListIsNotNil() throws {
+        let failing = root.appendingPathComponent("failing-stub-\(UUID().uuidString.prefix(6))")
+        try "#!/bin/sh\nexit 1\n".write(to: failing, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: failing.path)
+        let file = try configFile("profiles:\n    prod:\n        url: https://a.jamfcloud.com\n")
+        let fromFile = ProfileService.listJamfCLIProfiles(
+            scheduleCounts: [:], _testBinaryOverride: failing, _testConfigURL: file)
+        XCTAssertEqual(fromFile?.map(\.name), ["prod"])
+
+        let empty = try stub("[]")
+        let none = ProfileService.listJamfCLIProfiles(
+            scheduleCounts: [:], _testBinaryOverride: empty,
+            _testConfigURL: root.appendingPathComponent("absent.yaml"))
+        XCTAssertEqual(none?.count, 0, "a successful listing with no profiles is an answer")
+    }
+
     func testDiscoveryReadsThePlatformLevelAndConfirmsOrganizationAgainstTheFile() throws {
         let list = try stub("""
         [{"name":"env","auth-method":"platform","environment-id":"e1"},

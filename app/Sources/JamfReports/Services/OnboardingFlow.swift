@@ -89,8 +89,9 @@ final class OnboardingFlow {
     /// so the flow only calls it off the main actor, never during a SwiftUI update.
     typealias InstallationProbe = @Sendable () -> JamfCLIInstaller.Installation?
 
-    /// The jamf-cli profile names that exist now. Launches jamf-cli, so it runs off the main actor.
-    typealias ProfileLister = @Sendable () -> Set<String>
+    /// The jamf-cli profile names that exist now, nil when they could not be read. Launches
+    /// jamf-cli, so it runs off the main actor.
+    typealias ProfileLister = @Sendable () -> Set<String>?
 
     /// Removes one jamf-cli profile: nil when it is gone, else what went wrong.
     typealias ProfileRemover = @Sendable (String) async -> String?

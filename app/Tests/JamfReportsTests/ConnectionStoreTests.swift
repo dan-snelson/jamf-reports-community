@@ -45,6 +45,44 @@ final class ConnectionStoreTests: XCTestCase {
         XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.int16Value, 0o600)
     }
 
+    func testAConnectionFileWithoutUnconfirmedProfilesStillDecodes() throws {
+        let store = try store()
+        let id = UUID().uuidString
+        let json = """
+            [{"id": "\(id)", "name": "Acme", "region": "eu", "level": "environment",
+              "createdAt": "2026-10-01T00:00:00Z",
+              "members": [{"profile": "prod", "scopeID": "x", "product": "pro"}]}]
+            """
+        try json.write(to: store.url, atomically: true, encoding: .utf8)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].unconfirmedProfiles, [])
+
+        let bad = """
+            [{"id": "\(id)", "name": "Acme", "unconfirmedProfiles": {"a": 1}, "members": []}]
+            """
+        try bad.write(to: store.url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(store.load().first?.unconfirmedProfiles, [],
+                       "a wrong shape costs the field, not the file")
+    }
+
+    func testAnUnconfirmedProfileIsRecordedOnceAndClearedWhenItJoins() throws {
+        let store = try store()
+        let acme = connection("Acme", profiles: [("prod", Self.prodID)])
+        try store.upsert(acme)
+
+        try store.noteUnconfirmedProfile("stage", inConnection: acme.id)
+        try store.noteUnconfirmedProfile("stage", inConnection: acme.id)
+        try store.noteUnconfirmedProfile("prod", inConnection: acme.id)
+        try store.noteUnconfirmedProfile("elsewhere", inConnection: UUID())
+        XCTAssertEqual(store.load().first?.unconfirmedProfiles, ["stage"],
+                       "a member and an unknown connection record nothing")
+
+        try store.addMember(.init(profile: "stage", scopeID: Self.stageID), toConnection: acme.id)
+        XCTAssertEqual(store.load().first?.unconfirmedProfiles, [])
+        XCTAssertEqual(store.load().first?.members.map(\.profile), ["prod", "stage"])
+    }
+
     func testConnectionDecodeIgnoresUnknownFieldsAndValues() throws {
         let store = try store()
         let id = UUID().uuidString

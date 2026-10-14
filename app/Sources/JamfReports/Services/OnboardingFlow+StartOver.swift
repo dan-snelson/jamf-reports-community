@@ -65,19 +65,24 @@ extension OnboardingFlow {
     }
 
     /// Whether jamf-cli has no profile named `name` yet. Asked right before a command that adds
-    /// one, so Start over never removes a profile that was there before setup.
+    /// one, so Start over never removes a profile that was there before setup. A listing that
+    /// cannot be read is not "no profiles": the profile is then not new, and is left alone.
     func isNewProfile(_ name: String) async -> Bool {
         let lister = profileLister
-        return await Task.detached(priority: .userInitiated) { !lister().contains(name) }.value
+        return await Task.detached(priority: .userInitiated) {
+            guard let existing = lister() else { return false }
+            return !existing.contains(name)
+        }.value
     }
 
     func noteCreatedProfile(_ name: String) {
         if !createdProfiles.contains(name) { createdProfiles.append(name) }
     }
 
-    /// Every profile jamf-cli has, unusable ones included.
-    nonisolated static func listJamfCLIProfiles() -> Set<String> {
-        Set(ProfileService.discoverJamfCLIProfiles(scheduleCounts: [:]).map(\.name))
+    /// Every profile jamf-cli has, unusable ones included; nil when neither `config list` nor
+    /// jamf-cli's config file could be read.
+    nonisolated static func listJamfCLIProfiles() -> Set<String>? {
+        ProfileService.listJamfCLIProfiles(scheduleCounts: [:]).map { Set($0.map(\.name)) }
     }
 
     /// `jamf-cli config remove-profile`, which also deletes the profile's keychain items.

@@ -34,8 +34,9 @@ final class ConnectionCredentialsModel {
         /// Creates the profile's workspace; true when it wrote a config.yaml.
         var provisionWorkspace: @MainActor (String) throws -> Bool
         var store: ConnectionStore
-        /// An existing jamf-cli profile an earlier Add environments attempt left behind: in no
-        /// connection and with no workspace folder, so registering it again loses nothing.
+        /// An existing jamf-cli profile an earlier Add environments attempt of this app left
+        /// behind: recorded by the store, in no connection and with no workspace folder, so
+        /// registering it again loses nothing.
         var canReRegister: @MainActor (String) -> Bool = { _ in false }
     }
 
@@ -200,9 +201,12 @@ final class ConnectionCredentialsModel {
             let request = Registration(
                 profile: planned.profile, gatewayURL: gatewayURL, scope: scope,
                 scopeID: planned.entry.scopeID, clientID: clientID, clientSecret: secret)
-            let outcome = await registerAndCheck(context, request) { verdict in
-                self.outcomeForNew(planned, verdict: verdict)
-            }
+            let outcome = await registerAndCheck(
+                context, request,
+                afterRegister: {
+                    if !planned.reRegisters { self.noteUnconfirmed(planned.profile) }
+                },
+                decide: { verdict in self.outcomeForNew(planned, verdict: verdict) })
             rows.append(Row(
                 label: label, profile: planned.profile, outcome: outcome,
                 reRegistered: planned.reRegisters))
@@ -233,9 +237,11 @@ final class ConnectionCredentialsModel {
     }
 
     /// Registers, then checks the ID. A failed registration is the outcome; otherwise
-    /// `decide` turns the verdict into one.
+    /// `decide` turns the verdict into one. `afterRegister` runs once the profile exists in
+    /// jamf-cli and before the check, so an interrupted check still leaves the record.
     private func registerAndCheck(
         _ context: JamfCLIContext, _ request: Registration,
+        afterRegister: () -> Void = {},
         decide: (ConnectionCheck.Verdict) -> Outcome
     ) async -> Outcome {
         do {
@@ -244,7 +250,22 @@ final class ConnectionCredentialsModel {
             return .registrationFailed(error.localizedDescription)
         }
         didChange = true
+        afterRegister()
         return decide(await deps.check(context, request.profile))
+    }
+
+    /// Records a profile this run registered, so a later run may register it again if the check
+    /// does not confirm it. `addMember` clears the record when the ID is accepted.
+    private func noteUnconfirmed(_ profile: String) {
+        do {
+            try deps.store.noteUnconfirmedProfile(profile, inConnection: connection.id)
+        } catch {
+            AppLogger.auth.warning(
+                """
+                AddEnvironments: could not record a registered profile: \
+                \(error.localizedDescription, privacy: .private)
+                """)
+        }
     }
 
     private func outcomeForNew(

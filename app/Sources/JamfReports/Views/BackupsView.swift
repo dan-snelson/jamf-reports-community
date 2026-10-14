@@ -667,7 +667,8 @@ struct BackupLibrary {
             created: created,
             sizeBytes: manifest.sizeBytes ?? stats.sizeBytes,
             fileCount: manifest.fileCount ?? stats.fileCount,
-            url: dir
+            url: dir,
+            protect: manifest.protect
         )
     }
 
@@ -681,7 +682,8 @@ struct BackupLibrary {
             label: object["label"] as? String ?? "",
             created: parseDate(object["created_at"] as? String),
             fileCount: object["file_count"] as? Int,
-            sizeBytes: object["size_bytes"] as? Int64
+            sizeBytes: object["size_bytes"] as? Int64,
+            protect: BackupProductResult.protect(inManifest: object)
         )
     }
 
@@ -717,6 +719,7 @@ struct BackupLibrary {
         var created: Date?
         var fileCount: Int?
         var sizeBytes: Int64?
+        var protect: BackupProductResult?
     }
 }
 

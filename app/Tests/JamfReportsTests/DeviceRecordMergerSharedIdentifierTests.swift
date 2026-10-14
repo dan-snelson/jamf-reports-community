@@ -154,4 +154,51 @@ final class DeviceRecordMergerSharedIdentifierTests: XCTestCase {
         XCTAssertEqual(merger.records.count, count)
         XCTAssertLessThan(elapsed, 6, "took \(elapsed) s")
     }
+
+    // MARK: Row ids
+
+    private func csvRow(_ n: Int, serial: String) -> DeviceInventoryRecord {
+        DeviceInventoryService.recordFromCSV(
+            ["Computer Name": "Row-\(n)", "Serial Number": serial], source: "inventory.csv")
+    }
+
+    /// Rows that share a placeholder serial and carry no Jamf ID, management ID or UDID all
+    /// start from one id, so each needs a suffix; finding it must not scan every earlier one.
+    func testThousandsOfRowsWithNoStrongIdentifierGetIDsInReasonableTime() {
+        let count = 10_000
+        let rows = (1...count).map { csvRow($0, serial: placeholder) }
+        var merger = merger(computers: cap + 1)
+        let start = Date()
+        for row in rows { merger.upsert(row) }
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(merger.records.count, cap + 1 + count)
+        XCTAssertEqual(Set(merger.records.map(\.id)).count, cap + 1 + count)
+        XCTAssertLessThan(elapsed, 5, "took \(elapsed) s")
+    }
+
+    /// The ids are the ones the linear probe handed out. The first Macs took the base and `#2`
+    /// to `#51` from their Jamf IDs, so the rows with none count up from `#52`.
+    func testSuffixesCountUpFromTheFirstFreeNumberInArrivalOrder() {
+        var merger = merger(computers: cap + 1)
+        let base = merger.records[0].id
+        for n in 1...6 { merger.upsert(csvRow(n, serial: placeholder)) }
+
+        XCTAssertEqual(merger.records.dropFirst(cap + 1).map(\.id),
+                       (52...57).map { "\(base)#\($0)" })
+    }
+
+    /// A row whose own id already is a suffix the count reaches is skipped over, as before.
+    func testASuffixAnotherRowAlreadyUsesIsSkipped() {
+        var merger = merger(computers: cap + 1)
+        let base = merger.records[0].id
+        merger.upsert(csvRow(1, serial: placeholder))
+        var taken = csvRow(2, serial: "OTHER")
+        taken.id = "\(base)#54"
+        merger.upsert(taken)
+        for n in 3...5 { merger.upsert(csvRow(n, serial: placeholder)) }
+
+        XCTAssertEqual(merger.records.dropFirst(cap + 1).map(\.id),
+                       [52, 54, 53, 55, 56].map { "\(base)#\($0)" })
+    }
 }

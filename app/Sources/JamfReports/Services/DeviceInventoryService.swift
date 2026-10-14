@@ -1264,6 +1264,8 @@ struct DeviceRecordMerger {
     /// Records by name, kept to two: callers only ask for none, one or several.
     private var nameIndex: [String: [Int]] = [:]
     private var usedIDs: Set<String> = []
+    /// Per base id, the highest `#n` suffix `uniqueID` has handed out; every smaller one is used.
+    private var lastSuffix: [String: Int] = [:]
 
     private enum Placement { case merge(Int), append, leaveOut }
 
@@ -1276,7 +1278,6 @@ struct DeviceRecordMerger {
             index(idx)
         case .append:
             record.id = uniqueID(for: record)
-            usedIDs.insert(record.id)
             records.append(record)
             index(records.count - 1)
         case .leaveOut:
@@ -1366,17 +1367,20 @@ struct DeviceRecordMerger {
     }
 
     /// `Identifiable` needs a distinct id per row, and two Macs can share the serial or name
-    /// the id is built from.
-    private func uniqueID(for record: DeviceInventoryRecord) -> String {
-        guard usedIDs.contains(record.id) else { return record.id }
+    /// the id is built from. Returns an id no earlier row has and records it as used.
+    private mutating func uniqueID(for record: DeviceInventoryRecord) -> String {
+        let base = record.id
+        guard usedIDs.contains(base) else { usedIDs.insert(base); return base }
         let tie = record.identifier(.jamfID) ?? record.identifier(.managementID)
             ?? record.identifier(.udid) ?? "2"
-        var candidate = "\(record.id)#\(tie)"
-        var count = 2
+        var candidate = "\(base)#\(tie)"
+        var count = lastSuffix[base] ?? 2
         while usedIDs.contains(candidate) {
             count += 1
-            candidate = "\(record.id)#\(count)"
+            candidate = "\(base)#\(count)"
+            lastSuffix[base] = count
         }
+        usedIDs.insert(candidate)
         return candidate
     }
 }

@@ -40,8 +40,11 @@ enum AutomationStateFile {
 
     /// Creates `url` with `O_CREAT|O_EXCL|O_NOFOLLOW` (0600): true when this caller made it, false
     /// when it exists and is younger than `staleAfter`. An older file belongs to a sender that
-    /// died, so it is removed and the claim retried once. Two callers that take the same stale
-    /// claim in the same instant can both win; that needs a crash first and costs one card.
+    /// died, so it is removed and the claim retried once; so is one dated more than
+    /// `SharedWorkspace.clockSkewTolerance` ahead of `now`, which would otherwise never age. A
+    /// folder at the name is never entered or removed: it throws, because nothing here can
+    /// make that name a claim. Two callers that take the same stale claim in the same instant can
+    /// both win; that needs a crash first and costs one card.
     static func claimExclusively(
         _ url: URL, staleAfter: TimeInterval, now: Date = Date()
     ) throws -> Bool {
@@ -53,18 +56,25 @@ enum AutomationStateFile {
                 close(descriptor)
                 return true
             }
-            guard errno == EEXIST else {
-                throw CocoaError(.fileWriteUnknown, userInfo: [
-                    NSLocalizedDescriptionKey: "claim \(url.lastPathComponent): "
-                        + String(cString: strerror(errno))])
-            }
+            guard errno == EEXIST else { throw claimError(url, String(cString: strerror(errno))) }
             var info = stat()
             guard lstat(url.path, &info) == 0 else { continue }   // gone meanwhile: retry
+            guard info.st_mode & S_IFMT != S_IFDIR else {
+                throw claimError(url, "a folder is at the claim name")
+            }
             let age = now.timeIntervalSince1970 - TimeInterval(info.st_mtimespec.tv_sec)
-            guard age >= staleAfter, attempt == 0 else { return false }
-            unlink(url.path)
+            let dated = age < -SharedWorkspace.clockSkewTolerance
+            guard dated || age >= staleAfter, attempt == 0 else { return false }
+            guard unlink(url.path) == 0 else {
+                throw claimError(url, "cannot remove it: " + String(cString: strerror(errno)))
+            }
         }
         return false
+    }
+
+    private static func claimError(_ url: URL, _ reason: String) -> CocoaError {
+        CocoaError(.fileWriteUnknown, userInfo: [
+            NSLocalizedDescriptionKey: "claim \(url.lastPathComponent): \(reason)"])
     }
 
     static func releaseClaim(_ url: URL) {

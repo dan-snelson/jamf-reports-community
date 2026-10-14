@@ -154,7 +154,8 @@ func notifyOverdueSchedulesHeadless(
         )
         let count = batch.issues.count
         let outcome = await marker.sendOnce(
-            day: today, in: batch.targets.map(\.workspace)
+            day: today, in: batch.targets.map(\.workspace),
+            onLine: { fputs($0 + "\n", stderr) }
         ) {
             await WebhookNotifier.sendFailed(
                 config: batch.notify,

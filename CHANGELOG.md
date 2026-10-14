@@ -306,10 +306,13 @@ text inside names.
   Items card has an Open Devices button that opens Devices on the security-gap filter. (#276)
 - The overdue-schedule notification is no longer posted twice when the app and the background
   item find a schedule overdue at the same moment. Whichever starts first claims the send, the
-  other waits for the next pass, and a failed send still retries.
+  other waits for the next pass (and logs that it did), and a failed send still retries. A
+  leftover claim file dated in the future, or a folder at its name, no longer holds the
+  notification back.
 - A diagnostic bundle's config.yaml no longer carries free text. The IDs and linked findings of
   exceptions are replaced like their descriptions and sign-offs already were, every copy of a
-  repeated `exceptions:` key is covered, and the `#` comments are left out of the staged copy.
+  repeated `exceptions:` key is covered, and the `#` comments are left out of the staged copy,
+  including one that follows an apostrophe (`Don't stop # note`).
 - Devices stays fast when thousands of Macs carry the same placeholder serial number. A serial
   or ID that more than 50 Macs share no longer joins rows from different sources; a row left
   with nothing else to go on is matched by computer name, as a row with no serial is.

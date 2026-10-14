@@ -1261,6 +1261,7 @@ struct DeviceRecordMerger {
     /// Rows left out per source file because nothing told which Mac they described.
     private(set) var leftOutRows: [String: Int] = [:]
     private var identifierIndex: [DeviceIdentifier: [String: Holders]] = [:]
+    /// Records by name, kept to two: callers only ask for none, one or several.
     private var nameIndex: [String: [Int]] = [:]
     private var usedIDs: Set<String> = []
 
@@ -1346,8 +1347,12 @@ struct DeviceRecordMerger {
             identifierIndex[kind, default: [:]][value, default: Holders()].add(idx)
         }
         let nameKey = DeviceInventoryService.normalizedKey(records[idx].name)
-        if !nameKey.isEmpty, !nameIndex[nameKey, default: []].contains(idx) {
-            nameIndex[nameKey, default: []].append(idx)
+        if !nameKey.isEmpty {
+            var holders = nameIndex[nameKey] ?? []
+            if holders.count < 2, !holders.contains(idx) {
+                holders.append(idx)
+                nameIndex[nameKey] = holders
+            }
         }
     }
 

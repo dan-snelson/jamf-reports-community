@@ -105,4 +105,39 @@ final class DeviceRecordMergerSharedIdentifierTests: XCTestCase {
         XCTAssertEqual(merger.records.filter { $0.daysSinceContact == 5 }.count, count / 3)
         XCTAssertLessThan(elapsed, 5, "took \(elapsed) s")
     }
+
+    // MARK: Shared names
+
+    private func namedComputer(_ id: Int, name: String) -> DeviceInventoryRecord {
+        let item: [String: Any] = [
+            "id": String(id), "general": ["name": name],
+            "hardware": ["serialNumber": "FXTR\(id)"],
+        ]
+        return DeviceInventoryService.recordFromComputer(item, source: "computers.json")
+    }
+
+    /// Several Macs on one name stay several, and a name-only row cannot pick one of them.
+    func testManyMacsOnOneNameStayApartAndANameOnlyRowIsLeftOut() {
+        var merger = DeviceRecordMerger()
+        for id in 1...120 { merger.upsert(namedComputer(id, name: "localhost")) }
+
+        merger.upsert(DeviceInventoryService.recordFromCompliance(
+            ["name": "localhost", "days_since_contact": "9"], source: "device-compliance.json"))
+
+        XCTAssertEqual(merger.records.count, 120)
+        XCTAssertEqual(merger.leftOutRows["device-compliance.json"], 1)
+        XCTAssertTrue(merger.records.allSatisfy { $0.daysSinceContact != 9 })
+    }
+
+    /// One name on thousands of Macs (a default hostname) must not make the merge quadratic.
+    func testTensOfThousandsOfRecordsOnOneNameMergeInReasonableTime() {
+        let count = 20_000
+        let start = Date()
+        var merger = DeviceRecordMerger()
+        for id in 1...count { merger.upsert(namedComputer(id, name: "localhost")) }
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(merger.records.count, count)
+        XCTAssertLessThan(elapsed, 6, "took \(elapsed) s")
+    }
 }

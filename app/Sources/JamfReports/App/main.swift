@@ -308,7 +308,8 @@ private func scheduledRunSingleBody(
         // "Backup failed" health row the operator has no way to clear (#213).
         // A schedule that has nothing to do for a profile is not a failed
         // schedule — log why and return success.
-        guard ProfileProductType.detect(from: routingConfig).type == .jamfPro else {
+        let backupDetected = ProfileProductType.detect(from: routingConfig, profile: profile)
+        guard backupDetected.type == .jamfPro else {
             let message = "[skip] scheduled backup skipped for '\(profile)': `pro backup` is a "
                 + "Jamf Pro command and this profile is configured for Jamf School "
                 + "(school_cli.enabled in config.yaml). Nothing to back up — not a failure. "
@@ -416,7 +417,7 @@ private func scheduledRunSingleBody(
         // Only Jamf Pro collect (via ReportEngine.collect) writes summary.json;
         // School collect does not — avoid a false "Trends updated" claim for School.
         if mode == .snapshotOnly {
-            let detected = ProfileProductType.detect(from: routingConfig)
+            let detected = ProfileProductType.detect(from: routingConfig, profile: profile)
             // Trends only moved if a Jamf Pro collect ran AND its summary
             // reached disk. Claiming it otherwise is the specific lie this
             // release is closing: the operator reads "Trends updated" as proof
@@ -497,6 +498,15 @@ private func scheduledRunSingleBody(
             template: template,
             onLine: onLine
         )
+        if let csv = resolvedCSV {
+            do {
+                try CSVInboxService.markConsumed(csv, profile: profile)
+            } catch {
+                let warning = "[warn] \(error.localizedDescription)"
+                print(warning)
+                recorder?.record(warning)
+            }
+        }
         if !failures.isEmpty {
             let partialMsg = partialRunMarker(sheetFailures: failures.count)
             recorder?.record(partialMsg)
@@ -644,10 +654,11 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
     let discovered = ProfileService.discoverLocal()
     let profiles = ProfileService.runnableProfiles(discovered, excluding: excluded)
     for p in discovered where p.status == .error && !excluded.contains(p.name) {
-        fputs("[info] skipping \(p.name): \(p.authMethod)\n", stderr)
+        let reason = p.unusableReason ?? "not usable"
+        fputs("[info] skipping \(p.name): \(reason)\n", stderr)
         // The background item's stderr goes nowhere; the log keeps the reason.
         AppLogger.schedule.notice(
-            "skipping \(p.name, privacy: .public): \(p.authMethod, privacy: .public)"
+            "skipping \(p.name, privacy: .public): \(reason, privacy: .public)"
         )
     }
     guard !profiles.isEmpty else {

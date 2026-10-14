@@ -6,9 +6,15 @@ report. This page walks through it and the workspace it creates.
 ## Reaching onboarding
 
 On first launch, when jamf-cli has no profiles yet, the app opens a **Welcome chooser** with
-three cards:
+four cards:
 
-- **Connect Jamf Pro** — starts the Jamf Pro onboarding flow.
+- **Connect with Jamf Account** — the way
+  [jamf-cli's wiki recommends](https://github.com/Jamf-Concepts/jamf-cli/wiki#getting-started)
+  to connect Jamf Cloud: a Jamf Account integration scoped to one platform environment,
+  through the Jamf Platform API. It starts the Jamf Pro onboarding flow
+  with the Authenticate step already on the Jamf Account form.
+- **Connect a Jamf Pro server** — the same flow with an OAuth2 API client, for an on-premises
+  server, GovCloud or any Jamf Pro instance. The Jamf Platform API gateway is Jamf Cloud only.
 - **Connect Jamf School** — starts a Jamf School-only onboarding flow (see
   [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School)): the
   same wizard, minus the Jamf Pro Authenticate / Validate / Add-products steps, with a
@@ -17,7 +23,15 @@ three cards:
   every screen before connecting anything. Demo mode is not a real workspace; switch back
   to a real connection anytime from **Settings → jamf-cli → Demo mode**.
 
-After the initial choice the chooser does not reappear. To set up additional tenants
+Until setup finishes, **Start over** (and **Back** on the first step) returns to the chooser
+so you can pick another card. If setup has already created the workspace folder or a jamf-cli
+profile, it asks first, then moves that folder to the Trash and removes that profile with
+`jamf-cli config remove-profile`, which also deletes its saved credentials. A folder or profile
+that existed before setup is never touched. When the profile cannot be removed, setup stays
+open and names the command to run. The cards already chose the connection type, so the
+Authenticate step does not ask for it again on this path.
+
+After setup finishes the chooser does not reappear. To set up additional tenants
 later, open the **workspace switcher** at the bottom of the sidebar and choose **Add
 workspace…**, or click **Settings → jamf-cli → Connections → Add connection**. Both
 routes start the same onboarding flow.
@@ -77,26 +91,43 @@ profile has a workspace, for example after the workspace folder is emptied.
    folder so several Macs build one pooled history; see
    [Security & Operational Considerations](https://github.com/tonyyo11/jamf-reports-community/wiki/10-Security-and-Operational-Considerations)
    before you do, because everyone with access to that folder can read raw device data.
-4. **Authenticate** — connect Jamf Pro with either OAuth2 API client credentials (URL,
-   client ID, client secret) or a Platform API scope (environment ID, or tenant ID for
-   a legacy integration). The secret is passed to `jamf-cli` over a controlling TTY and
-   cleared immediately; the app never persists it. `jamf-cli` stores the resulting token
-   in the macOS keychain. For a Platform API connection, create the integration in Jamf
+4. **Authenticate** — connect with a Jamf Account integration (Platform API, recommended
+   for Jamf Cloud) or with OAuth2 API client credentials (URL, client ID, client secret).
+   For a Jamf Account integration, pick your **Region** (United States, Europe or
+   Asia-Pacific) and a scope: **Environment** with the environment ID (use this), or
+   **Tenant (legacy)** with the tenant ID, which cannot reach Compliance Benchmarks or
+   Blueprints. A profile holds one environment; an integration scoped to several needs one
+   profile per environment, with the same client ID and secret, and more environments from
+   the same integration are added from **Data Sources → Connection → Add environments** after
+   setup (see [Adding more environments](#adding-more-environments-from-the-same-integration)).
+   jamf-cli suggests keeping a Jamf Pro OAuth profile beside the gateway profile for the
+   commands the gateway refuses (device actions among them). Jamf Reports does not run them and
+   collects one profile per fleet: when both reach the same Jamf Pro, setup keeps the Platform
+   API profile, notes the OAuth one as "same Jamf Pro as ...", and leaves it out unless you tick
+   it. The secret is passed to `jamf-cli` over a controlling TTY and cleared immediately; the
+   app never persists it. `jamf-cli` keeps the credentials in the macOS keychain and caches
+   tokens on disk. An organization-level integration is not accepted: it reaches only Jamf
+   Account, so create an environment-level one. For a Platform API connection, create the
+   integration in Jamf
    Account first — at the platform environment level, scoped to one environment, with
    read permissions only.
    [Permissions & Access](https://github.com/tonyyo11/jamf-reports-community/wiki/13-Permissions-and-Access)
    has the steps.
 5. **Validate** — the app runs `jamf-cli config validate` against the new profile and
    reports success or a redacted error. For a Platform API profile it also checks the
-   environment or tenant ID, and setup stops on an ID the gateway rejects; see
+   environment or tenant ID, and setup stops on an ID the gateway rejects or an environment
+   with no Jamf Pro (probably a Jamf School tenant; the banner offers **Set up Jamf
+   School**); see
    [Check the scope ID](https://github.com/tonyyo11/jamf-reports-community/wiki/13-Permissions-and-Access#check-the-scope-id).
 6. **CSV mapping** — optionally pick a Jamf Pro CSV export. The app scaffolds a
    `config.yaml` with best-guess column mappings from the export's headers. You can also
    **Skip for now** — the app writes a minimal config and works from `jamf-cli` data
    alone (see [Running without a CSV](#running-without-a-csv)).
-7. **Add products (optional)** — if you use Jamf Protect or Jamf School, connect them here
-   (`protect setup` / `school setup`); they augment the Jamf Pro reports. You can also add
-   them later from the **Data Sources** screen. (A Jamf School-*only* district should instead
+7. **Add products (optional)** — if you use Jamf Protect, connect it here
+   (`protect setup`); it augments the Jamf Pro reports. You can also add
+   it later from the **Data Sources** screen, where **Disconnect** turns it off again (it
+   leaves the jamf-cli profile in jamf-cli). (Jamf School is never added to a Jamf Pro
+   workspace; a Jamf School district should instead
    pick **Connect Jamf School** on the Welcome chooser, which runs the dedicated School path
    below — no Jamf Pro placeholder credentials.)
 8. **First report** — for Jamf Pro, the app collects a snapshot (refresh and inventory
@@ -106,11 +137,42 @@ profile has a workspace, for example after the workspace folder is emptied.
    looks off you can **Skip & finish setup** — the workspace is fully configured at this
    point and you can run reports later from the Reports tab.
 
+### Adding more environments from the same integration
+
+A jamf-cli profile holds one environment, so each extra environment of a Jamf Account
+integration is its own profile with the same client ID and secret. Once a Platform API
+profile is set up, **Data Sources → Connection** lists the connection it belongs to (a
+profile in none offers **Start a connection**).
+
+1. Choose **Add environments…**.
+2. Paste the environment IDs, one per line, each with an optional label after it
+   (`<id> Production`). The label names the new profile and its sidebar entry: the profile
+   is `<connection>-<label>` in lowercase letters, digits and hyphens. A name that already
+   exists, or differs from an existing profile or workspace only by letter case, is refused
+   and shown before anything runs.
+3. Type the client ID and secret once, then choose **Register & check**. The app registers
+   each profile the way onboarding does (the secret goes over a controlling TTY and is
+   cleared when the run ends or the sheet closes) and runs the connection check for each ID.
+4. The list shows one result per ID. An environment where Jamf Pro answers gets a workspace
+   (the same minimal config.yaml as skipping CSV mapping) and joins the connection. An
+   environment where no Jamf Pro answers is not added: its MDM is probably Jamf School, which
+   is read with a School API key in a Jamf School workspace (the result offers **Add Jamf
+   School workspace…**). A rejected or unconfirmed ID is not added either.
+
+The app has no way to remove a jamf-cli profile, so a profile registered for an ID that was
+not added stays in jamf-cli; the result names the `jamf-cli config remove-profile` command to
+remove it. **Update credentials for all…** re-registers every profile in the connection with
+a new secret (each with its own ID) and checks each one. **Rename…** changes the connection
+name and member labels, and **Remove** on a member takes it out of the connection without
+deleting its jamf-cli profile or workspace. The grouping is kept per Mac, holds no
+credentials, and the app never keeps the secret.
+
 ### The Jamf School path
 
 Choosing **Connect Jamf School** on the Welcome chooser runs a shorter sequence — Welcome,
-Install CLI, Workspace, CSV mapping, **Connect School**, First report — skipping the Jamf
-Pro Authenticate, Validate, and Add-products steps. The Connect School step registers a
+Install CLI, Workspace, Workspace config, **Connect School**, First report — skipping the Jamf
+Pro Authenticate, Validate, and Add-products steps. Workspace config writes config.yaml and
+maps no CSV: Jamf School reports come from jamf-cli. The Connect School step registers a
 `jamf-cli school` profile (School URL + Network ID + API key, passed over stdin and cleared)
 and wires `school_cli.enabled`/`profile` into the workspace config, so the first report and
 every later collect route to the Jamf School engine. jamf-cli must still be installed to get
@@ -143,7 +205,9 @@ whatever folder **Settings → Workspace location** points at, if you have moved
 ```
 
 Everything for one tenant is under one folder. To move a profile to another Mac, copy the
-folder and re-authenticate with `jamf-cli pro setup` for that profile. Changing the
+folder and re-authenticate that profile with `jamf-cli platform setup --profile-name <profile>`
+(a gateway profile) or `jamf-cli pro setup --url <url> --profile-name <profile>` (an OAuth
+profile). Changing the
 workspace location does **not** move existing data — copy `config.yaml` and `snapshots/`
 across yourself; Run check on the Config screen says when more history for a profile is
 sitting in the folder you left behind.
@@ -190,20 +254,21 @@ runs a real connection check and will report failure against placeholder values 
 advancing past it only requires that the profile registered, not that the check passed. So
 a CSV-only admin can complete onboarding with placeholder Jamf Pro values and map a CSV at
 the CSV-mapping step. (A Jamf School-only admin can skip this placeholder workaround
-entirely by choosing **Connect Jamf School** on the Welcome chooser; the older route —
-placeholder Jamf Pro values, then connect Jamf School at **Add products** — still works
-for existing installs.)
+entirely by choosing **Connect Jamf School** on the Welcome chooser.)
 
 To add real credentials later, open **Data Sources → Connection health → Update
 credentials…** — it re-registers the profile's jamf-cli credentials (URL, client ID,
 and secret) and runs the same connection check onboarding does, without leaving the app.
 The same button also appears when the connection-health probe reports an unauthorized or
 credentials-unresolved profile. As a Terminal alternative, run this for the same profile
-name:
+name. Without `--profile-name`, jamf-cli writes a profile called `default` instead of
+renewing yours:
 
 ```bash
-jamf-cli pro setup --url https://your-instance.jamfcloud.com
+jamf-cli pro setup --url https://your-instance.jamfcloud.com --profile-name <your profile>
 ```
+
+For a Platform API profile, use `jamf-cli platform setup --profile-name <your profile>`.
 
 This only writes to jamf-cli's own credential store — the app's `config.yaml` and the
 rest of the workspace are untouched, so nothing else needs to be redone.

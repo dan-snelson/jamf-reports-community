@@ -22,17 +22,24 @@ enum ProfileService {
         }
     }
 
-    private struct JamfCLIConfigProfile: Decodable {
+    /// One profile of jamf-cli's config, read from `config list -o json` or the config file.
+    /// The environment and tenant IDs are reduced to `platformLevel` on decode and not kept.
+    struct JamfCLIConfigProfile: Decodable {
         let name: String
         let url: String?
         let authMethod: String?
         let isDefault: Bool
+        /// The file's `product:` key; `config list` does not print it.
+        var product: String?
+        var platformLevel: PlatformScopeLevel?
 
         private enum CodingKeys: String, CodingKey {
             case name
             case url
             case authMethod = "auth-method"
             case isDefault = "default"
+            case environmentID = "environment-id"
+            case tenantID = "tenant-id"
         }
 
         init(from decoder: Decoder) throws {
@@ -41,13 +48,31 @@ enum ProfileService {
             url = try container.decodeIfPresent(String.self, forKey: .url)
             authMethod = try container.decodeIfPresent(String.self, forKey: .authMethod)
             isDefault = try container.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+            product = nil
+            platformLevel = Self.level(
+                authMethod: authMethod,
+                environmentID: try container.decodeIfPresent(String.self, forKey: .environmentID),
+                tenantID: try container.decodeIfPresent(String.self, forKey: .tenantID))
         }
 
-        init(name: String, url: String?, authMethod: String?, isDefault: Bool) {
+        init(
+            name: String, url: String?, authMethod: String?, isDefault: Bool,
+            product: String? = nil, platformLevel: PlatformScopeLevel? = nil
+        ) {
             self.name = name
             self.url = url
             self.authMethod = authMethod
             self.isDefault = isDefault
+            self.product = product
+            self.platformLevel = platformLevel
+        }
+
+        /// Only a platform profile has a scope level.
+        static func level(
+            authMethod: String?, environmentID: String?, tenantID: String?
+        ) -> PlatformScopeLevel? {
+            guard JamfCLIAuthMethod(raw: authMethod)?.isPlatform == true else { return nil }
+            return PlatformScopeLevel.level(environmentID: environmentID, tenantID: tenantID)
         }
     }
 
@@ -186,7 +211,7 @@ enum ProfileService {
     /// local `~/Jamf-Reports/<profile>/config.yaml` workspaces. Returns sorted by
     /// default profile first, then by name. In demo mode, the caller falls back
     /// to `DemoData.cliProfiles`.
-    static func discoverLocal() -> [JamfCLIProfile] {
+    static func discoverLocal(keeping active: Set<String> = []) -> [JamfCLIProfile] {
         let scheduleCounts = Dictionary(
             grouping: ScheduleStore().load().filter { !$0.allProfiles }, by: \.profile
         ).mapValues(\.count)
@@ -204,7 +229,48 @@ enum ProfileService {
             )
         }
         profiles.append(contentsOf: workspaceProfiles)
-        return profiles.sorted(by: profileSort)
+        return droppingPairedProductProfiles(profiles.sorted(by: profileSort), keeping: active)
+    }
+
+    /// Drops a jamf-cli profile that is not a workspace of its own: another workspace's Protect
+    /// connection or foreign School login (connecting Protect creates a second jamf-cli profile
+    /// and names it in `protect.profile`; earlier builds did the same for Jamf School in
+    /// `school_cli.profile`), and a Protect or Security Cloud login whatever names it
+    /// (`JamfCLIProfile.product`). None of these holds Jamf Pro data, so listing one offers an
+    /// empty workspace and makes `--all-profiles` runs collect Jamf Pro data against it. A
+    /// paired profile with its own `config.yaml` stays, as does one in `keeping` (the active
+    /// one). A Protect or Security Cloud login is dropped even then: its Protect data lives in
+    /// the Jamf Pro workspace that names it, and a folder of its own (made by a catch-up,
+    /// scheduled run or click on 2.9.0) holds nothing the app reads. The folder is left alone.
+    static func droppingPairedProductProfiles(
+        _ profiles: [JamfCLIProfile],
+        under root: URL = workspacesRoot(),
+        keeping active: Set<String> = []
+    ) -> [JamfCLIProfile] {
+        var paired = Set<String>()
+        for profile in profiles where hasWorkspace(profile.name, under: root) {
+            let products = ConnectedProducts.read(
+                configURL: configURL(profile.name, under: root), workspace: profile.name)
+            for name in [products.protectProfile, products.foreignSchoolProfile].compactMap({ $0 })
+            where name != profile.name {
+                paired.insert(name)
+            }
+        }
+        return profiles.filter { profile in
+            if profile.product.isNeverAWorkspace { return false }
+            guard paired.contains(profile.name) else { return true }
+            return active.contains(profile.name) || hasWorkspace(profile.name, under: root)
+        }
+    }
+
+    private static func configURL(_ name: String, under root: URL) -> URL {
+        root.appendingPathComponent(ProfileName.pathComponent(name), isDirectory: true)
+            .appendingPathComponent("config.yaml")
+    }
+
+    /// True when `name` has a workspace folder under `root` holding a `config.yaml`.
+    static func hasWorkspace(_ name: String, under root: URL = workspacesRoot()) -> Bool {
+        FileManager.default.fileExists(atPath: configURL(name, under: root).path)
     }
 
     /// Profiles of the workspace folders under `root` (holding a `config.yaml`) that no
@@ -237,12 +303,20 @@ enum ProfileService {
     /// The profiles a multi-profile run collects: exclusions applied, and the
     /// `.error` ones dropped. Discovery marks a profile the app can't use that way
     /// (unsupported name, or a case variant sharing another's folder); it has no
-    /// workspace to run in, and counting it failed every run of the schedule.
+    /// workspace in which to run, and counting it failed every run of the schedule.
+    /// A Protect or Security Cloud login is never run. A Jamf School login or an
+    /// organization-level Platform integration is left out until it has a workspace of its
+    /// own (which is how it keeps running as before).
     static func runnableProfiles(
         _ profiles: [JamfCLIProfile],
-        excluding excluded: Set<String>
+        excluding excluded: Set<String>,
+        hasWorkspace: (String) -> Bool = { ProfileService.hasWorkspace($0) }
     ) -> [JamfCLIProfile] {
-        applyingExclusions(profiles, excluding: excluded).filter { $0.status != .error }
+        applyingExclusions(profiles, excluding: excluded).filter { profile in
+            guard profile.status != .error, !profile.product.isNeverAWorkspace else { return false }
+            let needsWorkspace = profile.product == .school || profile.isOrganizationLevel
+            return !needsWorkspace || hasWorkspace(profile.name)
+        }
     }
 
     // MARK: - Command-line arguments
@@ -289,6 +363,32 @@ enum ProfileService {
     /// app's local workspace directory after path-boundary validation.
     @discardableResult
     static func removeLocalWorkspace(profile: String) throws -> Bool {
+        let url = try confinedWorkspaceFolder(profile: profile)
+        do {
+            try FileManager.default.removeItem(at: url)
+            return true
+        } catch let error as NSError where error.code == NSFileNoSuchFileError {
+            return false
+        }
+    }
+
+    /// Moves one local workspace folder to the Trash, under the same path checks as
+    /// `removeLocalWorkspace`. False when there is no folder.
+    @discardableResult
+    static func trashLocalWorkspace(
+        profile: String,
+        trash: (URL) throws -> Void = {
+            try FileManager.default.trashItem(at: $0, resultingItemURL: nil)
+        }
+    ) throws -> Bool {
+        let url = try confinedWorkspaceFolder(profile: profile)
+        guard FileManager.default.fileExists(atPath: url.path) else { return false }
+        try trash(url)
+        return true
+    }
+
+    /// `profile`'s workspace folder, refused unless it resolves to a direct child of the root.
+    private static func confinedWorkspaceFolder(profile: String) throws -> URL {
         guard isValid(profile), let url = workspaceURL(for: profile) else {
             throw CleanupError.invalidProfile(profile)
         }
@@ -303,12 +403,7 @@ enum ProfileService {
         guard resolved.deletingLastPathComponent().standardizedFileURL.path == root.path else {
             throw CleanupError.outsideWorkspaceRoot(url)
         }
-        do {
-            try FileManager.default.removeItem(at: url)
-            return true
-        } catch let error as NSError where error.code == NSFileNoSuchFileError {
-            return false
-        }
+        return url
     }
 
     /// Lists profiles from `jamf-cli config list`. The
@@ -321,7 +416,8 @@ enum ProfileService {
     static func discoverJamfCLIProfiles(
         scheduleCounts: [String: Int],
         _testBinaryOverride: URL? = nil,
-        _testTimeout: TimeInterval = JamfCLIProbe.defaultTimeout
+        _testTimeout: TimeInterval = JamfCLIProbe.defaultTimeout,
+        _testConfigURL: URL? = nil
     ) -> [JamfCLIProfile] {
         #if DEBUG
         // A test never reads this Mac's ~/.config/jamf-cli/config.yaml, the fallback when no
@@ -356,7 +452,11 @@ enum ProfileService {
         guard let decoded = try? JSONDecoder().decode([JamfCLIConfigProfile].self, from: data) else {
             return fallbackConfigProfiles(scheduleCounts: scheduleCounts)
         }
-        return rows(for: decoded, scheduleCounts: scheduleCounts)
+        // `config list` leaves out the `product:` key; the file has it.
+        let fromFile = readConfigFile(at: _testConfigURL ?? defaultConfigFileURL)
+        return rows(
+            for: merging(listed: decoded, fromFile: fromFile),
+            scheduleCounts: scheduleCounts, configFileRead: fromFile != nil)
     }
 
     /// Profiles Jamf Reports can't use stay listed, marked `.error` with the
@@ -365,7 +465,8 @@ enum ProfileService {
     /// active, multi-profile runs and catch-up skip them).
     private static func rows(
         for configured: [JamfCLIConfigProfile],
-        scheduleCounts: [String: Int]
+        scheduleCounts: [String: Int],
+        configFileRead: Bool
     ) -> [JamfCLIProfile] {
         let unusable = unusableProfiles(in: configured.map(\.name))
         return configured.map { item in
@@ -375,8 +476,9 @@ enum ProfileService {
                     url: displayURL(item.url),
                     schedules: 0,
                     status: .error,
-                    authMethod: reason.label,
-                    isDefault: false
+                    authMethod: item.authMethod ?? "",
+                    isDefault: false,
+                    unusableReason: reason.label
                 )
             }
             return JamfCLIProfile(
@@ -385,9 +487,91 @@ enum ProfileService {
                 schedules: scheduleCounts[item.name] ?? 0,
                 status: item.isDefault ? .ok : .idle,
                 authMethod: item.authMethod ?? "",
-                isDefault: item.isDefault
+                isDefault: item.isDefault,
+                product: derivedProduct(
+                    configProduct: item.product, authMethod: item.authMethod,
+                    url: item.url, configFileRead: configFileRead),
+                platformLevel: item.platformLevel
             )
         }
+    }
+
+    // MARK: - Product
+
+    /// The product a profile logs in to, first answer wins: (a) the `product:` key in jamf-cli's
+    /// config file (`pro`, `protect`, `school`, `security`; a value this build does not know is
+    /// `.unknown`, never Pro); (b) the auth method, where `apikey` is Jamf School (`school
+    /// setup`), `security` is Security Cloud (`security setup`) and `platform` is Jamf Pro;
+    /// (c) the host, where `*.protect.jamfcloud.com` is Protect and `*.jamfschool.com` is Jamf
+    /// School. Protect's `protect setup` writes plain `oauth2`, so only (a) and (c) can tell it
+    /// from Jamf Pro. Nothing says: Jamf Pro when the file was read, since jamf-cli treats an
+    /// absent `product:` as `pro`; otherwise `.unknown`, which is handled like Jamf Pro.
+    static func derivedProduct(
+        configProduct: String?, authMethod: String?, url: String?, configFileRead: Bool
+    ) -> JamfCLIProduct {
+        switch configProduct?.trimmingCharacters(in: .whitespaces).lowercased() ?? "" {
+        case "": break
+        case "pro": return .pro
+        case "protect": return .protect
+        case "school": return .school
+        case "security": return .securityCloud
+        default: return .unknown
+        }
+        switch JamfCLIAuthMethod(raw: authMethod) {
+        case .apiKey: return .school
+        case .security: return .securityCloud
+        case .platform: return .pro
+        default: break
+        }
+        if let host = url.flatMap({ URL(string: $0)?.host?.lowercased() }) {
+            if host.hasSuffix(".protect.jamfcloud.com") { return .protect }
+            if host.hasSuffix(".jamfschool.com") { return .school }
+        }
+        return configFileRead ? .pro : .unknown
+    }
+
+    /// `listed` (from `config list`) with each profile's `product:` key from the config file. A
+    /// list row without a scope ID reads as organization level, the one answer that blocks a
+    /// profile, so it is confirmed against the file whenever the file holds the profile: jamf-cli
+    /// versions that print no ID in `config list` must not turn every platform profile into one.
+    static func merging(
+        listed: [JamfCLIConfigProfile], fromFile: [JamfCLIConfigProfile]?
+    ) -> [JamfCLIConfigProfile] {
+        guard let fromFile else { return listed }
+        let byName = Dictionary(
+            fromFile.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        return listed.map { item in
+            guard let entry = byName[item.name] else { return item }
+            var merged = item
+            merged.product = entry.product
+            if item.platformLevel == .organization, let level = entry.platformLevel {
+                merged.platformLevel = level
+            }
+            return merged
+        }
+    }
+
+    /// jamf-cli's config file: `~/.config/jamf-cli/config.yaml`, the path its pinned
+    /// environment resolves to. nil in a test process, which never reads the real file.
+    static var defaultConfigFileURL: URL? {
+        #if DEBUG
+        if NSClassFromString("XCTestCase") != nil { return nil }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/jamf-cli/config.yaml")
+    }
+
+    /// The file is credentials-adjacent: it holds keychain references, and a user may have
+    /// pasted a literal secret into it. Read at most this many bytes, and keep only the keys
+    /// `parseConfigFile` names.
+    static let maxConfigFileBytes = 1_048_576
+
+    /// The profiles in jamf-cli's config file, or nil when it is missing, not a regular file,
+    /// over `maxConfigFileBytes` or not UTF-8.
+    static func readConfigFile(at url: URL?) -> [JamfCLIConfigProfile]? {
+        guard let url, let data = try? BoundedFile.read(url, limit: maxConfigFileBytes),
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        return parseConfigFile(text)
     }
 
     /// Reads profiles straight from jamf-cli's config file when `config list`
@@ -397,23 +581,39 @@ enum ProfileService {
         configURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".config/jamf-cli/config.yaml")
     ) -> [JamfCLIProfile] {
-        guard let text = try? String(contentsOf: configURL, encoding: .utf8) else { return [] }
+        guard let configured = readConfigFile(at: configURL) else { return [] }
+        return rows(for: configured, scheduleCounts: scheduleCounts, configFileRead: true)
+    }
 
+    /// The `profiles:` of jamf-cli's config file: name, url, auth-method, product and scope
+    /// level, and the file's `default-profile`. Indentation is relative (jamf-cli writes four
+    /// spaces, its wiki shows two), and keys nested under a profile are skipped. Only the
+    /// keys above are kept; a credential key is never stored.
+    static func parseConfigFile(_ text: String) -> [JamfCLIConfigProfile] {
+        struct Pending {
+            var name: String
+            var values: [String: String] = [:]
+        }
         let defaultProfile = firstScalar("default-profile", in: text)
+        let kept: Set<String> = ["url", "auth-method", "product", "environment-id", "tenant-id"]
         var configured: [JamfCLIConfigProfile] = []
-        var currentName: String?
-        var currentURL: String?
-        var currentAuthMethod: String?
+        var pending: Pending?
+        var nameIndent: Int?
+        var keyIndent: Int?
+        var inProfiles = false
 
         func flush() {
-            guard let name = currentName else { return }
+            guard let item = pending else { return }
+            let auth = item.values["auth-method"]
             configured.append(JamfCLIConfigProfile(
-                name: name, url: currentURL, authMethod: currentAuthMethod,
-                isDefault: name == defaultProfile
-            ))
+                name: item.name, url: item.values["url"], authMethod: auth,
+                isDefault: item.name == defaultProfile, product: item.values["product"],
+                platformLevel: JamfCLIConfigProfile.level(
+                    authMethod: auth, environmentID: item.values["environment-id"],
+                    tenantID: item.values["tenant-id"])))
+            pending = nil
         }
 
-        var inProfiles = false
         for rawLine in text.components(separatedBy: .newlines) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line == "profiles:" {
@@ -421,25 +621,26 @@ enum ProfileService {
                 continue
             }
             guard inProfiles, !line.isEmpty, !line.hasPrefix("#") else { continue }
-
-            if rawLine.hasPrefix("    "), line.hasSuffix(":") {
+            let indent = rawLine.prefix { $0 == " " }.count
+            if indent == 0 { break }
+            if nameIndent == nil { nameIndent = indent }
+            if indent == nameIndent, line.hasSuffix(":") {
                 flush()
-                currentName = unquotedYAMLKey(String(line.dropLast()))
-                currentURL = nil
-                currentAuthMethod = nil
-            } else if rawLine.hasPrefix("        "), let colon = line.firstIndex(of: ":") {
+                pending = Pending(name: unquotedYAMLKey(String(line.dropLast())))
+                keyIndent = nil
+            } else if indent > (nameIndent ?? indent), pending != nil,
+                      let colon = line.firstIndex(of: ":") {
+                if keyIndent == nil { keyIndent = indent }
+                guard indent == keyIndent else { continue }
                 let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
-                let value = String(line[line.index(after: colon)...])
+                guard kept.contains(key) else { continue }
+                pending?.values[key] = String(line[line.index(after: colon)...])
                     .trimmingCharacters(in: .whitespaces)
                     .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-                if key == "url" { currentURL = value }
-                if key == "auth-method" { currentAuthMethod = value }
-            } else if !rawLine.hasPrefix(" ") {
-                break
             }
         }
         flush()
-        return rows(for: configured, scheduleCounts: scheduleCounts)
+        return configured
     }
 
     /// A mapping key as jamf-cli's YAML writer emits it: plain, `"double"` (with `\"` and `\\`

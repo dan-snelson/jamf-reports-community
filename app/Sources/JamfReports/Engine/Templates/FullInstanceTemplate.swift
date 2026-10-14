@@ -109,10 +109,12 @@ struct FullInstanceTemplate: ReportTemplate {
             .buildingBreakdown,
             .departmentBreakdown,
             .orgInfo,
+            // Mobile
+            .mobileFleet,
             .auditAppendix,
         ]
     }
 
-    let pdfPagination: PaginationStrategy = .standard
+    let pdfPagination: PaginationStrategy = .sectionPerPage
     let recommendedSchedule: TemplateDataTier = .full
 }

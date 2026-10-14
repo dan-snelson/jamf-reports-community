@@ -8,10 +8,22 @@ struct OnboardingView: View {
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var flow = OnboardingFlow()
     @State private var showingCSVImporter = false
+    @State private var confirmingStartOver = false
+    @State private var isStartingOver = false
+    /// Set on first launch only: returns to the chooser, where the path was picked.
+    var onStartOver: (() -> Void)?
 
     /// The profile name as the commands on this screen show it.
     private var shellProfile: String { ProfileName.shellWord(flow.profileName.trimmedForView) }
     private var profileOption: String { ProfileName.profileOption(flow.profileName.trimmedForView) }
+
+    /// One profile holds one environment ID; an integration scoped to several needs one profile
+    /// each, with the same client ID and secret.
+    static let platformProfileNote = "A profile holds one environment. To report on more "
+        + "environments from the same integration, use Add environments in Data Sources after "
+        + "setup; they reuse this client ID and secret. jamf-cli's Jamf Pro and Classic "
+        + "commands that the gateway refuses need a separate Jamf Pro OAuth profile; Jamf "
+        + "Reports runs none of them."
 
     private let privileges = [
         "Computers: Read", "Mobile Devices: Read", "Mobile Profiles: Read",
@@ -36,6 +48,14 @@ struct OnboardingView: View {
         // The jamf-cli probe waits on child processes, so it starts here and runs off the main
         // actor, never from `OnboardingFlow.init()` while this view is being built.
         .task { await flow.refreshJamfCLIStatus() }
+        .confirmationDialog(
+            "Start over?", isPresented: $confirmingStartOver, titleVisibility: .visible
+        ) {
+            Button("Start over", role: .destructive) { performStartOver() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(flow.startOverMessage)
+        }
         .fileImporter(isPresented: $showingCSVImporter, allowedContentTypes: csvTypes) { result in
             switch result {
             case .success(let url):
@@ -77,7 +97,7 @@ struct OnboardingView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "Step \(flow.stepPosition) of \(flow.stepCount): \(flow.currentStep.label)"
+            "Step \(flow.stepPosition) of \(flow.stepCount): \(flow.label(for: flow.currentStep))"
         )
     }
 
@@ -112,7 +132,7 @@ struct OnboardingView: View {
                     .foregroundStyle(current ? Theme.Colors.goldBright : Theme.Text.tertiary(contrast))
             }
             if !compact || current {
-                Text(step.label)
+                Text(flow.label(for: step))
                     .font(.caption)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -135,13 +155,14 @@ struct OnboardingView: View {
                 lineWidth: 0.5
             )
         )
-        .help(step.label)
+        .help(flow.label(for: step))
     }
 
     private var stepHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
             Kicker(
-                text: "Step \(flow.stepPosition) of \(flow.stepCount) - \(flow.currentStep.label)",
+                text: "Step \(flow.stepPosition) of \(flow.stepCount) - "
+                    + flow.label(for: flow.currentStep),
                 tone: .gold
             )
             Text(headerTitle)
@@ -161,11 +182,12 @@ struct OnboardingView: View {
         case .workspace: "Name the workspace."
         case .authenticate:
             flow.proConnectionType == .platformGateway
-                ? "Connect via Platform Gateway."
+                ? "Connect with Jamf Account."
                 : "Connect to Jamf Pro."
         case .validate: "Validate the profile."
         case .addProducts: "Add more products."
-        case .csvMapping: "Map your first CSV export."
+        case .csvMapping:
+            flow.offersCSVMapping ? "Map your first CSV export." : "Write the workspace config."
         case .firstReport:
             flow.productPath == .school
                 ? "Generate the first report."
@@ -177,7 +199,7 @@ struct OnboardingView: View {
     private var headerSubtitle: String {
         switch flow.currentStep {
         case .welcome:
-            "This wizard creates the local folder structure, registers a jamf-cli profile, scaffolds config.yaml from your export, and runs the first workbook."
+            "This wizard creates the workspace folders, registers a jamf-cli profile, writes config.yaml and runs the first report."
         case .installCLI:
             "The app detects jamf-cli locally. Installation stays under your control; copy the Homebrew command if it is missing."
         case .workspace:
@@ -186,20 +208,22 @@ struct OnboardingView: View {
         case .authenticate:
             flow.proConnectionType == .platformGateway
                 ? "Registers a jamf-cli profile with Platform API auth. Secrets are passed over stdin and cleared immediately."
-                : "Jamf Reports passes the API client secret to jamf-cli over stdin and clears the field after the profile add command returns."
+                : "Jamf Reports passes the client secret to jamf-cli over stdin and clears it as soon as jamf-cli has saved the profile."
         case .validate:
             "jamf-cli validates the saved profile before report setup continues."
         case .addProducts:
-            "Optionally connect Jamf Protect and Jamf School. Both products are skippable — you can add them later from Settings."
+            "Optionally connect Jamf Protect. It is skippable — you can add it later from Data Sources. Jamf School uses its own workspace."
         case .csvMapping:
-            "CSV imports are accepted from ~/Documents, ~/Downloads, or ~/Desktop. The app's scaffold tool reads the CSV headers and writes the workspace config."
+            flow.offersCSVMapping
+                ? "CSV imports are accepted from ~/Documents, ~/Downloads, or ~/Desktop. The app's scaffold tool reads the CSV headers and writes the workspace config."
+                : "Jamf School reports come from jamf-cli, so there is no CSV to map. This writes the workspace's config.yaml; the next step connects Jamf School to it."
         case .firstReport:
             flow.productPath == .school
                 ? "The final step runs generate for the new profile and streams output here."
                 : "Collects a snapshot, then generates the first report. The per-device scans "
                     + "run later on their schedule, or via Collect now on Overview."
         case .schoolConnect:
-            "Registers a jamf-cli Jamf School profile with your Network ID and API key over stdin, then wires school_cli into this workspace's config so reports route to the Jamf School engine."
+            "Registers a jamf-cli Jamf School profile with your Network ID and API key over stdin, then sets this workspace to report on Jamf School."
         }
     }
 
@@ -248,7 +272,9 @@ struct OnboardingView: View {
             }
 
             if let check = flow.connectionCheck {
-                ConnectionCheckBanner(verdict: check)
+                ConnectionCheckBanner(
+                    verdict: check, onSetUpSchool: startSchoolWorkspace,
+                    tenantLevel: flow.platformScope == .tenant)
             }
 
             if flow.offersContinueWithoutValidating {
@@ -344,8 +370,8 @@ struct OnboardingView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("No Homebrew? Download the binary from the jamf-cli GitHub releases "
-                    + "page, place it in /usr/local/bin, then click Re-check above.")
+                Text("No Homebrew? Download the installer package (.pkg) from the jamf-cli "
+                    + "GitHub releases page, run it, then click Re-check above.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                     .fixedSize(horizontal: false, vertical: true)
@@ -414,28 +440,34 @@ struct OnboardingView: View {
 
     private var authenticateStep: some View {
         VStack(alignment: .leading, spacing: 18) {
-            // Connection-type picker
-            Card(padding: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    FieldLabel(label: "Connection type")
-                    Picker("", selection: Binding(
-                        get: { flow.proConnectionType },
-                        set: { flow.proConnectionType = $0 }
-                    )) {
-                        ForEach(OnboardingFlow.ProConnectionType.allCases) { kind in
-                            Text(kind.label).tag(kind)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.radioGroup)
-                    TipView(OnboardingTips.connectionType)
-                }
+            // The first-launch chooser already picked the connection; Start over changes it.
+            if onStartOver == nil {
+                connectionTypePicker
             }
 
             if flow.proConnectionType == .oauth2 {
                 oauth2Form
             } else {
                 platformGatewayForm
+            }
+        }
+    }
+
+    private var connectionTypePicker: some View {
+        Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                FieldLabel(label: "Connection type")
+                Picker("", selection: Binding(
+                    get: { flow.proConnectionType },
+                    set: { flow.proConnectionType = $0 }
+                )) {
+                    ForEach(OnboardingFlow.ProConnectionType.allCases) { kind in
+                        Text(kind.label).tag(kind)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.radioGroup)
+                TipView(OnboardingTips.connectionType)
             }
         }
     }
@@ -455,7 +487,8 @@ struct OnboardingView: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 5) {
                         FieldLabel(label: "Client ID")
-                        PNPTextField(value: binding(\.clientID), mono: true)
+                        PNPTextField(
+                            value: binding(\.clientID), placeholder: "OAuth client ID", mono: true)
                     }
                     .frame(maxWidth: .infinity)
 
@@ -498,8 +531,9 @@ struct OnboardingView: View {
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text("1. In account.jamf.com, open Integrations → Create integration")
-                        Text("2. Scope level: Platform environment, choosing only the "
-                            + "environment that holds your Jamf Pro tenant")
+                        Text("2. Scope level: Platform environment (recommended), choosing "
+                            + "the environment that holds your Jamf Pro tenant. Tenant level "
+                            + "is legacy and cannot reach Compliance Benchmarks or Blueprints")
                         Text("3. Permissions: Read only, for the report areas you want")
                         Text("4. Copy the client ID and the client secret (shown only once)")
                         Text("5. Copy the environment ID: open the integration and click the "
@@ -508,24 +542,17 @@ struct OnboardingView: View {
                     }
                     .font(.footnote)
                     .foregroundStyle(Theme.Colors.fg2)
+                    Text(OnboardingView.platformProfileNote)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Card(padding: 22) {
                 VStack(alignment: .leading, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 5) {
-                        FieldLabel(label: "Gateway URL")
-                        PNPTextField(
-                            value: binding(\.gatewayURL),
-                            placeholder: "https://us.api.jamfcloud.com",
-                            mono: true
-                        )
-                        validationLine(
-                            value: flow.gatewayURL, ok: flow.isGatewayURLValid,
-                            text: "Must use https:// and include a host"
-                        )
-                    }
+                    GatewayRegionPicker(flow: flow)
 
                     VStack(alignment: .leading, spacing: 8) {
                         FieldLabel(label: "Platform API scope")
@@ -538,12 +565,7 @@ struct OnboardingView: View {
                                 ($0, $0.label, nil)
                             }
                         )
-                        Text(
-                            "Environment is where a GA integration is usually created "
-                                + "(needs jamf-cli 1.28 or later). Tenant is the legacy "
-                                + "single-tenant level and cannot reach Compliance Benchmarks "
-                                + "or blueprint status."
-                        )
+                        Text(OnboardingFlow.PlatformScope.caption)
                         .font(.caption)
                         .foregroundStyle(Theme.Colors.fg2)
                         FieldLabel(label: flow.platformScope.idFieldLabel)
@@ -558,7 +580,9 @@ struct OnboardingView: View {
                     HStack(alignment: .top, spacing: 12) {
                         VStack(alignment: .leading, spacing: 5) {
                             FieldLabel(label: "Client ID")
-                            PNPTextField(value: binding(\.platformClientID), mono: true)
+                            PNPTextField(
+                                value: binding(\.platformClientID),
+                                placeholder: "Platform client ID", mono: true)
                         }
                         .frame(maxWidth: .infinity)
 
@@ -588,7 +612,11 @@ struct OnboardingView: View {
     private var addProductsStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             protectProductCard
-            schoolProductCard
+            Text("Jamf School uses its own workspace. Add one later from the workspace menu "
+                + "in the sidebar: Add Jamf School workspace.")
+                .font(.footnote)
+                .foregroundStyle(Theme.Text.tertiary(contrast))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -707,111 +735,9 @@ struct OnboardingView: View {
         }
     }
 
-    private var schoolProductCard: some View {
-        Card(padding: 22) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 12) {
-                    Image(systemName: "graduationcap.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.goldBright)
-                        .frame(width: 38, height: 38)
-                        .background(
-                            Theme.Colors.gold.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Jamf School")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(Theme.Colors.fg)
-                        Text("Device and user management for K-12 and education environments.")
-                            .font(.footnote)
-                            .foregroundStyle(Theme.Text.tertiary(contrast))
-                    }
-                    Spacer()
-                    if flow.schoolConnected {
-                        Pill(text: "CONNECTED", tone: .teal, icon: "checkmark")
-                    }
-                }
-
-                configNote(flow.schoolConfigNote)
-
-                if !flow.schoolConnected {
-                    Divider().background(Theme.Colors.hairline)
-
-                    Text("Find your Network ID at Devices → Enroll Device(s). Generate an API key at Organization → Settings → API.")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        FieldLabel(label: "School URL")
-                        PNPTextField(
-                            value: binding(\.schoolURL),
-                            placeholder: "https://yourorg.jamfcloud.com"
-                        )
-                    }
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        FieldLabel(label: "Profile name")
-                        PNPTextField(value: binding(\.schoolProfileName), placeholder: "school", mono: true)
-                        FieldHelp(text: "Any name without line breaks or spaces at either end.")
-                    }
-
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            FieldLabel(label: "Network ID")
-                            PNPTextField(value: binding(\.schoolNetworkID), mono: true)
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        VStack(alignment: .leading, spacing: 5) {
-                            FieldLabel(label: "API Key")
-                            SecureSecretField(
-                                placeholder: "School API key",
-                                onTextChange: { flow.schoolAPIKeyFieldHasText = $0 }
-                            ) { data in
-                                flow.setSchoolAPIKey(data)
-                            }
-                            .frame(height: 28)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-
-                    if let err = flow.schoolConnectionError {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundStyle(Theme.Colors.danger)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    HStack(spacing: 10) {
-                        PNPButton(
-                            title: flow.isConnectingSchool ? "Connecting…" : "Connect School",
-                            icon: "graduationcap.fill",
-                            style: .gold,
-                            size: .sm
-                        ) {
-                            NSApp.keyWindow?.makeFirstResponder(nil)
-                            Task { await flow.registerSchoolProfile() }
-                        }
-                        .disabled(
-                            flow.isConnectingSchool
-                            || flow.schoolURL.trimmedForView.isEmpty
-                            || flow.schoolProfileName.trimmedForView.isEmpty
-                            || flow.schoolNetworkID.trimmedForView.isEmpty
-                            || (!flow.schoolConnected && flow.schoolAPIKey.isEmpty
-                                && !flow.schoolAPIKeyFieldHasText)
-                        )
-                    }
-                }
-            }
-        }
-    }
-
     /// Jamf School-only connect step (School product path).
     ///
-    /// Reuses the exact Connect School machinery from the Add-products step —
-    /// same `school setup` PTY call, same fields, same redaction — but connects
-    /// School as the workspace's primary product via `connectSchoolAsPrimary`
+    /// Connects School as the workspace's primary product via `connectSchoolAsPrimary`
     /// (the workspace profile name is the School jamf-cli profile; there is no
     /// separate profile-name field here).
     private var schoolConnectStep: some View {
@@ -872,7 +798,9 @@ struct OnboardingView: View {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 5) {
                                 FieldLabel(label: "Network ID")
-                                PNPTextField(value: binding(\.schoolNetworkID), mono: true)
+                                PNPTextField(
+                                    value: binding(\.schoolNetworkID), placeholder: "Network ID",
+                                    mono: true)
                             }
                             .frame(maxWidth: .infinity)
 
@@ -914,7 +842,51 @@ struct OnboardingView: View {
         }
     }
 
+    @ViewBuilder
     private var csvMappingStep: some View {
+        if flow.offersCSVMapping {
+            proCSVMappingStep
+        } else {
+            schoolConfigStep
+        }
+    }
+
+    /// The School path's CSV step: no CSV, one button that writes config.yaml.
+    private var schoolConfigStep: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Card(padding: 22) {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "doc.badge.gearshape")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.goldBright)
+                            .frame(width: 40, height: 40)
+                            .background(
+                                Theme.Colors.gold.opacity(0.14),
+                                in: RoundedRectangle(cornerRadius: 8))
+                        Text("Workspace config")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Theme.Colors.fg)
+                        Spacer()
+                        PNPButton(title: "Write config", icon: "square.and.pencil") {
+                            Task { await flow.skipCSVMapping() }
+                        }
+                        .disabled(flow.isSkippingCSVMapping)
+                    }
+                    if flow.csvMappingSkipped {
+                        Pill(text: "CONFIG WRITTEN", tone: .teal, icon: "checkmark")
+                    }
+                }
+            }
+            logViewer(
+                title: csvLogViewerTitle,
+                lines: flow.csvOutput,
+                exitCode: flow.csvMappingSkipped ? 0 : nil
+            )
+        }
+    }
+
+    private var proCSVMappingStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Card(padding: 22) {
                 VStack(alignment: .leading, spacing: 14) {
@@ -968,7 +940,7 @@ struct OnboardingView: View {
     private var csvLogViewerTitle: String {
         if flow.isScaffoldingCSV { return "Scaffold running" }
         if flow.isSkippingCSVMapping { return "Workspace init running" }
-        if flow.csvMappingSkipped { return "Workspace init output" }
+        if flow.csvMappingSkipped || !flow.offersCSVMapping { return "Workspace init output" }
         return "Scaffold output"
     }
 
@@ -1048,6 +1020,15 @@ struct OnboardingView: View {
     ///     is `.onboarding`; the `.navigateToTab(.overview)` post lands the
     ///     user back on Overview where progress is visible.
     ///   - Sidebar "Add workspace…" → same as Settings path above.
+    /// Restarts this screen on the Jamf School steps, as the sidebar's "Add Jamf School
+    /// workspace…" does. The profile saved for the Platform ID stays in jamf-cli.
+    private func startSchoolWorkspace() {
+        flow.clearAllSecrets()
+        OnboardingFlow.pendingProductPath = .school
+        flow = OnboardingFlow()
+        Task { await flow.refreshJamfCLIStatus() }
+    }
+
     private func skipAndFinishOnboarding() {
         // Leave demo mode, through its cleanup, so the newly created real
         // profile replaces the demo; otherwise reload to pick it up.
@@ -1099,14 +1080,20 @@ struct OnboardingView: View {
     private var navigationButtons: some View {
         HStack {
             PNPButton(title: "Back") {
-                flow.previousStep()
+                if flow.currentStep == .welcome { requestStartOver() } else { flow.previousStep() }
             }
-            .disabled(flow.currentStep == .welcome || flow.isRegisteringProfile ||
-                      flow.isValidatingConnection || flow.isScaffoldingCSV ||
-                      flow.isSkippingCSVMapping || flow.isRunningFirstReport ||
-                      flow.isConnectingProtect || flow.isConnectingSchool)
-            .opacity(flow.currentStep == .welcome ? 0.45 : 1)
-            .accessibilityLabel("Back to step \(max(1, flow.stepPosition - 1))")
+            .disabled(!backEnabled)
+            .opacity(backEnabled ? 1 : 0.45)
+            .accessibilityLabel(flow.currentStep == .welcome
+                ? "Back to the first screen" : "Back to step \(max(1, flow.stepPosition - 1))")
+
+            if onStartOver != nil && flow.currentStep != .welcome {
+                PNPButton(title: "Start over", icon: "arrow.uturn.backward") {
+                    requestStartOver()
+                }
+                .disabled(flow.isBusy || isStartingOver)
+                .help("Go back to the first screen and choose another way to connect")
+            }
 
             Spacer()
 
@@ -1120,6 +1107,35 @@ struct OnboardingView: View {
             }
             .disabled(!flow.canAdvance)
             .opacity(flow.canAdvance ? 1 : 0.55)
+        }
+    }
+
+    private var backEnabled: Bool {
+        guard !flow.isBusy, !isStartingOver else { return false }
+        return flow.currentStep != .welcome || onStartOver != nil
+    }
+
+    /// Asks first when setup has created a folder or a jamf-cli profile, else goes straight back.
+    private func requestStartOver() {
+        if flow.startOverRemovesSomething {
+            confirmingStartOver = true
+        } else {
+            performStartOver()
+        }
+    }
+
+    /// Leaves for the chooser only when everything setup created is gone; otherwise the error
+    /// banner names what is left and how to remove it.
+    private func performStartOver() {
+        isStartingOver = true
+        Task {
+            let problems = await flow.startOver()
+            isStartingOver = false
+            if problems.isEmpty {
+                onStartOver?()
+            } else {
+                flow.lastError = problems.joined(separator: "\n")
+            }
         }
     }
 

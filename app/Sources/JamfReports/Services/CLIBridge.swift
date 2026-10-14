@@ -63,6 +63,18 @@ final class CLIBridge {
         let timestamp: Date
         let level: LogLevel
         let text: String
+
+        /// jamf-cli's own `Error: …` stderr line, which carries no level marker. Colour only:
+        /// `LogLevel` and Run History's failure verdict do not read it.
+        var isBareError: Bool {
+            text.drop(while: \.isWhitespace).lowercased().hasPrefix("error:")
+        }
+
+        /// A `[partial]` line streamed from another process arrives at info level
+        /// (`LogLevel.from` keeps it there for Run History); the live logs still show it amber.
+        var isPartialMarker: Bool {
+            text.drop(while: \.isWhitespace).lowercased().hasPrefix("[partial]")
+        }
     }
 
     /// A no-op `onLine` handler for call sites that do not need log streaming.
@@ -1032,7 +1044,7 @@ final class CLIBridge {
         AppLogger.auth.debug("auth probe profile=\(profile, privacy: .public)")
         let authMethod = ProfileService.discoverLocal()
             .first(where: { $0.name == profile })?
-            .authMethod ?? ""
+            .auth?.rawValue ?? ""
         guard !CLIBridge.shouldSkipAuthProbe(for: authMethod) else { return true }
         let probe = await probeToken(
             for: profile, executable: _testExecutable, timeout: probeTimeout
@@ -1070,7 +1082,7 @@ final class CLIBridge {
     /// API-key auth (Jamf School) uses key-based authentication with no bearer token
     /// to inspect, so the `pro auth token` probe must be skipped for those profiles.
     nonisolated static func shouldSkipAuthProbe(for authMethod: String) -> Bool {
-        authMethod == "apikey"
+        JamfCLIAuthMethod(raw: authMethod) == .apiKey
     }
 
     nonisolated func validateConnection(

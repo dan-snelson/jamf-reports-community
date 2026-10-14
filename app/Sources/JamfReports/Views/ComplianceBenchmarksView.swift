@@ -2,19 +2,22 @@ import SwiftUI
 import Charts
 
 /// Browse view for Platform API compliance benchmark snapshots.
-/// Renders a locked empty state until both the experimental Platform API
-/// flag is on AND the configured jamf-cli profile reports
-/// ``auth-method: platform``. When unlocked and data exists, surfaces a
+/// Renders a locked empty state until the configured jamf-cli profile
+/// reports ``auth-method: platform``. When unlocked and data exists, surfaces a
 /// rule pass/fail aggregate, a per-rule bar chart, and a device table.
 struct ComplianceBenchmarksView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var snapshot: ComplianceBenchmarksService.Snapshot = .empty
-    @State private var experimentalFeatures = ExperimentalFeatureService()
-    @State private var platformCapability: PlatformCapabilityService?
-    @State private var platformAvailable = false
-    @State private var platformTenantLevel = false
-    @State private var bridge = CLIBridge()
+    /// A Platform API profile, as profile discovery read it from jamf-cli.
+    private var platformAvailable: Bool {
+        !workspace.demoMode && workspace.activeCLIProfile?.auth?.isPlatform == true
+    }
+
+    /// A tenant-level integration, which collect skips benchmarks for.
+    private var platformTenantLevel: Bool {
+        !workspace.demoMode && workspace.activeCLIProfile?.platformLevel == .tenant
+    }
     @State private var selectedBenchmark = ""
 
     /// Tri-state lock decision the view's body switches on.
@@ -36,7 +39,6 @@ struct ComplianceBenchmarksView: View {
         }
         .tint(Theme.Colors.goldBright)
         .task(id: workspace.profile) {
-            await probePlatformAvailability()
             reload()
         }
         .onReceive(NotificationCenter.default.publisher(for: .refreshActiveTab)) { _ in
@@ -51,7 +53,6 @@ struct ComplianceBenchmarksView: View {
     var lockState: LockState {
         ComplianceBenchmarksView.decideLockState(
             isDemoMode: workspace.demoMode,
-            experimentalOn: experimentalFeatures.isEnabled(.platformAPI),
             platformAvailable: platformAvailable,
             hasData: snapshot.totalRules > 0 || snapshot.totalDevices > 0,
             tenantLevel: platformTenantLevel
@@ -61,15 +62,12 @@ struct ComplianceBenchmarksView: View {
     /// Pure state-machine function. Inputs:
     /// - ``isDemoMode``: in demo mode the gate is bypassed entirely and
     ///   the demo dataset always renders.
-    /// - ``experimentalOn``: ``ExperimentalFeatureService.platformAPI``
-    ///   toggle from Settings.
-    /// - ``platformAvailable``: result of ``PlatformCapabilityService``
+    /// - ``platformAvailable``: the active profile's auth method is `platform`
     ///   probe for the active profile.
     /// - ``hasData``: any cached rule or device data on disk.
     /// - ``tenantLevel``: the profile's integration is tenant level, so collect skips benchmarks.
     static func decideLockState(
         isDemoMode: Bool,
-        experimentalOn: Bool,
         platformAvailable: Bool,
         hasData: Bool,
         tenantLevel: Bool = false
@@ -77,7 +75,6 @@ struct ComplianceBenchmarksView: View {
         if isDemoMode {
             return hasData ? .unlockedWithData : .unlockedNoData
         }
-        guard experimentalOn else { return .locked }
         guard platformAvailable else { return .locked }
         if hasData { return .unlockedWithData }
         return tenantLevel ? .needsEnvironmentLevel : .unlockedNoData
@@ -104,7 +101,7 @@ struct ComplianceBenchmarksView: View {
 
     private static func header() -> some View {
         PageHeader(
-            kicker: "Experimental — Platform API",
+            kicker: "Platform API",
             title: "Compliance Benchmarks",
             subtitle: "Browse compliance benchmark results captured by jamf-cli's Platform API.",
             lastModified: nil
@@ -114,21 +111,12 @@ struct ComplianceBenchmarksView: View {
     private var lockedCard: some View {
         Card(padding: 24) {
             VStack(alignment: .leading, spacing: 16) {
-                ComplianceBenchmarksView.experimentalBadge()
                 EmptyStateView(
                     systemImage: "lock.shield",
-                    title: "Experimental — Platform API required",
-                    message: ComplianceBenchmarksView.lockReason(
-                        experimentalOn: experimentalFeatures.isEnabled(.platformAPI),
-                        platformAvailable: platformAvailable
-                    ),
+                    title: "Platform API profile required",
+                    message: ComplianceBenchmarksView.lockReason(),
                     commands: ComplianceBenchmarksView.setupCommands
                 )
-                if let url = ExperimentalFeatureService.Feature.platformAPI.discussionURL {
-                    Link("Learn more on GitHub Discussions \u{2192}", destination: url)
-                        .font(.callout)
-                        .foregroundStyle(Theme.Colors.gold)
-                }
             }
         }
     }
@@ -136,7 +124,6 @@ struct ComplianceBenchmarksView: View {
     private var unlockedEmptyCard: some View {
         Card(padding: 24) {
             VStack(alignment: .leading, spacing: 14) {
-                ComplianceBenchmarksView.experimentalBadge()
                 EmptyStateView(
                     systemImage: "checkmark.shield",
                     title: "No compliance snapshots yet",
@@ -155,7 +142,6 @@ struct ComplianceBenchmarksView: View {
     private var environmentLevelCard: some View {
         Card(padding: 24) {
             VStack(alignment: .leading, spacing: 14) {
-                ComplianceBenchmarksView.experimentalBadge()
                 EmptyStateView(
                     systemImage: "lock.shield",
                     title: "Needs a platform environment integration",
@@ -236,11 +222,7 @@ struct ComplianceBenchmarksView: View {
         let agg = shown.ruleAggregate
         return Card {
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    SectionHeader(title: "Rule Pass / Fail", trailing: "\(shown.totalRules) rules")
-                    Spacer()
-                    ComplianceBenchmarksView.experimentalBadge()
-                }
+                SectionHeader(title: "Rule Pass / Fail", trailing: "\(shown.totalRules) rules")
                 HStack(alignment: .top, spacing: 28) {
                     ComplianceBenchmarksView.aggregateDonut(passed: agg.passed,
                                                             failed: agg.failed,
@@ -308,52 +290,17 @@ struct ComplianceBenchmarksView: View {
             : ComplianceBenchmarksService.load(profile: workspace.profile)
     }
 
-    private func probePlatformAvailability() async {
-        guard !workspace.demoMode, !workspace.profile.isEmpty else {
-            platformAvailable = false
-            platformTenantLevel = false
-            return
-        }
-        let service = platformCapability ?? PlatformCapabilityService(
-            executor: DefaultCLIExecutor(bridge: bridge)
-        )
-        if platformCapability == nil { platformCapability = service }
-        platformAvailable = await service.isAvailable(for: workspace.profile)
-        let profile = workspace.profile
-        platformTenantLevel = await Task.detached {
-            ProfileAuthMethod.resolve(profile: profile)?.isTenantLevel == true
-        }.value
-    }
-
     // MARK: - Static rendering helpers (kept static to keep view body type-check cheap)
 
     private static let setupCommands: [String] = [
         "jamf-cli config add-profile <name> --auth-method platform \\",
-        "  --url <gateway-url> --environment-id <id>",
-        "Then turn on Platform API in Settings → Experimental Features.",
+        "  --url https://<us|eu|apac>.api.jamfcloud.com --environment-id <id>",
     ]
 
-    private static func lockReason(experimentalOn: Bool, platformAvailable: Bool) -> String {
-        if !experimentalOn {
-            return "Turn on Platform API in Settings → Experimental Features to enable this screen."
-        }
-        if !platformAvailable {
-            return "Your active jamf-cli profile does not use auth-method: platform. Add a platform-auth profile and switch this workspace to it."
-        }
-        return "Platform API is enabled but no compliance data is available yet."
-    }
-
-    private static func experimentalBadge() -> some View {
-        Text("Experimental")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(Theme.Colors.goldBright)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(Theme.Colors.goldBright.opacity(0.4), lineWidth: 1)
-            )
-            .accessibilityLabel("Experimental feature")
+    private static func lockReason() -> String {
+        "Your active jamf-cli profile does not use auth-method: platform. Connect with a Jamf "
+            + "Account integration (Add workspace, then Platform Gateway) or switch this "
+            + "workspace to a Platform profile."
     }
 
     private static func aggregateDonut(passed: Int, failed: Int, unknown: Int) -> some View {

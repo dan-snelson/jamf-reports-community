@@ -9,6 +9,10 @@ final class WorkspaceStore {
     var org: Org
     var profile: String
     var profiles: [JamfCLIProfile]
+    /// This Mac's Platform API connections (`ConnectionStore`), loaded at launch and on every
+    /// reload from disk. Demo mode never reads them; `activeConnections` is what screens use.
+    private(set) var connections: [Connection] = []
+    @ObservationIgnored let connectionStore: ConnectionStore
     var schedules: [Schedule]
     var customEAs: [CustomEA]
     var columnMappings: [ColumnMapping]
@@ -74,6 +78,10 @@ final class WorkspaceStore {
     private let jamfCLIInstallation: @MainActor () -> JamfCLIInstaller.Installation?
     var tickerStatus: TickerStatus = .unavailable
     var globalStatus: String? = nil
+    /// A Devices filter another screen asked for (`DevicesView.DeviceFilter` raw value),
+    /// held until Devices appears and applies it, since the view does not exist when the
+    /// navigation is posted.
+    var pendingDevicesFilter: String? = nil
     /// What the running collect is doing, while one runs. Kept apart from `globalStatus`,
     /// which any screen sets and clears for its own work, so another screen finishing cannot
     /// wipe the line a collect still owns.
@@ -182,6 +190,25 @@ final class WorkspaceStore {
     func isOffered(_ metric: TrendSeries.Metric) -> Bool {
         if case .agent = metric { return agentMetrics.contains(metric) }
         return metric.isOffered(under: securityPolicy)
+    }
+
+    /// The connections screens group by: the demo's own in demo mode, else this Mac's store.
+    var activeConnections: [Connection] { demoMode ? DemoData.connections : connections }
+
+    /// Re-reads this Mac's connections after the Connection card changed them.
+    func reloadConnections() {
+        connections = demoMode ? [] : connectionStore.load()
+    }
+
+    /// All profiles under their connections, for the sidebar menu.
+    var connectionGrouping: ConnectionGrouping {
+        ProfileService.connectionGrouping(profiles: profiles, connections: activeConnections)
+    }
+
+    /// Initialized workspaces under their connections, for Fleet Overview.
+    var initializedConnectionGrouping: ConnectionGrouping {
+        ProfileService.connectionGrouping(
+            profiles: initializedProfiles, connections: activeConnections)
     }
 
     /// True when the active profile has a `config.yaml` on disk under
@@ -302,8 +329,10 @@ final class WorkspaceStore {
         discoverProfiles: @escaping @MainActor () -> [JamfCLIProfile]
             = { ProfileService.discoverLocal() },
         jamfCLIInstallation: @escaping @MainActor () -> JamfCLIInstaller.Installation?
-            = { JamfCLIInstaller.currentInstallation() }
+            = { JamfCLIInstaller.currentInstallation() },
+        connectionStore: ConnectionStore = ConnectionStore()
     ) {
+        self.connectionStore = connectionStore
         self.tickerRegistrar = tickerRegistrar
         self.jamfCLIProfileNames = jamfCLIProfileNames
         self.discoverProfiles = discoverProfiles
@@ -331,6 +360,7 @@ final class WorkspaceStore {
         self.org = isDemo ? DemoData.org : Self.org(for: start)
         self.profile = isDemo ? DemoData.org.profile : (start?.name ?? DemoData.org.profile)
         self.profiles = isDemo ? DemoData.cliProfiles : realProfiles
+        self.connections = isDemo ? [] : connectionStore.load()
         self.schedules = isDemo ? DemoData.scheduledRuns
             : Self.loadSchedules(baseProfile: ManagedAutomation.managedBaseProfile(
                 profiles: realProfiles, policy: AutomationPolicy.current()))
@@ -420,6 +450,7 @@ final class WorkspaceStore {
             demoMode = false
             refreshToolStatus()
             profiles = real
+            connections = connectionStore.load()
             schedules = Self.loadSchedules(baseProfile: ManagedAutomation.managedBaseProfile(
                 profiles: real, policy: AutomationPolicy.current()))
             if let next = Self.activeProfile(keeping: profile, in: real), next != profile {
@@ -1154,10 +1185,62 @@ final class WorkspaceStore {
         return components.url
     }
 
-    /// Server URL for the currently active profile.
+    /// The active profile as profile discovery read it from jamf-cli; nil in demo mode. Screens
+    /// read its `auth` and `platformLevel` here rather than asking jamf-cli again.
+    var activeCLIProfile: JamfCLIProfile? {
+        demoMode ? nil : profiles.first { $0.name == profile }
+    }
+
+    /// The active workspace is a Jamf School one: its profile logs in to Jamf School
+    /// (`school setup`, discovered as `JamfCLIProduct.school`), which is also the profile
+    /// `ProfileProductType.detect` routes to School collect.
+    var isSchoolWorkspace: Bool { activeCLIProfile?.product == .school }
+
+    /// The sidebar's visibility for the active workspace: the user's hidden tabs, and the tabs
+    /// its product cannot fill.
+    func tabVisibility(hiddenRaw: String) -> TabVisibility {
+        TabVisibility.parse(hiddenRaw).limited(toSchool: isSchoolWorkspace)
+    }
+
+    /// After credentials are saved: a profile's auth method or scope level may have changed, so
+    /// the headless cache (`ProfileAuthMethod`) is cleared and the profile list read again.
+    func credentialsChanged() {
+        ProfileAuthMethod.invalidateCache()
+        reloadFromDisk()
+    }
+
+    /// Server URL for the currently active profile; empty for a Platform API profile, whose URL
+    /// is the gateway, not a Jamf Pro console.
     private func activeProfileURL() -> String {
         if demoMode { return org.jamfURL }
-        return profiles.first(where: { $0.name == profile })?.url ?? ""
+        guard let active = profiles.first(where: { $0.name == profile }) else { return "" }
+        return Self.consoleServer(
+            forProfileURL: active.url, authMethod: active.auth?.rawValue ?? "",
+            learnedJamfProURL: connections.lazy.flatMap(\.members)
+                .first { $0.profile == active.name }?.jamfProURL)
+    }
+
+    /// The host a console link may be built from. A Platform profile (auth method `platform`, or a
+    /// Platform gateway host whatever the method says) has none: `*.api.jamfcloud.com` serves
+    /// APIs only, so a link there would open nothing.
+    /// A platform profile has the Jamf Pro URL its connection learned (`pro
+    /// jamf-pro-server-url get`), when it did.
+    nonisolated static func consoleServer(
+        forProfileURL url: String, authMethod: String, learnedJamfProURL: String? = nil
+    ) -> String {
+        if JamfCLIAuthMethod(raw: authMethod)?.isPlatform == true {
+            return learnedJamfProURL.flatMap { learned in
+                let host = URL(string: learned)?.host?.lowercased() ?? ""
+                return host.isEmpty || host.hasSuffix(".api.jamfcloud.com")
+                    || host.hasSuffix(".apigw.jamf.com") ? nil : learned
+            } ?? ""
+        }
+        let host = url.contains("://") ? (URL(string: url)?.host ?? url) : url
+        let lowered = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if lowered.hasSuffix(".api.jamfcloud.com") || lowered.hasSuffix(".apigw.jamf.com") {
+            return ""
+        }
+        return url
     }
 
     /// The profile a launch or reload opens on: the first one the app can use,
@@ -1167,14 +1250,17 @@ final class WorkspaceStore {
     }
 
     /// The profile a reload keeps active: the current one while it is still
-    /// listed and usable, else `initialProfile(in:)`.
+    /// listed and usable. When it is gone because it is a Protect login (discovery no longer
+    /// lists one), the workspace whose `protect.profile` names it; else `initialProfile(in:)`.
     nonisolated static func activeProfile(
-        keeping current: String, in profiles: [JamfCLIProfile]
+        keeping current: String, in profiles: [JamfCLIProfile],
+        protectProfile: (String) -> String? = { ConnectedProducts.read(profile: $0).protectProfile }
     ) -> String? {
         if profiles.contains(where: { $0.name == current && $0.status != .error }) {
             return current
         }
-        return initialProfile(in: profiles)?.name
+        let owner = profiles.first { $0.status != .error && protectProfile($0.name) == current }
+        return (owner ?? initialProfile(in: profiles))?.name
     }
 
     private static func org(for profile: JamfCLIProfile?) -> Org {
@@ -1322,6 +1408,13 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
 
     var badgeIsGold: Bool { self == .trends }
 
+    /// The tabs a Jamf School workspace keeps (2.10): it collects only School data, which no
+    /// Jamf Pro screen reads, so it keeps the screens about the workspace, its reports and its
+    /// automation. Applied by `TabVisibility.limited(toSchool:)`, never stored.
+    static let schoolTabs: Set<Tab> = [
+        .overview, .fleet, .reports, .schedules, .runs, .config, .sources, .settings, .onboarding,
+    ]
+
     /// Tabs the user cannot hide. These are the bones of the app — hiding
     /// them would break navigation or leave the user without a way back to
     /// configuration. Everything else is toggleable via `TabVisibility`.
@@ -1382,6 +1475,9 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
 /// re-show tabs the user has hidden.
 struct TabVisibility: Sendable, Equatable {
     private var hidden: Set<Tab>
+    /// Tabs the workspace's product cannot fill (a Jamf School workspace's Jamf Pro tabs).
+    /// Not the user's choice: never serialized, and it overrides the core-tab rule.
+    private var unavailable: Set<Tab> = []
 
     init(hidden: Set<Tab> = []) {
         // Core tabs can never be hidden — strip them on construction so
@@ -1391,7 +1487,15 @@ struct TabVisibility: Sendable, Equatable {
 
     /// True when this tab should appear in the sidebar.
     func isVisible(_ tab: Tab) -> Bool {
-        tab.isCoreTab || !hidden.contains(tab)
+        !unavailable.contains(tab) && (tab.isCoreTab || !hidden.contains(tab))
+    }
+
+    /// This visibility for the active workspace: a Jamf School workspace also leaves out every
+    /// tab outside `Tab.schoolTabs`.
+    func limited(toSchool isSchool: Bool) -> TabVisibility {
+        var copy = self
+        copy.unavailable = isSchool ? Set(Tab.allCases).subtracting(Tab.schoolTabs) : []
+        return copy
     }
 
     /// Toggle a tab's visibility. Core tabs are no-ops.

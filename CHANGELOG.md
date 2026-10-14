@@ -7,8 +7,61 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+### Added
+
+- Connect Jamf Cloud with a Jamf Account integration. The first-launch screen now leads with
+  **Connect with Jamf Account** (the Jamf Platform API, which jamf-cli recommends for Jamf Cloud),
+  and the older card is now **Connect a Jamf Pro server**, for on-prem, GovCloud or any instance.
+  Onboarding and Update credentials pick a region (United States, Europe or Asia-Pacific) instead
+  of asking for the gateway URL, and the setup text explains that a profile holds one environment.
+- Jamf Platform API connections are grouped on this Mac. A Platform profile that validates during setup is recorded under a connection, and the sidebar workspace menu and Fleet Overview list the profiles of one connection together under its name; profiles in no connection list as before. The grouping is kept in the app's own Application Support folder, holds no credentials, and its IDs are removed from diagnostic bundles.
+- Data Sources has a **Connection** card for a Jamf Account integration. It lists the connection's
+  environments with their product and whether each has a workspace, and **Add environments**
+  takes one or more environment IDs (one per line, each with an optional label) and the client ID
+  and secret once. Each ID gets its own jamf-cli profile, is checked, and joins the connection with
+  a workspace; an ID with no Jamf Pro behind it (probably Jamf School) is not added and points to
+  a Jamf School workspace. **Update credentials for all** re-registers every environment with a new
+  secret, **Rename** changes display names, and **Remove** takes a profile out of the connection
+  without deleting its jamf-cli profile or workspace. The app does not keep the secret.
+- The Devices table now sorts by Last Check-in, Patch, Security and Risk as well as Device,
+  Serial, macOS and User. Click a header to sort and again to reverse: Last Check-in starts with
+  the most recent Mac and puts a Mac with no check-in date last, and the other three start with
+  the lowest count or score. (#272)
+- The HTML report has a **Mobile devices** group: iPad, iPhone and Apple TV counts, how many are
+  managed and supervised, passcode and Activation Lock counts (shown as Unknown when no device
+  reports the field, never 0) and the iOS and iPadOS version spread. It lists no individual
+  device. Every HTML report template includes it, as does a Custom report that picks a mobile
+  sheet. When no mobile data was collected, the audit appendix says so, with the recorded cause
+  when the last attempt failed. (#275)
+- Under Security agent health, the HTML report lists the Macs missing each agent with their
+  serial and the value seen, or "no value". A row that carries only a device name is marked
+  "name only". (#276)
+
+- Data Sources can disconnect Jamf Protect. **Disconnect** sits beside Reconnect on the Additional
+  Products card; after a confirmation it sets `protect.enabled: false` and removes
+  `protect.profile` in the workspace's config.yaml (a copy is kept when the block held a comment),
+  and tells you the jamf-cli profile stays until `jamf-cli config remove-profile <name>` removes
+  it. A line under the Protect control says Jamf Protect uses its own API client from Jamf
+  Protect, not your Jamf Account integration. (#271)
+- Add environments can try an ID again with the same label. A jamf-cli profile left behind by an
+  attempt that could not confirm the ID (or was refused) is registered again when it is in no
+  connection and has no workspace; a name that is a member, has a workspace or is not a Platform
+  profile is still refused. (#271)
+
 ### Changed
 
+- The AI summary is no longer added to reports just because AI insights are on. Reports keep to
+  the figures unless you also turn on **Include the AI summary in reports** in Settings › AI
+  Insights (`ai.include_in_reports`). The model can misstate a figure, and a report is often
+  forwarded.
+- The Platform API is no longer experimental. Compliance Benchmarks and DDM Blueprints unlock for
+  any profile that uses a Jamf Account integration, with no setting to turn on, and Settings →
+  Experimental Features lists only the Jamf Protect deep dive.
+- When a Jamf Account environment answers but holds no Jamf Pro, setup now says its MDM is probably
+  Jamf School, offers to set up a Jamf School workspace, and no longer lets you continue with that
+  profile.
+- Device and group links to Jamf Pro are no longer shown for a Jamf Account profile, whose address
+  is the API gateway and not a Jamf Pro console.
 - The integrity note at the foot of an HTML report now says it is a check for damage or a partial
   copy, not a signature, and points to the `[ok] sha256:` line in the run log as the copy kept
   outside the file.
@@ -21,8 +74,116 @@ versions in this repository map to git tags.
 - The per-title patch definition files the patch release-date lookup used to save under
   `jamf-cli-data/patch-definitions/` are no longer written; nothing read them.
 
+### Fixed
+
+- First-launch setup has a way back. **Start over** returns to the welcome screen, so you no
+  longer quit and reopen the app to try another connection. It asks before removing what setup
+  created so far (the new workspace folder goes to the Trash, the new jamf-cli profile is removed)
+  and never touches a folder or profile that was already there. The Authenticate step no longer
+  repeats the connection-type choice on this path, and several setup screens are worded more
+  plainly (the Jamf Account heading, the jamf-cli installer package, the Jamf School step).
+- The HTML report's "Macs to follow up" table lists the Macs with a reason first (no Jamf binary,
+  then a contact gap), then the Macs that are only stale. With more than 100 stale Macs, the table
+  used to show stale Macs only, so the contact-gap lines in "Needs attention" led to rows that
+  were not there.
+- A Jamf School workspace shows only the screens that apply to it. The Jamf Pro screens, which
+  could never fill from School data, leave the sidebar while it is active; Generate opens on the
+  School template with the workbook only; the Reports PDF and CSV exports and the Fleet Overview
+  "No summary" issue no longer appear for it; and the app stops running a Jamf Pro audit and
+  judging its data health by Jamf Pro reports at launch.
+- The Jamf Protect screen offers **Connect Jamf Protect** when Protect is not connected, instead
+  of a list of jamf-cli commands that put nothing into the workspace.
+- Every screen now reads a profile's sign-in method the way jamf-cli does, from one place, so
+  Config, Compliance Benchmarks, DDM Blueprints, the console links and collect agree. A profile
+  the app cannot use is no longer taken for a Platform API profile because its name contains
+  "platform", and changing a profile's credentials in Data Sources takes effect without a
+  relaunch.
+- Data Sources lists what a collect runs for the workspace you are on. It used to show the same
+  Jamf Pro commands everywhere, including on a Jamf School workspace and on one without Jamf
+  Protect. Now each product has its own group (Jamf Pro, Platform API, Jamf Protect when it is
+  connected, Jamf School), with when each was last cached, and a command a collect leaves out
+  says why (for example, the Platform API reports on a Jamf Pro OAuth profile). A Jamf School
+  workspace no longer shows the Jamf Pro command list or the Connect Jamf Protect card.
+- The PDF report prints cleanly. Each section starts on a new page, a heading is no longer left at
+  the foot of a page with its content on the next, long values such as email addresses wrap
+  inside the page instead of cutting off the last columns, and a long list prints as one table
+  without a "Show all" link that does nothing on paper. Its integrity note now names the PDF and
+  the manifest beside it; it used to describe checking a temporary HTML file the reader never had.
+- Jamf School setup no longer offers to map a CSV. That step read a Jamf Pro export's column
+  names, which a Jamf School workspace does not use; it now only writes the workspace's
+  config.yaml, since Jamf School reports come from jamf-cli.
+- A fleet with iPads and iPhones but no Macs now gets its daily summary. Before, the summary was
+  written only when at least one Mac was counted, so every collect on such a fleet logged
+  "summary not written", Run History showed each run as Partial and the background item retried
+  it three times a day. The summary now records the mobile device count with every Mac figure
+  left unmeasured (shown as "--" or "Not reported", never 0%), and a fleet with neither Macs nor
+  mobile devices still writes nothing. Where a figure counts Macs only, the Fleet Overview, the
+  fleet rollup and workbook, the period report, metric alerts and the Overview insight now say
+  "Macs" instead of "devices", and a day with no Macs is a gap in those figures, not a 0. The
+  Executive, Operational, Compliance and Security Posture HTML reports also list the Mobile
+  devices group.
+- A tenant-level (legacy) Jamf Account integration whose tenant is not Jamf Pro is no longer
+  assumed to be Jamf School: setup says it may be Jamf School, Jamf Protect or Jamf Security
+  Cloud and what Jamf Reports can do with each. The first-launch screen also says that Jamf
+  Reports reports on a Jamf Pro or Jamf School fleet, that Jamf Protect is added to a Jamf Pro
+  workspace, and that Jamf Security Cloud is not supported yet.
+- A Jamf Protect, Jamf Security Cloud or Jamf School login in jamf-cli is no longer treated as a
+  Jamf Pro workspace. The app now reads which product a profile logs in to (the `product:` key in
+  jamf-cli's config file, then its auth method, then its host) and no longer lists or collects a
+  Protect or Security Cloud login, even if an earlier version made a folder for it; the folder is
+  left alone and Config Doctor says it can be removed. A Jamf School login is set up as a Jamf
+  School workspace. If the open workspace was a Protect login, the app opens the workspace that
+  uses it.
+- A Jamf Account integration at organization level, which reaches only Jamf Account, is no
+  longer set up or collected as if it could report. Setup lists it with the reason, a collect
+  stops at one clear error line instead of failing every source, and Config Doctor fails a
+  workspace that uses one. The fix is an environment-level integration.
+- A gateway profile and an OAuth profile for the same Jamf Pro are no longer both set up and
+  collected, which split history and counted the fleet twice in consolidated reports. Setup asks
+  Jamf Pro for its address through the gateway profile, keeps that profile and leaves the OAuth
+  one out unless you tick it; if the lookup fails nothing changes. Config Doctor suggests
+  excluding the twin where both workspaces already exist. A Platform API profile can link to its
+  Jamf Pro console once the address is known.
+- A profile still pointing at the retired `apigw.jamf.com` gateway is now named as the cause in
+  Run History with the fix (use your `api.jamfcloud.com` host) and is no longer retried every
+  hour. A request sent at a scope level the endpoint does not accept is reported as a scope
+  problem with a hint.
+- The setup guides now recommend `jamf-cli platform setup` for Jamf Cloud at environment level,
+  give the re-authenticate commands with `--profile-name`, and say jamf-cli keeps credentials in
+  the keychain and caches tokens on disk.
+- The Additional Products card no longer shows Jamf Protect as CONNECTED when the jamf-cli
+  profile named in `protect.profile` is no longer in jamf-cli: it reads "Profile <name> not found
+  in jamf-cli" with Reconnect and Disconnect. (#271)
+- The CSV Inbox card now says what leaves a file in Pending: a scheduled CSV-assisted run marks
+  the CSV it used as Consumed, Archive moves a file out of the inbox, and generating a report
+  from the app does not read the inbox. (#270)
+- Connecting Jamf School from a Jamf Pro workspace no longer stops that workspace collecting. It
+  is not offered there any more: Jamf School uses its own workspace, which the sidebar's workspace
+  menu now adds (Add Jamf School workspace), and onboarding's Add products step and Data Sources
+  point there. A Jamf Pro workspace that already holds a School
+  login in `school_cli.profile` collects Jamf Pro again, and Config Doctor warns that the School
+  profile is not used there; set `school_cli.enabled: false` to clear it. That School login no
+  longer shows up as a Jamf Pro workspace of its own. Config Doctor's note that School and Protect
+  are both on now appears only when School is the workspace's own product. (#278)
+- A Mac that enrolled through Automated Device Enrollment but never received the Jamf binary (the
+  "DEP - <serial>" records) is no longer counted as stale. Jamf lists it as not managed and it has
+  never checked in, so Devices, Offline Outreach and the HTML report now show it as "Not managed:
+  Jamf binary missing" instead: a Binary missing filter on Devices, a line in the Mac's detail
+  panel, and a "Needs attention" line in the report that links to its row in the follow-up list.
+  It is found from Jamf's data, not its name. To fix one, mark the computer as managed in Jamf
+  Pro, deploy the binary through the API or another tool, or run
+  `sudo profiles renew -type enrollment` on the Mac. Totals that come from Jamf's own summaries
+  still include these Macs. (#274)
+- The Stale figure at the top of the HTML report and its first Needs attention line now say how
+  many of those Macs have no Jamf binary and are listed apart ("includes 2 without the Jamf
+  binary, listed apart"), so they agree with the follow-up table. The appendix definition says
+  the same. (#274)
+
 ### Security
 
+- Power Automate webhook URLs on the government clouds (GCC `api.gov.powerplatform.microsoft.us`,
+  GCC High and DoD hosts) are now masked whole in shared logs, diagnostic bundles and config
+  backups, as commercial ones already were; before, only their `sig=` value was masked.
 - A report run for one profile now reads and writes only that profile's folders. If the shared
   config.yaml names a different `jamf_cli.profile`, the run stops with an error naming both
   instead of using the other profile's summaries, chart history and archive.
@@ -126,6 +287,20 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- Once Jamf Protect or Jamf School is connected, Data Sources shows it as connected with its
+  profile name and a Reconnect button instead of "Add" again. The jamf-cli profile Protect creates
+  is no longer listed as a workspace in the sidebar, in schedules or in all-profiles runs, unless
+  it has a workspace of its own (#271).
+- The CSV Inbox on Sources no longer shows every file as Pending for good. A scheduled
+  csv-assisted run now marks the CSV it built a report from as consumed (the file stays in place,
+  so the next run can reuse it), and each file's menu has an Archive action that moves it, with
+  its marker, into `csv-inbox/archive/`. (#270)
+- A workbook sheet left out because its data was never collected, such as the mobile device
+  sheets, is now named in the run log the app shows, with the snapshot it needed, instead of
+  only in the terminal output (#275).
+- The Generate sheet's and Schedules' live logs no longer show a line in red because it mentions
+  a report such as `patch-device-failures`: lines are coloured by their `[ok]`, `[warn]` or
+  `[error]` marker, and jamf-cli's own `Error:` lines stay red; `[partial]` lines stay amber (#273).
 - Microsoft Teams notifications no longer format or link text inside profile and schedule names:
   Teams reads Markdown in cards, so names such as `**x**` or `[a](https://x)` are now escaped
   (an underscore inside a word, as in `prod_east`, is left alone).
@@ -215,6 +390,11 @@ versions in this repository map to git tags.
   hours. A sign-in check that times out logs a warning and the command carries on. A backup that
   times out fails, is logged with its limit, and leaves no folder behind for the Backups screen
   to list.
+- The HTML report's "Needs attention" links now land on the Macs they count. The Macs list also
+  holds the Macs MDM reaches whose Jamf binary or inventory has fallen behind, with their Last
+  Contact and the kind of gap, and the security controls block lists the Macs behind the P0 count
+  (and says how many of those gaps the device rows name). The Security Posture screen's Action
+  Items card has an Open Devices button that opens Devices on the security-gap filter. (#276)
 
 ### Dependencies
 

@@ -69,10 +69,14 @@ struct Connection: Codable, Sendable, Equatable, Identifiable {
     var level: Level
     var members: [Member]
     var createdAt: Date
+    /// jamf-cli profiles this app registered in Add environments that the check did not confirm,
+    /// so they are in no connection yet. Only these may be registered again with the same label:
+    /// a profile of the same shape made in Terminal is not in this list. Names, not secrets.
+    var unconfirmedProfiles: [String]
 
     init(
         id: UUID = UUID(), name: String, region: Region, level: Level,
-        members: [Member], createdAt: Date = Date()
+        members: [Member], createdAt: Date = Date(), unconfirmedProfiles: [String] = []
     ) {
         self.id = id
         self.name = name
@@ -80,9 +84,12 @@ struct Connection: Codable, Sendable, Equatable, Identifiable {
         self.level = level
         self.members = members
         self.createdAt = createdAt
+        self.unconfirmedProfiles = unconfirmedProfiles
     }
 
-    enum CodingKeys: String, CodingKey { case id, name, region, level, members, createdAt }
+    enum CodingKeys: String, CodingKey {
+        case id, name, region, level, members, createdAt, unconfirmedProfiles
+    }
 
     /// Unknown future values for `region` and `level` and a bad date decode to a default, so
     /// one newer record cannot make the whole file unreadable.
@@ -95,5 +102,7 @@ struct Connection: Codable, Sendable, Equatable, Identifiable {
         level = (try? c.decodeIfPresent(Level.self, forKey: .level)) ?? .environment
         createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt))
             ?? Date(timeIntervalSince1970: 0)
+        unconfirmedProfiles = (try? c.decodeIfPresent([String].self, forKey: .unconfirmedProfiles))
+            ?? []
     }
 }

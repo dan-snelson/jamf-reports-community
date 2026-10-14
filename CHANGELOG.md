@@ -57,10 +57,11 @@ text inside names.
   and tells you the jamf-cli profile stays until `jamf-cli config remove-profile <name>` removes
   it. A line under the Protect control says Jamf Protect uses its own API client from Jamf
   Protect, not your Jamf Account integration. (#271)
-- Add environments can try an ID again with the same label. A jamf-cli profile left behind by an
-  attempt that could not confirm the ID (or was refused) is registered again when it is in no
-  connection and has no workspace; a name that is a member, has a workspace or is not a Platform
-  profile is still refused. (#271)
+- Add environments can try an ID again with the same label. A jamf-cli profile that this app
+  registered in an earlier attempt, and could not confirm the ID for, is registered again when it
+  is in no connection and has no workspace. A profile made any other way, such as in Terminal, a
+  member, a name with a workspace or one that is not a Platform profile, is refused and left
+  untouched. (#271)
 
 ### Changed
 

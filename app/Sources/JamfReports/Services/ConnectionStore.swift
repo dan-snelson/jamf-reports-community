@@ -85,6 +85,22 @@ struct ConnectionStore: Sendable {
               !all.contains(where: { $0.members.contains { $0.profile == member.profile } })
         else { return }
         all[index].members.append(member)
+        for slot in all.indices { all[slot].unconfirmedProfiles.removeAll { $0 == member.profile } }
+        try save(all)
+    }
+
+    /// Records that this app registered `profile` for the connection and has not confirmed its
+    /// ID, so a later Add environments may register it again. A profile already a member of any
+    /// connection, or already recorded, is left as it is.
+    func noteUnconfirmedProfile(_ profile: String, inConnection id: UUID) throws {
+        var all = load()
+        guard let index = all.firstIndex(where: { $0.id == id }),
+              !all.contains(where: {
+                  $0.members.contains { $0.profile == profile }
+                      || $0.unconfirmedProfiles.contains(profile)
+              })
+        else { return }
+        all[index].unconfirmedProfiles.append(profile)
         try save(all)
     }
 

@@ -252,14 +252,61 @@ enum YAMLCodec {
 
     /// `text` without its `#` comments: a line that is only a comment is dropped, a trailing
     /// comment is cut with its indentation kept. A `#` inside quotes or not after a space stays.
+    /// A quote opens only at the start of a scalar, as YAML defines it, so the apostrophe in
+    /// `Don't stop # note` does not hide the comment. Unlike the reader, which `stripInlineComment`
+    /// serves, this is for a copy that leaves the Mac.
     static func removingComments(from text: String) -> String {
         text.components(separatedBy: "\n").compactMap { line -> String? in
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("#") { return nil }
-            let stripped = stripInlineComment(line)
-            guard stripped != line else { return line }
-            let indent = line.prefix { $0 == " " || $0 == "\t" }
-            return indent + stripped
+            guard let start = commentStart(in: line) else { return line }
+            var kept = line[..<start]
+            while let last = kept.last, last == " " || last == "\t" { kept.removeLast() }
+            return String(kept)
         }.joined(separator: "\n")
+    }
+
+    /// Where a `#` comment starts in one line: outside quotes, at the line's start or after
+    /// whitespace. A quote opens only where a scalar can start (the line start, after `- `, after
+    /// `: ` or a colon ending the line, and in a flow collection after `[`, `{` or `,`);
+    /// `''` and `\"` inside a quoted scalar are escapes.
+    private static func commentStart(in line: String) -> String.Index? {
+        var quote: Character?
+        var scalarStart = true
+        var flowDepth = 0
+        var previous: Character?
+        var skipNext = false
+        for index in line.indices {
+            let char = line[index]
+            let following = line.index(after: index)
+            let next = following < line.endIndex ? line[following] : nil
+            defer { previous = char }
+            if skipNext { skipNext = false; continue }
+            if let open = quote {
+                if open == "\"", char == "\\" { skipNext = true } else if char == open {
+                    if open == "'", next == "'" { skipNext = true } else { quote = nil }
+                }
+                continue
+            }
+            if char == "#", previous == nil || previous?.isWhitespace == true { return index }
+            if char.isWhitespace { continue }
+            let atStart = scalarStart
+            scalarStart = false
+            if atStart, char == "'" || char == "\"" { quote = char; continue }
+            if char == "[" || char == "{", atStart || flowDepth > 0 {
+                flowDepth += 1
+                scalarStart = true
+            } else if char == "]" || char == "}", flowDepth > 0 {
+                flowDepth -= 1
+            }
+            if char == "-", atStart, next == nil || next == " " {
+                scalarStart = true
+            } else if char == ":", next == nil || next == " " {
+                scalarStart = true
+            } else if flowDepth > 0, char == "," {
+                scalarStart = true
+            }
+        }
+        return nil
     }
 
     private static func topLevelKey(in line: String) -> String? {

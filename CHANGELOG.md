@@ -309,7 +309,8 @@ text inside names.
   notification back.
 - A diagnostic bundle's config.yaml no longer carries free text. The IDs and linked findings of
   exceptions are replaced like their descriptions and sign-offs already were, every copy of a
-  repeated `exceptions:` key is covered, and the `#` comments are left out of the staged copy.
+  repeated `exceptions:` key is covered, and the `#` comments are left out of the staged copy,
+  including one that follows an apostrophe (`Don't stop # note`).
 - Devices stays fast when thousands of Macs carry the same placeholder serial number. A serial
   or ID that more than 50 Macs share no longer joins rows from different sources; a row left
   with nothing else to go on is matched by computer name, as a row with no serial is.

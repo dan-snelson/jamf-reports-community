@@ -54,6 +54,20 @@ final class DeviceRecordMergerSharedIdentifierTests: XCTestCase {
                        "no other Mac takes the row")
     }
 
+    /// The cap must not let a name join two Macs the identifiers keep apart: the row's serial is
+    /// the placeholder, the one Mac with its name has a real serial, so it is another Mac.
+    func testARowLeftWithOnlyItsNameNeverJoinsAMacWhoseSerialDiffers() {
+        var merger = merger(computers: cap + 1)
+        merger.upsert(computer(9_001, serial: "C02REALSERIAL"))
+        let before = merger.records.count
+
+        merger.upsert(compliance("Fixture-9001", serial: placeholder, days: 77))
+
+        XCTAssertEqual(merger.records.count, before + 1, "the row is its own Mac")
+        let real = merger.records.first { $0.serial == "C02REALSERIAL" }
+        XCTAssertNil(real?.daysSinceContact, "the real Mac keeps its own data")
+    }
+
     func testARowWithAnUnknownNameAndThePlaceholderIsItsOwnMac() {
         var merger = merger(computers: cap + 1)
 

@@ -1287,7 +1287,16 @@ struct DeviceRecordMerger {
     private func placement(of record: DeviceInventoryRecord) -> Placement {
         let nameKey = DeviceInventoryService.normalizedKey(record.name)
         let identifiers = record.identifiers.filter { !isShared($0.kind, $0.value) }
-        if identifiers.isEmpty { return placementByName(nameKey) }
+        if identifiers.isEmpty {
+            // A row the cap left with no identifier still carries them, so the named record
+            // must not contradict one (another serial or Jamf ID is another Mac).
+            let byName = placementByName(nameKey)
+            if !record.identifiers.isEmpty, case .merge(let index) = byName,
+               records[index].disagrees(with: record) {
+                return .append
+            }
+            return byName
+        }
         let candidates = compatibleRecords(sharing: identifiers, with: record)
         if candidates.isEmpty {
             // A name-only record made earlier is this Mac's only trace: take it over, but only

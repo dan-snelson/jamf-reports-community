@@ -3,7 +3,7 @@ import Foundation
 // MARK: - HtmlReport+Mobile
 //
 // The "Mobile devices" section (#275): counts by form factor, management and supervision,
-// passcode and Activation Lock, and OS versions, read through `MobileFleetService` so the
+// passcode, Activation Lock and jailbreak status, and OS versions, read through `MobileFleetService` so the
 // numbers follow the same rules as the Mobile Fleet screen and the workbook's mobile
 // sheets. No per-device table: an HTML report is forwarded, and the workbook has the rows.
 
@@ -45,6 +45,9 @@ extension HtmlReport {
         cards.append(postureCard(
             "Activation Lock on", count: mobile.activationLockEnabledCount,
             reporting: devices.compactMap(MobileFleetService.activationLockEnabled(of:)).count))
+        cards.append(postureCard(
+            "Jailbreak detected", count: mobile.jailbreakDetectedCount,
+            reporting: devices.compactMap(MobileFleetService.jailbreakStatus(of:)).count))
 
         var body = f.renderCardGrid(cards: cards)
         let versions = mobile.osDistribution.map { (label: $0.osVersion, count: $0.count) }
@@ -54,8 +57,8 @@ extension HtmlReport {
         }
         if !detailed {
             body += "\n<p class=\"block-note\">" + f.escapeHTML(
-                "Only the device list was collected, so management, supervision, passcode and "
-                + "OS versions are not known.") + "</p>"
+                "Only the device list was collected, so management, supervision, passcode, "
+                + "jailbreak status and OS versions are not known.") + "</p>"
         }
         return .shown(f.block(id: "mobile-fleet", title: "Mobile devices (\(total))", body: body))
     }

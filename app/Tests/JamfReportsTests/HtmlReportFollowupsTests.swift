@@ -207,11 +207,12 @@ final class HtmlReportFollowupsTests: XCTestCase {
 
     private func mobile(
         _ id: String, identifier: String, model: String, os: String, managed: Bool,
-        supervised: Bool, passcode: Bool? = nil, lock: Bool? = nil
+        supervised: Bool, passcode: Bool? = nil, lock: Bool? = nil, jailbroken: Bool? = nil
     ) -> [String: Any] {
         var security: [String: Any] = [:]
         if let passcode { security["passcodeCompliant"] = passcode }
         if let lock { security["activationLockEnabled"] = lock }
+        if let jailbroken { security["jailBreakDetected"] = jailbroken }
         return [
             "mobileDeviceId": id, "deviceType": "iOS",
             "hardware": ["model": model, "modelIdentifier": identifier,
@@ -224,9 +225,9 @@ final class HtmlReportFollowupsTests: XCTestCase {
 
     private var mobileFleet: [[String: Any]] {
         [mobile("1", identifier: "iPad13,1", model: "iPad Air", os: "17.4", managed: true,
-                supervised: true, passcode: true),
+                supervised: true, passcode: true, jailbroken: false),
          mobile("2", identifier: "iPad14,3", model: "iPad Pro", os: "17.4", managed: true,
-                supervised: false, passcode: false),
+                supervised: false, passcode: false, jailbroken: true),
          mobile("3", identifier: "iPhone16,1", model: "iPhone 15", os: "18.0", managed: true,
                 supervised: true, passcode: true),
          mobile("4", identifier: "AppleTV5,3", model: "Apple TV 4K", os: "18.0", managed: false,
@@ -261,6 +262,10 @@ final class HtmlReportFollowupsTests: XCTestCase {
         let lock = try XCTUnwrap(card("Activation Lock on"))
         XCTAssertTrue(lock.contains(">Unknown<"), lock)
         XCTAssertFalse(lock.contains(">0<"), lock)
+        // #275: the jailbreak status the Mobile Fleet screen shows is in the report too.
+        let jailbreak = try XCTUnwrap(card("Jailbreak detected"))
+        XCTAssertTrue(jailbreak.contains(">1<"), jailbreak)
+        XCTAssertTrue(jailbreak.contains("of 2 reporting"), jailbreak)
 
         XCTAssertEqual(html.components(separatedBy: "cohort-bar-row\"").count - 1, 2,
                        "one CSS bar per OS version, 17.4 and 18.0")

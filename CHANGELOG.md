@@ -42,8 +42,8 @@ text inside names.
   the most recent Mac and puts a Mac with no check-in date last, and the other three start with
   the lowest count or score. (#272)
 - The HTML report has a **Mobile devices** group: iPad, iPhone and Apple TV counts, how many are
-  managed and supervised, passcode and Activation Lock counts (shown as Unknown when no device
-  reports the field, never 0) and the iOS and iPadOS version spread. It lists no individual
+  managed and supervised, passcode, Activation Lock and jailbreak counts (shown as Unknown when
+  no device reports the field, never 0) and the iOS and iPadOS version spread. It lists no individual
   device. Every HTML report template includes it, as does a Custom report that picks a mobile
   sheet. When no mobile data was collected, the audit appendix says so, with the recorded cause
   when the last attempt failed. (#275)

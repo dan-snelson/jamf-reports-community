@@ -322,6 +322,10 @@ text inside names.
   Jamf Pro answers behind it, names a permission when jamf-cli does, does not suggest Jamf
   School, and offers **Continue without validating**. Add environments lists the ID as not
   added and says why. An ID the gateway rejects still stops setup.
+- On a real tenant the Compliance Benchmarks screen lists the worst rules and Macs first. It
+  showed the first 20 rules and 30 Macs in the order jamf-cli printed them, so a failing rule
+  could sit outside the list. The rules now run from most failures down and the Macs from most
+  failed rules down, a rule or Mac with no count last, then by name, and the headings say so.
 
 ### Security
 

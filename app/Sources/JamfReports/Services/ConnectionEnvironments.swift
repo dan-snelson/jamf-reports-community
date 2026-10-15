@@ -30,9 +30,10 @@ enum ConnectionEnvironments {
             case .invalidName:
                 "The name made from this label is not a usable profile name."
             case .profileExists(let name):
-                "A jamf-cli profile named \(name) already exists and is in use (it is in a "
-                    + "connection, has a workspace, or is not a Platform profile). Pick another "
-                    + "label."
+                "A jamf-cli profile named \(name) already exists and was not made by this app's "
+                    + "Add environments, or it is in use (it is in a connection, has a workspace, "
+                    + "or is not a Platform profile). Registering it would overwrite its "
+                    + "credentials. Pick another label."
             case .caseVariant(let existing):
                 "A name that differs from \(existing) only by letter case would share its folder. "
                     + "Pick another label."
@@ -46,8 +47,8 @@ enum ConnectionEnvironments {
         var entry: Entry
         var profile: String
         var refusal: Refusal?
-        /// The profile is already in jamf-cli from an attempt that did not finish, so
-        /// `config add-profile` overwrites it.
+        /// The profile is already in jamf-cli from an earlier attempt of this app that did not
+        /// finish, so `config add-profile` overwrites it.
         var reRegisters = false
 
         /// The line the sheet shows before a run.
@@ -121,7 +122,8 @@ enum ConnectionEnvironments {
     /// Decides each entry's profile name and whether it may be registered. `existingProfiles` is
     /// every jamf-cli profile; `workspaceConflict` names an existing workspace that differs
     /// from a name only by case. `canReRegister` says an existing profile is a leftover of an
-    /// earlier attempt (in no connection, no workspace folder), so the same label may try again.
+    /// earlier attempt of this app (recorded by it, in no connection, no workspace folder), so
+    /// the same label may try again.
     static func plan(
         entries: [Entry], connection: Connection, existingProfiles: [String],
         workspaceConflict: (String) -> String? = { _ in nil },

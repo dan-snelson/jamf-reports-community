@@ -3574,8 +3574,11 @@ struct CoreDashboard: Sendable {
         return String(format: "%d (%.1f%%)", value, pct)
     }
 
+    /// Green, yellow or red for a "93.3%" string; a blank or unparseable one is neutral, since
+    /// no figure is not a 0% result.
     private func colorForPctString(_ pct: String) -> CellFormat {
-        let num = Double(pct.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)) ?? 0
+        let text = pct.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)
+        guard let num = Double(text), num.isFinite else { return .cell }
         if num >= 95 { return .green }
         if num >= 80 { return .yellow }
         return .red

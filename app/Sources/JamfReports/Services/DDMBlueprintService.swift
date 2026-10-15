@@ -32,9 +32,10 @@ struct DDMBlueprintService: Sendable {
             let succeeded: Int?
             let failed: Int?
             let pending: Int?
-            var id: String {
-                name.isEmpty ? "(unnamed)-\(state)-\(scope.map(String.init) ?? "none")" : name
-            }
+            /// Position in the snapshot file. Two blueprints can share a name, or have none, so
+            /// the name alone cannot identify a row.
+            var rowIndex: Int = 0
+            var id: String { "\(rowIndex)|\(name)" }
         }
 
         struct Declaration: Sendable, Equatable, Identifiable {
@@ -44,7 +45,9 @@ struct DDMBlueprintService: Sendable {
             let devices: Int
             let successful: Int
             let unsuccessful: Int
-            var id: String { source.isEmpty ? "(no-source)-\(type)" : source }
+            /// Position in the snapshot file: one source can list several types.
+            var rowIndex: Int = 0
+            var id: String { "\(rowIndex)|\(source)|\(type)" }
         }
 
         var totalBlueprints: Int { blueprints.count }
@@ -149,7 +152,7 @@ struct DDMBlueprintService: Sendable {
               let items = try? JSONDecoder().decode([RawBlueprint].self, from: data) else {
             return nil
         }
-        return items.map { raw in
+        return items.enumerated().map { index, raw in
             Snapshot.Blueprint(
                 name: raw.name ?? "",
                 state: raw.state ?? "",
@@ -157,7 +160,8 @@ struct DDMBlueprintService: Sendable {
                 steps: raw.steps,
                 succeeded: raw.succeeded,
                 failed: raw.failed,
-                pending: raw.pending
+                pending: raw.pending,
+                rowIndex: index
             )
         }
     }
@@ -167,14 +171,15 @@ struct DDMBlueprintService: Sendable {
               let items = try? JSONDecoder().decode([RawDeclaration].self, from: data) else {
             return nil
         }
-        return items.map { raw in
+        return items.enumerated().map { index, raw in
             Snapshot.Declaration(
                 source: raw.source ?? "",
                 type: raw.type ?? "",
                 declarations: raw.declarations ?? 0,
                 devices: raw.devices ?? 0,
                 successful: raw.successful ?? 0,
-                unsuccessful: raw.unsuccessful ?? 0
+                unsuccessful: raw.unsuccessful ?? 0,
+                rowIndex: index
             )
         }
     }

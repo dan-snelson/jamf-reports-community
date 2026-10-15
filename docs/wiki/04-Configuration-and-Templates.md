@@ -420,9 +420,10 @@ The **Customize** screen holds the report options that are not in Config:
 
 Before 2.8.1 the screen also had a grid of sheet toggles, an Executive preset and three more
 chart switches. Nothing saved them or read them when generating, so they are gone. The
-stale-device trend (`charts.device_state_trend.enabled`) and the compliance bands
-(`charts.compliance_trend.bands`, with `charts.compliance_trend.enabled: false` to leave the
-chart out) are set in `config.yaml`.
+stale-device trend (`charts.device_state_trend.enabled`) and the mSCP/STIG band trend
+(`charts.compliance_trend.enabled: false` leaves it out) are set in `config.yaml`. Before 2.10
+the compliance bands (`charts.compliance_trend.bands`) drove a separate Compliance Band
+Distribution chart that never showed device counts; it is gone, and `bands` is no longer read.
 
 Both chart switches default to on, and the report reads a missing key the same way, so a
 workspace with no `charts:` block gets the OS adoption chart and the PNG files. A workspace

@@ -19,7 +19,7 @@ enum PriorCSVLoader {
     /// Load the prior snapshot, or return `nil` if no suitable candidate is found.
     static func load(historicalDir: URL, currentCSVURL: URL) -> Result? {
         let fm = FileManager.default
-        guard let currentData = try? Data(contentsOf: currentCSVURL),
+        guard let currentData = try? InventoryCSV.read(currentCSVURL),
               let currentHeaders = CSVParser.parseHeader(currentData) else {
             return nil
         }
@@ -52,7 +52,8 @@ enum PriorCSVLoader {
             ))?.canonicalPath ?? url.path
             if canonCandidate == canonCurrent { continue }
 
-            guard let candidateData = try? Data(contentsOf: url) else { continue }
+            // A link or oversize file in the history folder is skipped, never followed.
+            guard let candidateData = try? InventoryCSV.read(url) else { continue }
 
             // Skip if same size + same hash (archived copy of current).
             if candidateData.count == currentSize {

@@ -116,6 +116,15 @@ permission:
   **Add Jamf School workspace** in the sidebar's workspace menu) and no way to continue with
   this profile. If it should be Jamf Pro, check that the ID is for the environment that
   holds your Jamf Pro tenant.
+- **Missing permission:** the gateway did not reject the ID but refused the request with a
+  permission error (HTTP 403). The check's own request needs no permission, and the gateway
+  answers the same 403 for a request it does not route, so this points at the integration or
+  the environment as a whole: the integration holds none of the Jamf Pro permissions for this
+  environment, or no Jamf Pro answers behind the ID. Setup names the permission when jamf-cli does and offers
+  **Continue without validating**; anything that needs the missing access will not collect.
+  Grant the permissions in [Permissions by report area](#permissions-by-report-area) on the
+  integration in Jamf Account and check again with **Update credentials…**. **Add
+  environments** does not add an ID in this state.
 - **Undecided:** the answer was not conclusive, and setup offers **Continue without
   validating**.
 
@@ -133,6 +142,7 @@ permission, so the answer is about the ID and credentials alone:
 | A `version` value | The ID is accepted and a Jamf Pro tenant answered. |
 | Exit 4, `resource not found (HTTP 404)` | The gateway does not know this environment ID. The usual cause is a tenant ID pasted into the environment field. If the ID is right, confirm the environment includes your Jamf Pro instance. |
 | Exit 5, message contains `OWNERSHIP_FORBIDDEN` | The ID is the wrong kind for the integration's scope level, or belongs to another organization. |
+| Exit 5, any other message | The gateway accepted the ID but refused the request. Check that the integration has the Jamf Pro permissions in [Permissions by report area](#permissions-by-report-area), and that the ID is for the environment that holds your Jamf Pro tenant. |
 | Exit 3 | The credentials were refused. Check the client ID and secret. |
 
 On a direct Jamf Pro profile the same command is a quick connection test.

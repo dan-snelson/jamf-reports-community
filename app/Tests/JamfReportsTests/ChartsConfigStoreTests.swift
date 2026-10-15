@@ -94,15 +94,20 @@ final class ChartsConfigStoreTests: XCTestCase {
           device_state_trend:
             enabled: true
         """)
-        try ChartsConfigWriter.save(
+        let saved = try ChartsConfigWriter.save(
             ChartsOptions(savePNGs: false, perMajorCharts: false), profile: profile)
 
         let text = try readBack()
         for survivor in ["historical_csv_dir", "archive_current_csv", "compliance_trend",
-                         "device_state_trend", "bands", "Pass", "#4472C4", "embed_in_xlsx"] {
+                         "device_state_trend", "embed_in_xlsx"] {
             XCTAssertTrue(text.contains(survivor),
                           "writing chart options must not drop \(survivor)")
         }
+        // `bands` is retired (2.10): the save removes it and says so.
+        for gone in ["bands", "Pass", "#4472C4"] {
+            XCTAssertFalse(text.contains(gone), "\(gone) is no longer read and goes")
+        }
+        XCTAssertEqual(saved.report.removedRetiredKeys, ["charts.compliance_trend.bands"])
     }
 
     /// Same hazard one level deeper: a hand-typed sibling of per_major_charts stays.

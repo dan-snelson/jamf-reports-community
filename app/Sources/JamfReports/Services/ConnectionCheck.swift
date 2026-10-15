@@ -17,6 +17,10 @@ enum ConnectionCheck {
         case rejectedID(FailureCause.Kind)
         /// The gateway recognised the ID, but no Jamf Pro answered for it.
         case noJamfPro
+        /// The gateway did not reject the ID, but the integration lacks a permission the check
+        /// needs (a plain HTTP 403, not `OWNERSHIP_FORBIDDEN`). `names` holds what jamf-cli's
+        /// hint names, empty when it names none.
+        case missingPermission(names: [String])
         /// The check could not tell.
         case undecided(exitCode: Int32?)
     }
@@ -55,6 +59,7 @@ enum ConnectionCheck {
         if first.kind == .scopeRejected || first.kind == .unknownEnvironment {
             return .rejectedID(first.kind)
         }
+        if first.kind == .missingPermission { return .missingPermission(names: first.names) }
         guard needsProbe(version) else { return .undecided(exitCode: version.exitCode) }
         guard let probe else { return .undecided(exitCode: nil) }
         if probe.exitCode == CLIBridge.exitCodeTimedOut {
@@ -64,6 +69,8 @@ enum ConnectionCheck {
         let second = FailureCause.classify(exitCode: probe.exitCode, stdout: probe.stdout)
         switch second.kind {
         case .scopeRejected, .unknownEnvironment: return .rejectedID(second.kind)
+        // The version call answered 404 and the gateway resolved the scope for this one (it
+        // checks scope before capability), so the ID is known and holds no Jamf Pro.
         case .missingPermission: return .noJamfPro
         case .edgeBlocked, .notServed, .noDeclarationData, .softwareUpdatePlansOff,
              .noConfiguredBenchmark, .retiredGateway, .other:
@@ -121,7 +128,7 @@ extension ConnectionCheck.Verdict {
     var blocksContinue: Bool {
         switch self {
         case .rejectedID, .noJamfPro: true
-        case .accepted, .undecided: false
+        case .accepted, .missingPermission, .undecided: false
         }
     }
 
@@ -139,6 +146,23 @@ extension ConnectionCheck.Verdict {
         + "Security Cloud, Jamf Reports cannot report from it on its own: Jamf Protect is added "
         + "to a Jamf Pro workspace (Data Sources › Add Jamf Protect), and Jamf Security Cloud is "
         + "not supported yet."
+
+    /// What the verdict says without its advice on continuing, for a list of results.
+    static func missingPermissionText(names: [String]) -> String {
+        // The version request itself needs no permission, and the gateway answers the same 403
+        // for a path it does not route, so a refusal is about the integration or the environment
+        // as a whole, not about one permission the check needs.
+        if !names.isEmpty {
+            return "The gateway did not reject this ID, but the integration lacks a permission ("
+                + names.joined(separator: "; ") + "). Grant it on the integration in Jamf "
+                + "Account, or on the API role for a Jamf Pro privilege."
+        }
+        return "The gateway did not reject this ID but refused the request. Either the "
+            + "integration holds no Jamf Pro permission for this environment, or no Jamf Pro "
+            + "answers behind it. Grant the Jamf Pro permissions Jamf Reports reads on the "
+            + "integration in Jamf Account, and check that the ID is for the environment that "
+            + "holds your Jamf Pro tenant."
+    }
 
     var message: String { message(tenantLevel: false) }
 
@@ -163,6 +187,10 @@ extension ConnectionCheck.Verdict {
                 + "a School API key, so set it up as a Jamf School workspace (Add Jamf School "
                 + "workspace in the sidebar's workspace menu). If it should be Jamf Pro, check "
                 + "that the ID is for the environment that holds your Jamf Pro tenant."
+        case .missingPermission(let names):
+            return Self.missingPermissionText(names: names)
+                + " You can continue; data that needs the permission will not collect until it "
+                + "is granted."
         case .undecided(let exitCode):
             let cause = exitCode == CLIBridge.exitCodeTimedOut
                 ? " (no answer within \(Int(ConnectionCheck.timeout)) seconds)"

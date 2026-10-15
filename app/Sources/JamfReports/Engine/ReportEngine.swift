@@ -24,6 +24,8 @@ struct ReportEngine: Sendable {
     /// pinned logo and HTML history file look the profile's workspace up by it; the profile in
     /// config.yaml is not used for that, since a peer on a shared workspace can edit it.
     var profile: String? = nil
+    /// The most bytes of a CSV export `generate` reads; a larger file fails the run. A test seam.
+    var csvByteLimit = InventoryCSV.maxBytes
 
     /// The trend-chart tab, the one tab no sheet plan writes.
     static let chartsSheetName = "Charts"
@@ -177,7 +179,7 @@ struct ReportEngine: Sendable {
     private func csvDashboard(
         at csvURL: URL, workbook: Workbook, profile: String
     ) throws -> CSVDashboard {
-        let csvData = try Data(contentsOf: csvURL)
+        let csvData = try InventoryCSV.read(csvURL, limit: csvByteLimit)
         guard let csv = CSVDashboard(config: config, csvData: csvData, workbook: workbook,
                                      currentCSVURL: csvURL, profile: profile) else {
             throw ReportEngineError.csvParseFailed(csvURL)
@@ -403,6 +405,18 @@ struct ReportEngine: Sendable {
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) {
         let fm = FileManager.default
+        // Read through the same bounded, link-refusing open as the report, so a link planted at
+        // the CSV's name is never copied and the archive cannot hold more than the report read.
+        let data: Data
+        do {
+            data = try InventoryCSV.read(csvURL, limit: csvByteLimit)
+        } catch {
+            let msg = "[warn] Could not archive CSV snapshot: \(error.localizedDescription)"
+            AppLogger.report.warning("\(msg, privacy: .private)")
+            print(msg)
+            onLine?(.init(timestamp: Date(), level: .warn, text: msg))
+            return
+        }
         do {
             try fm.createDirectory(at: historicalDir, withIntermediateDirectories: true)
         } catch {
@@ -417,7 +431,12 @@ struct ReportEngine: Sendable {
         let ts = formatter.string(from: Date())
         let dest = historicalDir.appendingPathComponent("computers_\(ts).csv")
         do {
-            try fm.copyItem(at: csvURL, to: dest)
+            try data.write(to: dest, options: .withoutOverwriting)
+            // Keep the export's own date: Fleet Drift picks the prior snapshot by modification time.
+            if let modified = (try? csvURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate {
+                try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: dest.path)
+            }
         } catch {
             let msg = "[warn] Could not archive CSV snapshot: \(error)"
             AppLogger.report.warning("\(msg, privacy: .private)")
@@ -1189,11 +1208,11 @@ struct ReportEngine: Sendable {
     /// - `charts.os_adoption.per_major_charts` — draws the OS adoption chart, one bar per major
     ///   OS version (using `ChartPalette.majorVersionColors`). On when the key is absent, as
     ///   the Customize screen shows it; `false` turns it off.
-    /// - `charts.compliance_trend.bands` — uses band labels/colors for compliance stacked area;
-    ///   `charts.compliance_trend.enabled: false` turns the chart off.
+    /// - `charts.compliance_trend.enabled: false` leaves the mSCP/STIG band trend chart out
+    ///   (absent is on); the donuts stay.
     /// - `charts.device_state_trend.enabled` — renders managed/stale trend line chart.
     /// - `compliance.baselines` — when configured, appends mSCP/STIG compliance donut(s) and
-    ///   a band trend stackplot even when the summaries dir is empty (first-run case).
+    ///   a band trend stackplot (first baseline with data) even when the summaries dir is empty (first-run case).
     ///
     /// - Parameters:
     ///   - workbook: Workbook to append the "Charts" sheet to.
@@ -1303,30 +1322,6 @@ struct ReportEngine: Sendable {
                 }
             }
 
-            // --- Compliance trend (stacked area with configurable bands) ---
-            if let trend = config.charts?.complianceTrend, trend.isEnabled,
-               let bands = trend.bands, !bands.isEmpty {
-                let bandSeries: [ChartSeries] = bands.enumerated().compactMap { (idx, band) in
-                    let color = cgColorFromHex(band.color) ?? ChartPalette.color(for: idx)
-                    let pts = summaries.compactMap { s -> (date: Date, value: Double)? in
-                        guard let pct = s.compliancePct else { return nil }
-                        let within = pct >= Double(band.minFailures) && pct <= Double(band.maxFailures)
-                        return within ? (s.parsedDate, 1.0) : nil
-                    }
-                    return pts.isEmpty ? nil : ChartSeries(label: band.label, color: color, points: pts)
-                }
-                if !bandSeries.isEmpty {
-                    if let png = ChartRenderer.stackedAreaChart(
-                        series: bandSeries, title: "Compliance Band Distribution"
-                    ) {
-                        ws.insertImage(row: embedRow, col: 0, data: png,
-                                       filename: "compliance_bands.png")
-                        embedRow += 20
-                        writePNG(png, kind: "compliance-bands", profile: profile, to: pngOutputDir)
-                    }
-                }
-            }
-
             // --- OS adoption (on unless per_major_charts is false, like the Customize screen) ---
             if config.charts?.osAdoption?.perMajorCharts ?? ChartsOptions.defaults.perMajorCharts {
                 var majorData: [String: Double] = [:]
@@ -1366,6 +1361,7 @@ struct ReportEngine: Sendable {
         embedRow = renderMSCPCharts(
             workbook: workbook, ws: ws, embedRow: embedRow,
             mscpResults: mscpResults, baselines: baselines, summaries: summaries,
+            trendEnabled: config.charts?.complianceTrend?.isEnabled ?? true,
             profile: profile, pngOutputDir: pngOutputDir
         )
         _ = embedRow  // final row count not needed outside this scope
@@ -1382,6 +1378,7 @@ struct ReportEngine: Sendable {
         mscpResults: [MSCPComplianceService.BaselineResult],
         baselines: [ComplianceBaselineConfig],
         summaries: [DailySummary],
+        trendEnabled: Bool,
         profile: String,
         pngOutputDir: URL?
     ) -> Int {
@@ -1412,9 +1409,11 @@ struct ReportEngine: Sendable {
             }
         }
 
-        // Band trend stackplot — uses primary baseline (first with data).
-        guard let primaryBaseline = baselines.first,
-              let primaryResult = mscpResults.first, primaryResult.devicesWithData > 0
+        // Band trend stackplot — the first baseline with data (`evaluate` returns one result
+        // per baseline, in order).
+        guard trendEnabled,
+              let primaryBaseline = zip(baselines, mscpResults)
+                  .first(where: { $0.1.devicesWithData > 0 })?.0
         else { return embedRow }
 
         let points = MSCPChartDataBuilder.buildSeries(
@@ -1449,17 +1448,6 @@ struct ReportEngine: Sendable {
 
     private func sanitizeForFilename(_ s: String) -> String {
         ExportNaming.sanitize(s).prefix(32).description
-    }
-
-    /// Parse a hex color string (#RRGGBB) into a `CGColor`. Returns nil on malformed input.
-    private func cgColorFromHex(_ hex: String) -> CGColor? {
-        let h = hex.trimmingCharacters(in: .init(charactersIn: "#"))
-        guard h.count == 6,
-              let rgb = UInt32(h, radix: 16) else { return nil }
-        let r = CGFloat((rgb >> 16) & 0xFF) / 255
-        let g = CGFloat((rgb >> 8) & 0xFF) / 255
-        let b = CGFloat(rgb & 0xFF) / 255
-        return CGColor(red: r, green: g, blue: b, alpha: 1)
     }
 
     /// Routes through `WorkspacePaths.historicalDir(for:)` so that
@@ -2127,7 +2115,7 @@ struct ReportEngine: Sendable {
         // Scope: pro namespace only. school/protect namespace flag support is unverified;
         // those collect paths are left unmodified until confirmed via `school --help`.
         let supportsQuietFlags = detectedVersion.map {
-            !JamfCLIInstaller.isBelowMinimumSupported($0)
+            !JamfCLIInstaller.isBelowMinimumRunnable($0)
         } ?? false
 
         // Resolved once per run, not per kind — it spawns `config list`.
@@ -3592,6 +3580,7 @@ struct ReportEngine: Sendable {
         csvURL: URL?,
         dataDir: URL,
         outputURL: URL,
+        csvByteLimit: Int = InventoryCSV.maxBytes,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async throws -> [SheetFailure] {
         // PR-10 / threat-model T-11: strict-mode pre-flight applies to School
@@ -3606,7 +3595,7 @@ struct ReportEngine: Sendable {
         let (_, schoolFailures) = core.writeAll(sheets: sheets)
 
         if let csvURL {
-            let csvData = try Data(contentsOf: csvURL)
+            let csvData = try InventoryCSV.read(csvURL, limit: csvByteLimit)
             let school = SchoolCSVDashboard(config: config, csvData: csvData, workbook: workbook)
             // SchoolCSVDashboard.writeAll() is currently a stub returning [].
             _ = school?.writeAll()

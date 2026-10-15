@@ -119,6 +119,39 @@ struct ComplianceBenchmarksService: Sendable {
         )
     }
 
+    /// Rules worst first: most failures, a rule with no failure count (unknown) after every
+    /// counted one, then by rule name. The screen cuts the list, so the order decides which
+    /// rules it shows.
+    static func rankedRules(_ rules: [Snapshot.Rule]) -> [Snapshot.Rule] {
+        rules.sorted { lhs, rhs in
+            if lhs.failed != rhs.failed { return failsMore(lhs.failed, rhs.failed) }
+            let byName = lhs.rule.localizedCaseInsensitiveCompare(rhs.rule)
+            if byName != .orderedSame { return byName == .orderedAscending }
+            return lhs.id < rhs.id
+        }
+    }
+
+    /// Devices worst first: most failed rules, unknown after every counted one, then by name.
+    static func rankedDevices(_ devices: [Snapshot.Device]) -> [Snapshot.Device] {
+        devices.sorted { lhs, rhs in
+            if lhs.rulesFailed != rhs.rulesFailed {
+                return failsMore(lhs.rulesFailed, rhs.rulesFailed)
+            }
+            let byName = lhs.device.localizedCaseInsensitiveCompare(rhs.device)
+            if byName != .orderedSame { return byName == .orderedAscending }
+            return lhs.id < rhs.id
+        }
+    }
+
+    /// True when `lhs` ranks ahead of `rhs`; nil (unknown) ranks behind every count.
+    private static func failsMore(_ lhs: Int?, _ rhs: Int?) -> Bool {
+        switch (lhs, rhs) {
+        case let (l?, r?): return l > r
+        case (_?, nil): return true
+        default: return false
+        }
+    }
+
     /// Returns the newest compliance snapshot for `profile`. Returns
     /// `.empty` when no compliance data has been collected — that's the
     /// expected state pre-first-collect or on a tenant without Platform

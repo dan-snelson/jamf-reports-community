@@ -89,8 +89,9 @@ final class OnboardingFlow {
     /// so the flow only calls it off the main actor, never during a SwiftUI update.
     typealias InstallationProbe = @Sendable () -> JamfCLIInstaller.Installation?
 
-    /// The jamf-cli profile names that exist now. Launches jamf-cli, so it runs off the main actor.
-    typealias ProfileLister = @Sendable () -> Set<String>
+    /// The jamf-cli profile names that exist now, nil when they could not be read. Launches
+    /// jamf-cli, so it runs off the main actor.
+    typealias ProfileLister = @Sendable () -> Set<String>?
 
     /// Removes one jamf-cli profile: nil when it is gone, else what went wrong.
     typealias ProfileRemover = @Sendable (String) async -> String?
@@ -102,6 +103,7 @@ final class OnboardingFlow {
         case invalidProfile
         case profileCaseConflict(existing: String)
         case invalidJamfURL
+        case invalidScopeID
         case missingJamfCLI
         case missingWorkspace
         case csvOutsideAllowedZones
@@ -118,6 +120,8 @@ final class OnboardingFlow {
                     + "only by letter case would share its folder. Choose a different name."
             case .invalidJamfURL:
                 "Jamf Pro URL must start with https:// and include a valid host."
+            case .invalidScopeID:
+                OnboardingFlow.scopeIDProblemText
             case .missingJamfCLI:
                 "Could not find jamf-cli on PATH."
             case .missingWorkspace:
@@ -353,7 +357,7 @@ final class OnboardingFlow {
                     && (!clientSecret.isEmpty || secretFieldHasText) && !isRegisteringProfile
             case .platformGateway:
                 isProfileNameValid && isGatewayURLValid
-                    && !platformScopeID.trimmed.isEmpty
+                    && isPlatformScopeIDValid
                     && !platformClientID.trimmed.isEmpty
                     && (!platformClientSecret.isEmpty || platformSecretFieldHasText)
                     && !isRegisteringProfile
@@ -609,6 +613,7 @@ final class OnboardingFlow {
     }
 
     private func registerPlatformGatewayProfile() async throws {
+        guard isPlatformScopeIDValid else { throw FlowError.invalidScopeID }
         guard let binary = CLIBridge().locate("jamf-cli") else { throw FlowError.missingJamfCLI }
         try Self.signatureGate(binary: binary)
         guard isProfileNameValid else { throw FlowError.invalidProfile }
@@ -985,13 +990,15 @@ final class OnboardingFlow {
     }
 
     /// Only an answering Jamf Pro validates. A rejected ID stays unvalidated, an unconfirmed one
-    /// offers Continue without validating, and an environment with no Jamf Pro is probably Jamf
-    /// School: the banner points to a School workspace and offers no way on with this profile.
+    /// or one whose check lacks a permission offers Continue without validating (the ID passed
+    /// the gateway; only the data that needs the permission is missing), and an environment with
+    /// no Jamf Pro is probably Jamf School: the banner points to a School workspace and offers no
+    /// way on with this profile.
     func applyConnectionCheck(_ verdict: ConnectionCheck.Verdict) {
         connectionCheck = verdict
         switch verdict {
         case .accepted: connectionValidated = true
-        case .rejectedID, .noJamfPro, .undecided: connectionValidated = false
+        case .rejectedID, .noJamfPro, .missingPermission, .undecided: connectionValidated = false
         }
         if connectionValidated { recordConnectionMember(for: verdict) }
     }
@@ -1026,8 +1033,10 @@ final class OnboardingFlow {
     var offersContinueWithoutValidating: Bool {
         guard !connectionValidated, canAdvance, let exit = validationExitCode else { return false }
         guard proConnectionType == .platformGateway, exit == 0 else { return exit != 0 }
-        if case .undecided = connectionCheck { return true }
-        return false
+        switch connectionCheck {
+        case .undecided, .missingPermission: return true
+        case .accepted, .rejectedID, .noJamfPro, nil: return false
+        }
     }
 
     func scaffoldCSV(from url: URL) async {
@@ -1280,6 +1289,19 @@ final class OnboardingFlow {
     }
 
     var isGatewayURLValid: Bool { normalizedURL(gatewayURL.trimmed) != nil }
+
+    /// The ID goes to `config add-profile` as a flag value, so it passes the check Add
+    /// environments applies to each ID.
+    var isPlatformScopeIDValid: Bool { ConnectionEnvironments.isUsableID(platformScopeID.trimmed) }
+
+    nonisolated static let scopeIDProblemText = "Use only letters, digits, dots, hyphens and "
+        + "underscores, and don't start with a hyphen. Copy the ID from Jamf Account without "
+        + "spaces."
+
+    /// Shown under the ID field once something is typed that the check refuses.
+    var platformScopeIDProblem: String? {
+        platformScopeID.trimmed.isEmpty || isPlatformScopeIDValid ? nil : Self.scopeIDProblemText
+    }
     var isProtectURLValid: Bool { normalizedURL(protectURL.trimmed) != nil }
     var isSchoolURLValid: Bool { normalizedURL(schoolURL.trimmed) != nil }
 

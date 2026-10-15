@@ -786,6 +786,54 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         return flow
     }
 
+    // MARK: - Platform scope ID check
+
+    private func completePlatformFlow(scopeID: String) -> OnboardingFlow {
+        let flow = makeValidPlatformGatewayFlow()
+        flow.platformScopeID = scopeID
+        flow.platformClientID = "platform-client-id"
+        flow.platformSecretFieldHasText = true
+        return flow
+    }
+
+    func testPlatformStepAdvancesOnlyWithAUsableScopeID() {
+        XCTAssertTrue(completePlatformFlow(scopeID: "7c1e5a90-3b2d_4f68.x").canAdvance)
+        XCTAssertTrue(completePlatformFlow(scopeID: "  my-env \n").canAdvance, "trimmed first")
+        for bad in ["--tenant-id", "-env", "my env", "env/1", "é", "", "   "] {
+            let flow = completePlatformFlow(scopeID: bad)
+            XCTAssertFalse(flow.canAdvance, bad)
+            XCTAssertFalse(flow.isPlatformScopeIDValid, bad)
+        }
+    }
+
+    func testTheScopeIDProblemShowsOnlyForTypedText() {
+        XCTAssertNil(completePlatformFlow(scopeID: "").platformScopeIDProblem)
+        XCTAssertNil(completePlatformFlow(scopeID: "  ").platformScopeIDProblem)
+        XCTAssertNil(completePlatformFlow(scopeID: " my-env ").platformScopeIDProblem)
+        XCTAssertEqual(completePlatformFlow(scopeID: "--x").platformScopeIDProblem,
+                       OnboardingFlow.scopeIDProblemText)
+    }
+
+    func testOnboardingAndAddEnvironmentsShareOneRule() {
+        for id in ["ok-1", "-no", "a b", "é", "a.b_c", ""] {
+            XCTAssertEqual(completePlatformFlow(scopeID: id).isPlatformScopeIDValid,
+                           ConnectionEnvironments.isUsableID(id), id)
+        }
+    }
+
+    /// The refusal comes before jamf-cli is looked for, so no test launches it.
+    func testRegisteringRefusesAnUnusableScopeIDBeforeAnythingRuns() async {
+        let flow = completePlatformFlow(scopeID: "--tenant-id")
+        do {
+            try await flow.registerJamfCLIProfile()
+            XCTFail("expected a refusal")
+        } catch let error as OnboardingFlow.FlowError {
+            guard case .invalidScopeID = error else { return XCTFail("\(error)") }
+        } catch {
+            XCTFail("\(error)")
+        }
+    }
+
     private func makeValidPlatformGatewayFlow() -> OnboardingFlow {
         let flow = OnboardingFlow()
         flow.currentStep = .authenticate

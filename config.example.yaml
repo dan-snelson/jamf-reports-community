@@ -1009,19 +1009,12 @@ charts:
     # key means true, as the Customize screen shows it; set false to leave it out.
     per_major_charts: true
 
-  # Compliance trend: stacked area chart bucketing devices by failure count.
-  # Requires compliance.failures_count_column to be configured.
+  # Compliance trend: the mSCP/STIG band trend chart (devices per failure-count band
+  # over time, for the first compliance baseline with data). Needs
+  # compliance.failures_count_column or compliance.baselines.
   compliance_trend:
-    # Set to false to leave this chart out of the Charts tab. The bands below
-    # are read either way.
+    # Set to false to leave the trend chart out of the Charts tab (the donuts stay).
     enabled: true
-    # Failure count bands — labels, thresholds, and colors.
-    bands:
-      - {label: "Pass",            min_failures: 0,  max_failures: 0,    color: "#4472C4"}
-      - {label: "Low (1-10)",      min_failures: 1,  max_failures: 10,   color: "#2E9E7D"}
-      - {label: "Med-Low (11-30)", min_failures: 11, max_failures: 30,   color: "#FFCA30"}
-      - {label: "Medium (31-50)",  min_failures: 31, max_failures: 50,   color: "#F07C21"}
-      - {label: "High (>50)",      min_failures: 51, max_failures: 9999, color: "#C0392B"}
 
   # jamf-cli-only trend: managed/unmanaged and current/stale device counts
   # over time from cached device-compliance snapshots.

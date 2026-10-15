@@ -19,12 +19,33 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         var profiles: [String] = []
     }
 
+    /// Verdicts that replace the harness's for later runs.
+    private final class LaterVerdicts: @unchecked Sendable {
+        private let lock = NSLock()
+        private var byProfile: [String: ConnectionCheck.Verdict] = [:]
+        func set(_ verdict: ConnectionCheck.Verdict, for profile: String) {
+            lock.lock(); byProfile[profile] = verdict; lock.unlock()
+        }
+        func verdict(for profile: String) -> ConnectionCheck.Verdict? {
+            lock.lock(); defer { lock.unlock() }
+            return byProfile[profile]
+        }
+    }
+
+    /// The jamf-cli profile list, which a test changes between runs.
+    private final class ProfileNames {
+        var names: [String]
+        init(_ names: [String]) { self.names = names }
+    }
+
     private struct Harness {
         let model: ConnectionCredentialsModel
         let store: ConnectionStore
         let recorder: Recorder
         let provisioned: Provisioned
         let connectionID: UUID
+        let profiles: ProfileNames
+        let later: LaterVerdicts
     }
 
     private let context = ConnectionCredentialsModel.JamfCLIContext(
@@ -39,6 +60,7 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         failRegistration: Set<String> = [],
         existingProfiles: [String] = ["acme-prod"],
         reRegistrable: Set<String> = [],
+        usesStoredLeftoverRule: Bool = false,
         region: Connection.Region = .eu
     ) throws -> Harness {
         let dir = FileManager.default.temporaryDirectory
@@ -51,6 +73,8 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         try store.upsert(connection)
         let recorder = Recorder()
         let provisioned = Provisioned()
+        let profiles = ProfileNames(existingProfiles)
+        let later = LaterVerdicts()
         let context = self.context
         let dependencies = ConnectionCredentialsModel.Dependencies(
             jamfCLI: { context },
@@ -62,18 +86,26 @@ final class ConnectionCredentialsModelTests: XCTestCase {
             },
             check: { _, profile in
                 await recorder.record(checked: profile)
-                return verdicts[profile] ?? .accepted(jamfProVersion: "11.25.0")
+                return later.verdict(for: profile) ?? verdicts[profile]
+                    ?? .accepted(jamfProVersion: "11.25.0")
             },
-            existingProfiles: { existingProfiles },
+            existingProfiles: { profiles.names },
             workspaceConflict: { _ in nil },
             provisionWorkspace: { provisioned.profiles.append($0); return true },
             store: store,
-            canReRegister: { reRegistrable.contains($0) })
+            canReRegister: { name in
+                guard usesStoredLeftoverRule else { return reRegistrable.contains(name) }
+                return ConnectionCredentialsModel.isLeftoverPlatformProfile(
+                    JamfCLIProfile(
+                        name: name, url: "", schedules: 0, status: .idle,
+                        authMethod: "platform"),
+                    connections: store.load(), workspaceExists: false)
+            })
         let model = ConnectionCredentialsModel(
             connection: connection, mode: mode, dependencies: dependencies)
         return Harness(
             model: model, store: store, recorder: recorder, provisioned: provisioned,
-            connectionID: connection.id)
+            connectionID: connection.id, profiles: profiles, later: later)
     }
 
     private func fill(_ model: ConnectionCredentialsModel, ids: String = "") {
@@ -132,6 +164,23 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         XCTAssertEqual(row.outcome, .rejected(.unknownEnvironment))
         XCTAssertFalse(row.suggestsJamfSchool)
         XCTAssertTrue(row.leavesProfileRegistered)
+        XCTAssertTrue(h.provisioned.profiles.isEmpty)
+        XCTAssertEqual(members(h).map(\.profile), ["acme-prod"])
+    }
+
+    func testAMissingPermissionAddsNothingAndNamesIt() async throws {
+        let h = try harness(
+            mode: .addEnvironments,
+            verdicts: ["acme-perm": .missingPermission(names: ["Settings: Read"])])
+        fill(h.model, ids: "env-perm Perm")
+        await h.model.run()
+
+        let row = try XCTUnwrap(h.model.rows.first)
+        XCTAssertEqual(row.outcome, .missingPermission(names: ["Settings: Read"]))
+        XCTAssertFalse(row.suggestsJamfSchool)
+        XCTAssertFalse(row.isSuccess)
+        XCTAssertTrue(row.leavesProfileRegistered)
+        XCTAssertTrue(row.message.contains("Settings: Read"), row.message)
         XCTAssertTrue(h.provisioned.profiles.isEmpty)
         XCTAssertEqual(members(h).map(\.profile), ["acme-prod"])
     }
@@ -198,10 +247,54 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         XCTAssertTrue(registrations.isEmpty)
     }
 
+    func testAProfileTheAppRegisteredButCouldNotConfirmIsRegisteredAgain() async throws {
+        let h = try harness(
+            mode: .addEnvironments, verdicts: ["acme-staging": .undecided(exitCode: 1)],
+            usesStoredLeftoverRule: true)
+        fill(h.model, ids: "env-stage Staging")
+        await h.model.run()
+
+        let first = try XCTUnwrap(h.model.rows.first)
+        XCTAssertEqual(first.outcome, .notConfirmed(exitCode: 1))
+        XCTAssertEqual(h.store.load().first?.unconfirmedProfiles, ["acme-staging"])
+
+        // The profile is now in jamf-cli, and the second check accepts the ID.
+        h.profiles.names.append("acme-staging")
+        h.later.set(.accepted(jamfProVersion: "11.25.0"), for: "acme-staging")
+        fill(h.model, ids: "env-stage Staging")
+        await h.model.run()
+
+        let second = try XCTUnwrap(h.model.rows.first)
+        XCTAssertEqual(second.outcome, .added(jamfProVersion: "11.25.0", workspaceNote: nil))
+        XCTAssertTrue(second.reRegistered)
+        let registrations = await h.recorder.registrations
+        XCTAssertEqual(registrations.map(\.profile), ["acme-staging", "acme-staging"])
+        XCTAssertEqual(members(h).map(\.profile).sorted(), ["acme-prod", "acme-staging"])
+        XCTAssertEqual(h.store.load().first?.unconfirmedProfiles, [],
+                       "a confirmed profile is a member, not a leftover")
+    }
+
+    func testAProfileMadeOutsideTheAppIsRefusedEvenWithTheShapeOfALeftover() async throws {
+        // Platform, in no connection, no workspace folder: made in Terminal, not by this app.
+        let h = try harness(
+            mode: .addEnvironments, existingProfiles: ["acme-prod", "acme-staging"],
+            usesStoredLeftoverRule: true)
+        fill(h.model, ids: "env-stage Staging")
+        await h.model.run()
+
+        XCTAssertEqual(h.model.rows.map(\.outcome), [.refused(.profileExists("acme-staging"))])
+        let row = try XCTUnwrap(h.model.rows.first)
+        XCTAssertTrue(row.message.contains("not made by this app"))
+        let registrations = await h.recorder.registrations
+        XCTAssertTrue(registrations.isEmpty, "the outside profile's credentials are untouched")
+        XCTAssertEqual(h.store.load().first?.unconfirmedProfiles, [])
+    }
+
     func testAMemberOrAWorkspaceProfileIsNotALeftover() {
         let member = Connection(
             name: "Acme", region: .eu, level: .environment,
-            members: [.init(profile: "acme-prod", scopeID: "e", label: "Prod", product: .pro)])
+            members: [.init(profile: "acme-prod", scopeID: "e", label: "Prod", product: .pro)],
+            unconfirmedProfiles: ["acme-staging", "acme-prod"])
         func isLeftover(
             _ name: String, auth: String = "platform", workspace: Bool = false
         ) -> Bool {
@@ -210,6 +303,7 @@ final class ConnectionCredentialsModelTests: XCTestCase {
                 connections: [member], workspaceExists: workspace)
         }
         XCTAssertTrue(isLeftover("acme-staging"))
+        XCTAssertFalse(isLeftover("acme-other"), "not registered by this app")
         XCTAssertFalse(isLeftover("acme-prod"), "a member")
         XCTAssertFalse(isLeftover("acme-staging", workspace: true), "has a workspace folder")
         XCTAssertFalse(isLeftover("acme-staging", auth: "oauth2"), "not a Platform profile")

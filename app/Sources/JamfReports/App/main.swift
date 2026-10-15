@@ -153,14 +153,18 @@ func notifyOverdueSchedulesHeadless(
             overdue: batch.issues
         )
         let count = batch.issues.count
-        let sent = await WebhookNotifier.sendFailed(
-            config: batch.notify,
-            title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
-            facts: facts
-        )
-        guard sent else { continue }
-        // Stamp only on a successful send so a transient webhook failure retries next run.
-        for target in batch.targets { marker.stamp(day: today, in: target.workspace) }
+        let outcome = await marker.sendOnce(
+            day: today, in: batch.targets.map(\.workspace),
+            onLine: { fputs($0 + "\n", stderr) }
+        ) {
+            await WebhookNotifier.sendFailed(
+                config: batch.notify,
+                title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
+                facts: facts
+            )
+        }
+        // Stamped only after a confirmed send, so a transient webhook failure retries next run.
+        guard outcome == .sent else { continue }
         print("[info] overdue schedule digest posted headlessly for "
             + "\(batch.profiles.joined(separator: ", ")) (\(count) overdue)")
     }
@@ -197,6 +201,7 @@ private func jamfCLIVersionBelowFloor() -> String? {
           JamfCLIInstaller.isBelowMinimumSupported(installed) else { return nil }
     return installed
 }
+
 
 /// True unless `value` looks like another flag — guards `args[idx + 1]` reads
 /// against silently consuming a missing value's own flag name (e.g.
@@ -267,19 +272,19 @@ private func scheduledRunSingleBody(
     // not followed (folders, retention, webhook); the run says which and carries on.
     SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
 
-    // Version-floor preflight (v2.2.0 Phase 3): abort loudly when an installed
-    // jamf-cli is below the supported floor, before any collect/backup, so a
-    // scheduled run never silently writes data from an unsupported binary.
-    // jamf-cli-only generates from cache and never calls jamf-cli, so it is
-    // exempt; an absent jamf-cli is also exempt (the collect path handles it).
+    // Version-floor preflight (v2.2.0 Phase 3; split in 2.10): below the runnable floor a
+    // scheduled run stops before any collect/backup, so it never writes data from a binary
+    // the app cannot drive; below the supported floor it warns and carries on. jamf-cli-only
+    // generates from cache and never calls jamf-cli, so it is exempt; an absent jamf-cli is
+    // also exempt (the collect path handles it).
     if mode != .jamfCLIOnly, let belowVersion = jamfCLIVersionBelowFloor() {
-        let message = "[error] jamf-cli \(belowVersion) is below the supported floor "
-            + "\(JamfCLIInstaller.minimumSupportedVersion) — aborting '\(profile)' to avoid "
-            + "writing data from an unsupported binary. Run: brew upgrade jamf-cli"
-        fputs(message + "\n", stderr)
-        recorder?.record(message)
-        recorder?.finish(exitCode: 1)
-        return 1
+        let line = JamfCLIInstaller.floorLine(installed: belowVersion, profile: profile)
+        fputs(line.text + "\n", stderr)
+        recorder?.record(line.text)
+        if line.stops {
+            recorder?.finish(exitCode: 1)
+            return 1
+        }
     }
 
     // Load config once, before the backup branch (product-type routing needs
@@ -375,7 +380,11 @@ private func scheduledRunSingleBody(
     // front so we don't run an expensive collect just to fail at generate.
     let resolvedCSV: URL?
     if mode == .csvAssisted {
-        guard let csv = CLIBridge.newestCSV(in: profile) else {
+        let picked = CLIBridge.newestCSV(in: profile) { warning in
+            print(warning)
+            recorder?.record(warning)
+        }
+        guard let csv = picked else {
             let message = "[error] csv-assisted requires a CSV in csv-inbox/ — none found for '\(profile)'"
             fputs(message + "\n", stderr)
             recorder?.record(message)

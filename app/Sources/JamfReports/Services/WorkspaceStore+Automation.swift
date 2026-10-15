@@ -778,16 +778,12 @@ extension WorkspaceStore {
             ? "Automation is off — background item disabled"
             : "Scheduled run overdue — \(overdue.count) schedule"
                 + (overdue.count == 1 ? "" : "s")
-        let delivered = await WebhookNotifier.sendFailed(
-            config: notify,
-            title: title,
-            facts: facts
-        )
-        // Claim the day only after a confirmed send, so a failed post retries
-        // on the next pass instead of silently swallowing the whole day.
-        if delivered {
-            marker.stamp(day: today, in: workspace)
-        } else {
+        // The claim keeps a tick that wakes mid-send from posting the same card; the day is
+        // stamped only after a confirmed send, so a failed post retries on the next pass.
+        let outcome = await marker.sendOnce(day: today, in: [workspace]) {
+            await WebhookNotifier.sendFailed(config: notify, title: title, facts: facts)
+        }
+        if outcome == .failed {
             AppLogger.webhook.warning(
                 "Overdue dead-man digest failed to send for \(profile, privacy: .public) — day not claimed, will retry (distinct from a routine run digest failure)"
             )

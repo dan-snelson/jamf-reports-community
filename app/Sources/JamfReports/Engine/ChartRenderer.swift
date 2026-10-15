@@ -30,7 +30,7 @@ enum ChartPalette {
         CGColor(red: 0.204, green: 0.596, blue: 0.859, alpha: 1), // #3498DB
     ]
 
-    /// Compliance band colors, matching `DEFAULT_CONFIG["charts"]["compliance_trend"]["bands"]`.
+    /// Compliance band colors for the mSCP/STIG donut and band trend.
     /// Order: Pass, Low, Med-Low, Medium, High (5 entries — no No-Data here).
     static let complianceBandColors: [CGColor] = [
         CGColor(red: 0.267, green: 0.447, blue: 0.769, alpha: 1), // Pass  — blue

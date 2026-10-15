@@ -99,6 +99,52 @@ final class DDMBlueprintServiceTests: XCTestCase {
                        "Empty source must round-trip without nilling the row")
     }
 
+    // MARK: - Row identity
+
+    /// A real tenant lists one source under several types, and two blueprints can share a name
+    /// or have none; every row must still get its own `ForEach` id.
+    func testDeclarationsWithTheSameSourceKeepSeparateIDs() throws {
+        let url = tempDir.appendingPathComponent("ddm-dupes.json")
+        let json = """
+        [
+          {"source": "Baseline", "type": "blueprint", "declarations": 4, "devices": 9,
+           "successful": 9, "unsuccessful": 0},
+          {"source": "Baseline", "type": "standalone", "declarations": 1, "devices": 9,
+           "successful": 9, "unsuccessful": 0},
+          {"source": "Baseline", "type": "blueprint", "declarations": 2, "devices": 3,
+           "successful": 1, "unsuccessful": 2},
+          {"source": "", "type": "system", "declarations": 1, "devices": 1,
+           "successful": 1, "unsuccessful": 0},
+          {"source": "", "type": "system", "declarations": 1, "devices": 1,
+           "successful": 1, "unsuccessful": 0}
+        ]
+        """
+        try Data(json.utf8).write(to: url)
+        let rows = DDMBlueprintService.load(blueprintsURL: nil, declarationsURL: url).declarations
+        XCTAssertEqual(rows.count, 5)
+        XCTAssertEqual(Set(rows.map(\.id)).count, 5, "Every declaration row needs its own id")
+        let sorted = DDMBlueprintView.sortedDeclarations(rows)
+        XCTAssertEqual(Set(sorted.map(\.id)).count, 5, "Sorting must not merge rows")
+    }
+
+    func testBlueprintsWithTheSameOrNoNameKeepSeparateIDs() throws {
+        let url = tempDir.appendingPathComponent("bp-dupes.json")
+        let json = """
+        [
+          {"name": "Baseline", "state": "DEPLOYED", "scope": 3, "steps": 1},
+          {"name": "Baseline", "state": "DEPLOYED", "scope": 3, "steps": 1},
+          {"name": "", "state": "NOT_DEPLOYED"},
+          {"state": "NOT_DEPLOYED"}
+        ]
+        """
+        try Data(json.utf8).write(to: url)
+        let rows = DDMBlueprintService.load(blueprintsURL: url, declarationsURL: nil).blueprints
+        XCTAssertEqual(rows.count, 4)
+        XCTAssertEqual(Set(rows.map(\.id)).count, 4, "Every blueprint row needs its own id")
+        XCTAssertEqual(rows.map(\.name), ["Baseline", "Baseline", "", ""],
+                       "The displayed name is the file's, unchanged")
+    }
+
     // MARK: - Aggregates
 
     func testAdoptionRateZeroWhenNoBlueprints() {

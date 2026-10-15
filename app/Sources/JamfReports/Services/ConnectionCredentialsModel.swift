@@ -34,8 +34,9 @@ final class ConnectionCredentialsModel {
         /// Creates the profile's workspace; true when it wrote a config.yaml.
         var provisionWorkspace: @MainActor (String) throws -> Bool
         var store: ConnectionStore
-        /// An existing jamf-cli profile an earlier Add environments attempt left behind: in no
-        /// connection and with no workspace folder, so registering it again loses nothing.
+        /// An existing jamf-cli profile an earlier Add environments attempt of this app left
+        /// behind: recorded by the store, in no connection and with no workspace folder, so
+        /// registering it again loses nothing.
         var canReRegister: @MainActor (String) -> Bool = { _ in false }
     }
 
@@ -48,6 +49,8 @@ final class ConnectionCredentialsModel {
         case notJamfPro
         case rejected(FailureCause.Kind)
         case notConfirmed(exitCode: Int32?)
+        /// The ID passed the gateway, but the integration lacks Jamf Pro access for it (HTTP 403).
+        case missingPermission(names: [String])
         case skipped(String)
     }
 
@@ -67,7 +70,7 @@ final class ConnectionCredentialsModel {
         var leavesProfileRegistered: Bool {
             guard isNew else { return false }
             switch outcome {
-            case .notJamfPro, .rejected, .notConfirmed: return true
+            case .notJamfPro, .rejected, .notConfirmed, .missingPermission: return true
             case .refused, .registrationFailed, .added, .updated, .skipped: return false
             }
         }
@@ -200,9 +203,12 @@ final class ConnectionCredentialsModel {
             let request = Registration(
                 profile: planned.profile, gatewayURL: gatewayURL, scope: scope,
                 scopeID: planned.entry.scopeID, clientID: clientID, clientSecret: secret)
-            let outcome = await registerAndCheck(context, request) { verdict in
-                self.outcomeForNew(planned, verdict: verdict)
-            }
+            let outcome = await registerAndCheck(
+                context, request,
+                afterRegister: {
+                    if !planned.reRegisters { self.noteUnconfirmed(planned.profile) }
+                },
+                decide: { verdict in self.outcomeForNew(planned, verdict: verdict) })
             rows.append(Row(
                 label: label, profile: planned.profile, outcome: outcome,
                 reRegistered: planned.reRegisters))
@@ -233,9 +239,11 @@ final class ConnectionCredentialsModel {
     }
 
     /// Registers, then checks the ID. A failed registration is the outcome; otherwise
-    /// `decide` turns the verdict into one.
+    /// `decide` turns the verdict into one. `afterRegister` runs once the profile exists in
+    /// jamf-cli and before the check, so an interrupted check still leaves the record.
     private func registerAndCheck(
         _ context: JamfCLIContext, _ request: Registration,
+        afterRegister: () -> Void = {},
         decide: (ConnectionCheck.Verdict) -> Outcome
     ) async -> Outcome {
         do {
@@ -244,7 +252,22 @@ final class ConnectionCredentialsModel {
             return .registrationFailed(error.localizedDescription)
         }
         didChange = true
+        afterRegister()
         return decide(await deps.check(context, request.profile))
+    }
+
+    /// Records a profile this run registered, so a later run may register it again if the check
+    /// does not confirm it. `addMember` clears the record when the ID is accepted.
+    private func noteUnconfirmed(_ profile: String) {
+        do {
+            try deps.store.noteUnconfirmedProfile(profile, inConnection: connection.id)
+        } catch {
+            AppLogger.auth.warning(
+                """
+                AddEnvironments: could not record a registered profile: \
+                \(error.localizedDescription, privacy: .private)
+                """)
+        }
     }
 
     private func outcomeForNew(
@@ -255,6 +278,7 @@ final class ConnectionCredentialsModel {
             return .added(jamfProVersion: version, workspaceNote: addMember(planned))
         case .noJamfPro: return .notJamfPro
         case .rejectedID(let kind): return .rejected(kind)
+        case .missingPermission(let names): return .missingPermission(names: names)
         case .undecided(let exitCode): return .notConfirmed(exitCode: exitCode)
         }
     }
@@ -295,6 +319,7 @@ final class ConnectionCredentialsModel {
             refreshProduct(member, .unknown)
             return .notJamfPro
         case .rejectedID(let kind): return .rejected(kind)
+        case .missingPermission(let names): return .missingPermission(names: names)
         case .undecided(let exitCode): return .notConfirmed(exitCode: exitCode)
         }
     }
@@ -345,6 +370,9 @@ extension ConnectionCredentialsModel.Row {
                 : exitCode.map { "exit \($0)" } ?? "jamf-cli did not run"
             return (isNew ? "Not added: " : "") + "the check could not confirm the ID (\(cause)). "
                 + "Check the client ID, secret and API privileges. " + removalHint
+        case .missingPermission(let names):
+            return (isNew ? "Not added: " : "")
+                + ConnectionCheck.Verdict.missingPermissionText(names: names) + " " + removalHint
         case .skipped(let reason):
             return reason
         }

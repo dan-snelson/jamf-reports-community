@@ -93,8 +93,11 @@ final class WorkspaceStoreConfigSaveTests: XCTestCase {
         let read = try ConfigService.load(profile: profile)
         var merged = read.state
         merged.columns["serial_number"] = "Serial"
-        _ = try ConfigService.save(profile: profile, state: merged, existingDocument: nil)
-        store.adoptScaffoldedColumns(from: merged, readStamp: read.stamp)
+        let written = try ConfigService.save(
+            profile: profile, state: merged, existingDocument: nil)
+        store.adoptScaffoldedColumns(
+            from: merged, readStamp: read.stamp,
+            savedDocument: written.document, savedStamp: written.stamp)
         store.configState.staleDeviceDays = "42"
         try await store.saveConfig()
 
@@ -115,7 +118,9 @@ final class WorkspaceStoreConfigSaveTests: XCTestCase {
         try edited.write(to: config, atomically: true, encoding: .utf8)
 
         let outcome = try ScaffoldService.mergeIntoConfig(csvURL: csv, profile: profile)
-        store.adoptScaffoldedColumns(from: outcome.state, readStamp: outcome.readStamp)
+        store.adoptScaffoldedColumns(
+            from: outcome.state, readStamp: outcome.readStamp,
+            savedDocument: outcome.savedDocument, savedStamp: outcome.savedStamp)
 
         XCTAssertEqual(store.configState.columns["serial_number"], "Serial Number",
                        "the Columns tab still shows the merge")
@@ -124,6 +129,30 @@ final class WorkspaceStoreConfigSaveTests: XCTestCase {
         let text = try String(contentsOf: config, encoding: .utf8)
         XCTAssertTrue(text.contains("stale_device_days: 45"), text)
         XCTAssertTrue(text.contains("serial_number: Serial Number"), "the merge is kept")
+    }
+
+    /// The screen adopts what the merge saved, not a fresh read: a hand edit made after the
+    /// merge's save, before the screen adopts it, is a change the next Save has to refuse.
+    func testAnEditAfterTheMergesSaveIsNotTakenAsTheScreensOwn() async throws {
+        let (store, config) = try await makeStore()
+        let csv = config.deletingLastPathComponent().appendingPathComponent("export.csv")
+        try "Serial Number\nrow\n".write(to: csv, atomically: true, encoding: .utf8)
+
+        let outcome = try ScaffoldService.mergeIntoConfig(csvURL: csv, profile: profile)
+        let merged = try String(contentsOf: config, encoding: .utf8)
+        let edited = merged.replacingOccurrences(of: "stale_device_days: 30",
+                                                 with: "stale_device_days: 45") + "# typed late\n"
+        try edited.write(to: config, atomically: true, encoding: .utf8)
+        store.adoptScaffoldedColumns(
+            from: outcome.state, readStamp: outcome.readStamp,
+            savedDocument: outcome.savedDocument, savedStamp: outcome.savedStamp)
+
+        XCTAssertEqual(store.configState.columns["serial_number"], "Serial Number",
+                       "the Columns tab shows what was saved")
+        store.configState.staleDeviceDays = "30"
+        await assertRefused(store, "the edit after the merge's save is not the screen's own")
+        let text = try String(contentsOf: config, encoding: .utf8)
+        XCTAssertEqual(text, edited)
     }
 
     /// A sync provider restamping the file is not a change, so the re-scaffold's Save still works.
@@ -135,7 +164,9 @@ final class WorkspaceStoreConfigSaveTests: XCTestCase {
             [.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: config.path)
 
         let outcome = try ScaffoldService.mergeIntoConfig(csvURL: csv, profile: profile)
-        store.adoptScaffoldedColumns(from: outcome.state, readStamp: outcome.readStamp)
+        store.adoptScaffoldedColumns(
+            from: outcome.state, readStamp: outcome.readStamp,
+            savedDocument: outcome.savedDocument, savedStamp: outcome.savedStamp)
         store.configState.staleDeviceDays = "46"
         try await store.saveConfig()
 

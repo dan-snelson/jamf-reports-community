@@ -208,4 +208,56 @@ final class ComplianceBenchmarksServiceTests: XCTestCase {
         let snapshot = ComplianceBenchmarksService.load(rulesURL: rulesURL, devicesURL: nil)
         XCTAssertEqual(snapshot.benchmarks, [])
     }
+
+    // MARK: - Ranking
+
+    private func rule(_ name: String, failed: Int?) -> ComplianceBenchmarksService.Snapshot.Rule {
+        .init(rule: name, passed: 5, failed: failed, unknown: 0, devices: 5, passRate: "")
+    }
+
+    private func device(_ name: String,
+                        failed: Int?) -> ComplianceBenchmarksService.Snapshot.Device {
+        .init(device: name, deviceId: name, rulesPassed: 5, rulesFailed: failed, compliance: "")
+    }
+
+    func testRulesRankMostFailuresFirstUnknownLastTiesByName() {
+        let ranked = ComplianceBenchmarksService.rankedRules([
+            rule("zeta", failed: 0),
+            rule("unknown-b", failed: nil),
+            rule("Beta", failed: 3),
+            rule("alpha", failed: 3),
+            rule("worst", failed: 12),
+            rule("unknown-a", failed: nil),
+        ])
+        XCTAssertEqual(ranked.map(\.rule),
+                       ["worst", "alpha", "Beta", "zeta", "unknown-a", "unknown-b"])
+    }
+
+    func testRankedRulesKeepEveryRowAndBreakNameTiesByID() {
+        let twin = { (id: String) in
+            ComplianceBenchmarksService.Snapshot.Rule(
+                rule: "Same", passed: 1, failed: 2, unknown: 0, devices: 1, passRate: "",
+                ruleId: id, benchmark: "CIS")
+        }
+        let ranked = ComplianceBenchmarksService.rankedRules([twin("b"), twin("a")])
+        XCTAssertEqual(ranked.map(\.ruleId), ["a", "b"])
+    }
+
+    func testDevicesRankMostFailedRulesFirstUnknownLastTiesByName() {
+        let ranked = ComplianceBenchmarksService.rankedDevices([
+            device("Mac-Z", failed: 0),
+            device("Mac-U", failed: nil),
+            device("mac-b", failed: 4),
+            device("Mac-A", failed: 4),
+            device("Mac-W", failed: 20),
+        ])
+        XCTAssertEqual(ranked.map(\.device), ["Mac-W", "Mac-A", "mac-b", "Mac-Z", "Mac-U"])
+    }
+
+    /// A failing rule that jamf-cli listed past the screen's cut still makes the cut.
+    func testFailingRuleBeyondTheCutIsRankedIntoTheTopTwenty() {
+        let rules = (0..<30).map { rule("rule-\($0)", failed: $0 == 27 ? 9 : 0) }
+        let shownNames = ComplianceBenchmarksService.rankedRules(rules).prefix(20).map(\.rule)
+        XCTAssertEqual(shownNames.first, "rule-27")
+    }
 }

@@ -169,6 +169,19 @@ final class WorkspaceConfinementTests: XCTestCase {
         XCTAssertFalse(marker.isStamped("2026-10-13", in: workspace), "clear gives the hour back")
     }
 
+    /// The send claim sits beside the marker, so a refused folder holds it on this Mac too.
+    func testARefusedFolderHoldsTheSendClaimOnThisMac() async throws {
+        try link("automation")
+        let marker = DayMarker(name: "overdue-notify")
+        let claim = AutomationStateFile.url(named: ".overdue-notify-sending", in: workspace)
+        XCTAssertEqual(claim.deletingLastPathComponent().lastPathComponent, "automation-fallback")
+        let outcome = await marker.sendOnce(day: "2026-10-14", in: [workspace]) { true }
+        XCTAssertEqual(outcome, .sent)
+        XCTAssertTrue(marker.isStamped("2026-10-14", in: workspace))
+        XCTAssertTrue(isEmpty(elsewhere), "nothing is written through the link")
+        XCTAssertFalse(fm.fileExists(atPath: claim.path), "the claim is given back")
+    }
+
     func testTheFallbackIsPerWorkspaceAndPerNameAndPrivate() throws {
         let other = workspace.deletingLastPathComponent().appendingPathComponent("other")
         try fm.createDirectory(at: other, withIntermediateDirectories: true)

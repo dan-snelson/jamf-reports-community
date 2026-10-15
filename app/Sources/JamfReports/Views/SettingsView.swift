@@ -346,7 +346,7 @@ struct SettingsView: View {
             return "\(base)\nCodesign verification failed — binary may be tampered. Update or reinstall jamf-cli."
         }
         if JamfCLIInstaller.isBelowMinimumSupported(workspace.jamfCLIVersion) {
-            return "\(base)\nBelow minimum supported \(JamfCLIInstaller.minimumSupportedVersion) — Device Lookup payloads may be incomplete. Update recommended."
+            return "\(base)\nOlder than the supported \(JamfCLIInstaller.minimumSupportedVersion) — Jamf Account environments, Security Posture and some reports need it. Update recommended."
         }
         return base
     }

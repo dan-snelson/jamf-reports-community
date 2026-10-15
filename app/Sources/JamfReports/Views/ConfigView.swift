@@ -812,7 +812,9 @@ private struct ColumnsTab: View {
                 // reloadFromDisk() leaves the loaded config alone, so without this the
                 // Columns tab showed the old mappings and Save wrote them back.
                 if workspace.profile == profile {
-                    workspace.adoptScaffoldedColumns(from: merged, readStamp: outcome.readStamp)
+                    workspace.adoptScaffoldedColumns(
+                        from: merged, readStamp: outcome.readStamp,
+                        savedDocument: outcome.savedDocument, savedStamp: outcome.savedStamp)
                 }
             } catch {
                 await MainActor.run {
@@ -824,24 +826,7 @@ private struct ColumnsTab: View {
         }
     }
 
-    private func newestCSVURL() -> URL? {
-        guard let wsURL = ProfileService.workspaceURL(for: workspace.profile) else { return nil }
-        let inbox = wsURL.appendingPathComponent("csv-inbox")
-        let dir = FileManager.default.fileExists(atPath: inbox.path) ? inbox : wsURL
-        return (try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ))?
-        .filter { $0.pathExtension.lowercased() == "csv" }
-        .max {
-            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey])
-                         .contentModificationDate) ?? .distantPast
-            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey])
-                         .contentModificationDate) ?? .distantPast
-            return a < b
-        }
-    }
+    private func newestCSVURL() -> URL? { CLIBridge.newestCSV(in: workspace.profile) }
 
     private func newestCSVPath() -> String? { newestCSVURL()?.path }
 }

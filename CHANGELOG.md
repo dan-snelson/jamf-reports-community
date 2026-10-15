@@ -7,6 +7,20 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-10-15
+
+2.10 connects Jamf Cloud through a Jamf Account integration (the Jamf Platform API) and makes
+Jamf School a workspace of its own. It answers seven community reports: live logs colour lines by
+what they report, Devices sorts by check-in, patch, security and risk, the HTML report gains a
+Mobile devices group, its Needs attention lines lead to the Macs they count, and Macs enrolled
+without the Jamf binary are shown apart. Reports leave out the AI summary unless you turn it on.
+On a shared team folder, each Mac now keeps the report folders, retention, Protect and webhook
+settings it was set up with until you confirm a change in Config Doctor. Every jamf-cli call has a
+time limit, so a server that stops answering no longer holds scheduled runs for hours, and two
+scheduled runs can no longer start together. Diagnostic bundles move to this Mac's Logs folder,
+HTML reports carry their own content-security policy, and Teams notifications no longer format
+text inside names.
+
 ### Added
 
 - Connect Jamf Cloud with a Jamf Account integration. The first-launch screen now leads with
@@ -28,9 +42,9 @@ versions in this repository map to git tags.
   the most recent Mac and puts a Mac with no check-in date last, and the other three start with
   the lowest count or score. (#272)
 - The HTML report has a **Mobile devices** group: iPad, iPhone and Apple TV counts, how many are
-  managed and supervised, passcode and Activation Lock counts (shown as Unknown when no device
-  reports the field, never 0) and the iOS and iPadOS version spread. It lists no individual
-  device. Every HTML report template includes it, as does a Custom report that picks a mobile
+  managed and supervised, passcode, Activation Lock and jailbreak counts (shown as Unknown when
+  no device reports the field, never 0) and the iOS and iPadOS version spread. It lists no
+  individual device. Every HTML report template includes it, as does a Custom report that picks a mobile
   sheet. When no mobile data was collected, the audit appendix says so, with the recorded cause
   when the last attempt failed. (#275)
 - Under Security agent health, the HTML report lists the Macs missing each agent with their
@@ -43,10 +57,11 @@ versions in this repository map to git tags.
   and tells you the jamf-cli profile stays until `jamf-cli config remove-profile <name>` removes
   it. A line under the Protect control says Jamf Protect uses its own API client from Jamf
   Protect, not your Jamf Account integration. (#271)
-- Add environments can try an ID again with the same label. A jamf-cli profile left behind by an
-  attempt that could not confirm the ID (or was refused) is registered again when it is in no
-  connection and has no workspace; a name that is a member, has a workspace or is not a Platform
-  profile is still refused. (#271)
+- Add environments can try an ID again with the same label. A jamf-cli profile that this app
+  registered in an earlier attempt, and could not confirm the ID for, is registered again when it
+  is in no connection and has no workspace. A profile made any other way, such as in Terminal, a
+  member, a name with a workspace or one that is not a Platform profile, is refused and left
+  untouched. (#271)
 
 ### Changed
 
@@ -73,13 +88,23 @@ versions in this repository map to git tags.
   folder; bundles made by earlier builds stay where they are.
 - The per-title patch definition files the patch release-date lookup used to save under
   `jamf-cli-data/patch-definitions/` are no longer written; nothing read them.
+- The minimum supported jamf-cli is now 1.29.0. Jamf Account environments need 1.28, the
+  renamed resources need 1.29, and 1.24 to 1.27 cannot run the security report. An older jamf-cli
+  from 1.18.0 still runs: Settings shows a notice and each scheduled run logs a warning, so no
+  schedule stops. Update jamf-cli from Settings.
+- The Charts tab no longer draws the Compliance Band Distribution chart. It compared each day's
+  compliance percentage with failure-count bands, so it never showed device counts. The mSCP/STIG
+  band trend chart shows the devices in each band over time and now follows the first baseline
+  that has data. `charts.compliance_trend.enabled: false` leaves that chart out, and the
+  `charts.compliance_trend.bands` setting is no longer read; the next Customize save removes it.
 
 ### Fixed
 
 - First-launch setup has a way back. **Start over** returns to the welcome screen, so you no
   longer quit and reopen the app to try another connection. It asks before removing what setup
   created so far (the new workspace folder goes to the Trash, the new jamf-cli profile is removed)
-  and never touches a folder or profile that was already there. The Authenticate step no longer
+  and never touches a folder or profile that was already there, or one it could not confirm was
+  new because jamf-cli's profile list could not be read. The Authenticate step no longer
   repeats the connection-type choice on this path, and several setup screens are worded more
   plainly (the Jamf Account heading, the jamf-cli installer package, the Jamf School step).
 - The HTML report's "Macs to follow up" table lists the Macs with a reason first (no Jamf binary,
@@ -178,6 +203,134 @@ versions in this repository map to git tags.
   many of those Macs have no Jamf binary and are listed apart ("includes 2 without the Jamf
   binary, listed apart"), so they agree with the follow-up table. The appendix definition says
   the same. (#274)
+- Once Jamf Protect or Jamf School is connected, Data Sources shows it as connected with its
+  profile name and a Reconnect button instead of "Add" again. The jamf-cli profile Protect creates
+  is no longer listed as a workspace in the sidebar, in schedules or in all-profiles runs, unless
+  it has a workspace of its own (#271).
+- The CSV Inbox on Sources no longer shows every file as Pending for good. A scheduled
+  csv-assisted run now marks the CSV it built a report from as consumed (the file stays in place,
+  so the next run can reuse it), and each file's menu has an Archive action that moves it, with
+  its marker, into `csv-inbox/archive/`. (#270)
+- A workbook sheet left out because its data was never collected, such as the mobile device
+  sheets, is now named in the run log the app shows, with the snapshot it needed, instead of
+  only in the terminal output (#275).
+- The Generate sheet's and Schedules' live logs no longer show a line in red because it mentions
+  a report such as `patch-device-failures`: lines are coloured by their `[ok]`, `[warn]` or
+  `[error]` marker, and jamf-cli's own `Error:` lines stay red; `[partial]` lines stay amber (#273).
+- Microsoft Teams notifications no longer format or link text inside profile and schedule names:
+  Teams reads Markdown in cards, so names such as `**x**` or `[a](https://x)` are now escaped
+  (an underscore inside a word, as in `prod_east`, is left alone).
+  Slack notifications are unchanged.
+- Fleet Drift in a CSV-assisted report reads the same chart-history folder the CSV archive writes
+  to, so a relative `charts.historical_csv_dir` such as `snapshots` finds the workspace's folder
+  and an absolute one follows the absolute-path opt-in.
+- Connecting Jamf Protect from Data Sources on a shared workspace no longer leaves Protect
+  collection waiting for a Config Doctor confirmation.
+- Two scheduled runs can no longer start together, and a Mac that slept in the middle of a run no
+  longer has that run taken over when it wakes.
+- A hung Homebrew or archive step during a jamf-cli install or update now times out with a message
+  naming the step, instead of blocking collects for hours.
+- Onboarding gives up with a clear message if jamf-cli stops responding, and sends its answers to
+  the prompts one at a time.
+- The scheduled overdue digest now goes to each profile's own webhook, so one tenant's channel no
+  longer lists another's schedules.
+- Exporting the inventory CSV from cached data is no longer blocked by an expired or rejected
+  token.
+- When a Generate run's refresh fails, the message now says how to generate from the cached
+  snapshots instead.
+- Looking up a device no longer waits for ever on a jamf-cli that never answers: it stops after
+  three minutes and shows the cached copy.
+- A jamf-cli process left running by a command it started can no longer hold up version checks
+  and Homebrew steps after that command has finished.
+- Checking the jamf-cli version after an update or install no longer freezes the window.
+- A collect, the per-device scan or the sign-in check that gets no answer from jamf-cli is stopped
+  (after an hour for a report, three minutes for a device or a patch title, one minute for the
+  sign-in check) and logged as timed out, instead of holding the scheduled-run lock for hours.
+  The next run tries the report again.
+- The device scan and the patch release-date walk give up after three timeouts in a row instead
+  of timing out on every device or title. The automatic hourly retry leaves a report alone after
+  two timeouts in a row; Collect now still tries it.
+- A sign-in check that times out is no longer read as expired credentials. The run says the check
+  timed out and carries on.
+- Each report's collect time is logged, so the time limits can be judged against real runs.
+- A program that jamf-cli leaves running no longer holds a collect, a scan or a sign-in check open
+  after jamf-cli itself has finished.
+- The "a scheduled run is in progress" message no longer lingers when a run crashed and another
+  program reused its process number, or left a defunct process behind.
+- An old list- or filter-scoped multi-profile schedule found in ~/Library/LaunchAgents is no longer
+  imported as a schedule for every profile. The import skips it, the log names it, and you can
+  rebuild it in the app.
+- A patch snapshot with impossibly large device counts is skipped instead of crashing collects and
+  the Patch screen.
+- A refused output folder is reported once per run, not once for every file format.
+- An inventory CSV with more than 10,000 rows now says how many rows were left out.
+- The period report waits for a running refresh or report, as the other reports do.
+- Sheet names that end in a quote mark no longer produce a workbook Excel refuses to open.
+- A blueprint that is not deployed shows a dash instead of zeros on the DDM screen.
+- Missing counts on the Compliance Devices and Compliance Rules sheets are blank instead of 0.
+- A mobile device whose supervision state is unknown reads "Unknown" instead of "Unsupervised".
+- Demo mode no longer reads the real home folder for Device Lookup or the Run History log paths.
+- Snapshot retention goes by the date in each file name, so a sync provider that re-stamps
+  downloaded files can no longer get newer snapshots archived or deleted. A summary whose name
+  holds a date that does not exist is aged by its modified time instead.
+- Backup pruning only touches this Mac's own backups on network volumes and shared workspaces,
+  and also when config.yaml will not load, so another Mac's backups are kept.
+- A webhook URL that cannot be parsed counts as a failed send and is retried, instead of being
+  marked as sent.
+- The background item exits with an error when its lock file cannot be written, and says so in
+  Run History, instead of reporting that another run is in progress.
+- The onboarding tip now says jamf-cli keeps the credentials in the keychain.
+- jamf-cli output lines that were split across reads, or that ended with CRLF, no longer vanish or
+  break in two, which had hidden the cause of some failures.
+- A hung `jamf-cli config list` no longer freezes a collect or the profile list.
+- The diagnostic bundle's jamf-cli checks no longer hang when jamf-cli writes a lot to stderr.
+- Check for update no longer blocks the window.
+- A pre-release jamf-cli now counts as older than its release, and the dashboard and the newer
+  command-name behaviour treat a release candidate of their minimum version as below it.
+- Scheduled runs no longer move a run log over 5 MB aside at the start of the next run, which
+  left that run in Run History with an empty log and a file nothing cleaned up. Run History
+  already reads only the end of a long log, and the newest 50 logs are kept. Log files an
+  earlier build already moved aside (`.log.1`) stay where they are and can be deleted.
+- The installer package is now built so the app always installs into /Applications and cannot
+  be relocated by the installer, whichever macOS version builds the package.
+- The sign-in check that runs before a live command (a collect, Generate, a connection check)
+  and the shared doctor, config-list and help probes now stop after one minute, and a backup
+  after two hours, when jamf-cli gets no answer, instead of holding the scheduled-run lock for
+  hours. A sign-in check that times out logs a warning and the command carries on. A backup that
+  times out fails, is logged with its limit, and leaves no folder behind for the Backups screen
+  to list.
+- The HTML report's "Needs attention" links now land on the Macs they count. The Macs list also
+  holds the Macs MDM reaches whose Jamf binary or inventory has fallen behind, with their Last
+  Contact and the kind of gap, and the security controls block lists the Macs behind the P0 count
+  (and says how many of those gaps the device rows name). The Security Posture screen's Action
+  Items card has an Open Devices button that opens Devices on the security-gap filter. (#276)
+- The overdue-schedule notification is no longer posted twice when the app and the background
+  item find a schedule overdue at the same moment. Whichever starts first claims the send, the
+  other waits for the next pass (and logs that it did), and a failed send still retries. A
+  leftover claim file dated in the future, or a folder at its name, no longer holds the
+  notification back.
+- A diagnostic bundle's config.yaml no longer carries free text. The IDs and linked findings of
+  exceptions are replaced like their descriptions and sign-offs already were, every copy of a
+  repeated `exceptions:` key is covered, and the `#` comments are left out of the staged copy,
+  including one that follows an apostrophe (`Don't stop # note`).
+- Devices stays fast when thousands of Macs carry the same placeholder serial number. A serial
+  or ID that more than 50 Macs share no longer joins rows from different sources; a row left
+  with nothing else to go on is matched by computer name, as a row with no serial is.
+- Setting up a Jamf Account integration no longer reads a refused check as "could not confirm".
+  When the gateway accepts an environment or tenant ID but refuses the check with a permission
+  error, setup says the integration holds no Jamf Pro permission for that environment or no
+  Jamf Pro answers behind it, names a permission when jamf-cli does, does not suggest Jamf
+  School, and offers **Continue without validating**. Add environments lists the ID as not
+  added and says why. An ID the gateway rejects still stops setup.
+- On a real tenant the Compliance Benchmarks screen lists the worst rules and Macs first. It
+  showed the first 20 rules and 30 Macs in the order jamf-cli printed them, so a failing rule
+  could sit outside the list. The rules now run from most failures down and the Macs from most
+  failed rules down, a rule or Mac with no count last, then by name, and the headings say so.
+  The DDM screen no longer drops or repeats rows when two declarations share a source, or two
+  blueprints share a name or have none.
+- The workbook's Compliance Rules sheet no longer colours a rule red when jamf-cli gives it no
+  pass rate. A blank or unreadable rate now has the plain cell style, as a rule with no
+  figure to grade should, and a patch title with no compliance figure reads the same way.
 
 ### Security
 
@@ -284,117 +437,16 @@ versions in this repository map to git tags.
   in /tmp or another system folder is no longer embedded.
 - The patch release-date snapshot and the SOFA feed cache are written atomically, so a symbolic
   link planted at their file names is replaced instead of followed.
-
-### Fixed
-
-- Once Jamf Protect or Jamf School is connected, Data Sources shows it as connected with its
-  profile name and a Reconnect button instead of "Add" again. The jamf-cli profile Protect creates
-  is no longer listed as a workspace in the sidebar, in schedules or in all-profiles runs, unless
-  it has a workspace of its own (#271).
-- The CSV Inbox on Sources no longer shows every file as Pending for good. A scheduled
-  csv-assisted run now marks the CSV it built a report from as consumed (the file stays in place,
-  so the next run can reuse it), and each file's menu has an Archive action that moves it, with
-  its marker, into `csv-inbox/archive/`. (#270)
-- A workbook sheet left out because its data was never collected, such as the mobile device
-  sheets, is now named in the run log the app shows, with the snapshot it needed, instead of
-  only in the terminal output (#275).
-- The Generate sheet's and Schedules' live logs no longer show a line in red because it mentions
-  a report such as `patch-device-failures`: lines are coloured by their `[ok]`, `[warn]` or
-  `[error]` marker, and jamf-cli's own `Error:` lines stay red; `[partial]` lines stay amber (#273).
-- Microsoft Teams notifications no longer format or link text inside profile and schedule names:
-  Teams reads Markdown in cards, so names such as `**x**` or `[a](https://x)` are now escaped
-  (an underscore inside a word, as in `prod_east`, is left alone).
-  Slack notifications are unchanged.
-- Fleet Drift in a CSV-assisted report reads the same chart-history folder the CSV archive writes
-  to, so a relative `charts.historical_csv_dir` such as `snapshots` finds the workspace's folder
-  and an absolute one follows the absolute-path opt-in.
-- Connecting Jamf Protect from Data Sources on a shared workspace no longer leaves Protect
-  collection waiting for a Config Doctor confirmation.
-- Two scheduled runs can no longer start together, and a Mac that slept in the middle of a run no
-  longer has that run taken over when it wakes.
-- A hung Homebrew or archive step during a jamf-cli install or update now times out with a message
-  naming the step, instead of blocking collects for hours.
-- Onboarding gives up with a clear message if jamf-cli stops responding, and sends its answers to
-  the prompts one at a time.
-- The scheduled overdue digest now goes to each profile's own webhook, so one tenant's channel no longer lists another's schedules.
-- Exporting the inventory CSV from cached data is no longer blocked by an expired or rejected
-  token.
-- When a Generate run's refresh fails, the message now says how to generate from the cached
-  snapshots instead.
-- Looking up a device no longer waits for ever on a jamf-cli that never answers: it stops after
-  three minutes and shows the cached copy.
-- A jamf-cli process left running by a command it started can no longer hold up version checks
-  and Homebrew steps after that command has finished.
-- Checking the jamf-cli version after an update or install no longer freezes the window.
-- A collect, the per-device scan or the sign-in check that gets no answer from jamf-cli is stopped
-  (after an hour for a report, three minutes for a device or a patch title, one minute for the
-  sign-in check) and logged as timed out, instead of holding the scheduled-run lock for hours.
-  The next run tries the report again.
-- The device scan and the patch release-date walk give up after three timeouts in a row instead
-  of timing out on every device or title. The automatic hourly retry leaves a report alone after
-  two timeouts in a row; Collect now still tries it.
-- A sign-in check that times out is no longer read as expired credentials. The run says the check
-  timed out and carries on.
-- Each report's collect time is logged, so the time limits can be judged against real runs.
-- A program that jamf-cli leaves running no longer holds a collect, a scan or a sign-in check open
-  after jamf-cli itself has finished.
-- The "a scheduled run is in progress" message no longer lingers when a run crashed and another
-  program reused its process number, or left a defunct process behind.
-- An old list- or filter-scoped multi-profile schedule found in ~/Library/LaunchAgents is no longer
-  imported as a schedule for every profile. The import skips it, the log names it, and you can
-  rebuild it in the app.
-- A patch snapshot with impossibly large device counts is skipped instead of crashing collects and
-  the Patch screen.
-- A refused output folder is reported once per run, not once for every file format.
-- An inventory CSV with more than 10,000 rows now says how many rows were left out.
-- The period report waits for a running refresh or report, as the other reports do.
-- Sheet names that end in a quote mark no longer produce a workbook Excel refuses to open.
-- A blueprint that is not deployed shows a dash instead of zeros on the DDM screen.
-- Missing counts on the Compliance Devices and Compliance Rules sheets are blank instead of 0.
-- A mobile device whose supervision state is unknown reads "Unknown" instead of "Unsupervised".
-- Demo mode no longer reads the real home folder for Device Lookup or the Run History log paths.
-- Snapshot retention goes by the date in each file name, so a sync provider that re-stamps
-  downloaded files can no longer get newer snapshots archived or deleted. A summary whose name
-  holds a date that does not exist is aged by its modified time instead.
-- Backup pruning only touches this Mac's own backups on network volumes and shared workspaces,
-  and also when config.yaml will not load, so another Mac's backups are kept.
-- A webhook URL that cannot be parsed counts as a failed send and is retried, instead of being
-  marked as sent.
-- The background item exits with an error when its lock file cannot be written, and says so in
-  Run History, instead of reporting that another run is in progress.
-- The onboarding tip now says jamf-cli keeps the credentials in the keychain.
-- Release tooling: the notary profile named for the app now also reaches the DMG step (it
-  worked only when the profile was called JamfReports-Notary), every release signature asks
-  for a secure timestamp, and a public release build stops instead of falling back to an
-  ad-hoc signature that would fail at notarization.
-- jamf-cli output lines that were split across reads, or that ended with CRLF, no longer vanish or
-  break in two, which had hidden the cause of some failures.
-- A hung `jamf-cli config list` no longer freezes a collect or the profile list.
-- The diagnostic bundle's jamf-cli checks no longer hang when jamf-cli writes a lot to stderr.
-- Check for update no longer blocks the window.
-- A pre-release jamf-cli now counts as older than its release, and the dashboard and the newer
-  command-name behaviour treat a release candidate of their minimum version as below it.
-- Release tooling: the notary profile named for the app now also reaches the DMG step (it
-  worked only when the profile was called JamfReports-Notary), every release signature asks
-  for a secure timestamp, and a public release build stops instead of falling back to an
-  ad-hoc signature that would fail at notarization.
-- Scheduled runs no longer move a run log over 5 MB aside at the start of the next run, which
-  left that run in Run History with an empty log and a file nothing cleaned up. Run History
-  already reads only the end of a long log, and the newest 50 logs are kept. Log files an
-  earlier build already moved aside (`.log.1`) stay where they are and can be deleted.
-- The installer package is now built so the app always installs into /Applications and cannot
-  be relocated by the installer, whichever macOS version builds the package.
-- The sign-in check that runs before a live command (a collect, Generate, a connection check)
-  and the shared doctor, config-list and help probes now stop after one minute, and a backup
-  after two hours, when jamf-cli gets no answer, instead of holding the scheduled-run lock for
-  hours. A sign-in check that times out logs a warning and the command carries on. A backup that
-  times out fails, is logged with its limit, and leaves no folder behind for the Backups screen
-  to list.
-- The HTML report's "Needs attention" links now land on the Macs they count. The Macs list also
-  holds the Macs MDM reaches whose Jamf binary or inventory has fallen behind, with their Last
-  Contact and the kind of gap, and the security controls block lists the Macs behind the P0 count
-  (and says how many of those gaps the device rows name). The Security Posture screen's Action
-  Items card has an Open Devices button that opens Devices on the security-gap filter. (#276)
+- A CSV-assisted run, Devices and Config Doctor no longer pick a link, pipe or folder named
+  `*.csv` in `csv-inbox/` (each is named in a warning), and the report reads the CSV through one
+  safe open that refuses a link and stops at 256 MB, so another Mac on a shared workspace can no
+  longer plant a link that pulls a file from this Mac into the workbook, or a pipe or huge file
+  that hangs the run. A run whose CSV is too large or not a regular file fails with an error
+  naming the file.
+- Setting up a Jamf Account integration checks the environment or tenant ID for stray
+  characters, as Add environments does. An ID that could read as a jamf-cli option, or holds
+  anything but letters, digits, dots, hyphens and underscores, keeps Continue disabled and shows
+  why, instead of being passed to jamf-cli.
 
 ### Dependencies
 

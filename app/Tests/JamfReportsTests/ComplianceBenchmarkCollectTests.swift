@@ -16,13 +16,6 @@ final class ComplianceBenchmarkSelectionTests: XCTestCase {
         XCTAssertEqual(selection.ambiguous, [])
     }
 
-    func testTitlesComeFromTheBenchmarksEnvelope() throws {
-        let selection = try XCTUnwrap(ReportEngine.benchmarkSelection(
-            fromListOutput: data(#"{"benchmarks":[{"id":"1","title":"CIS Level 1"}]}"#),
-            configured: []))
-        XCTAssertEqual(selection.titles, ["CIS Level 1"])
-    }
-
     /// jamf-cli matches a title exactly and case-sensitively.
     func testConfiguredTitlesNarrowTheListByExactMatch() throws {
         let selection = try XCTUnwrap(ReportEngine.benchmarkSelection(
@@ -67,6 +60,13 @@ final class ComplianceBenchmarkSelectionTests: XCTestCase {
     func testNonJSONListOutputIsRejected() {
         XCTAssertNil(ReportEngine.benchmarkSelection(
             fromListOutput: data("Usage: jamf-cli pro"), configured: []))
+    }
+
+    /// jamf-cli prints the list as a bare array; any other JSON shape is unreadable, not empty.
+    func testAJSONObjectListOutputIsRejected() {
+        XCTAssertNil(ReportEngine.benchmarkSelection(
+            fromListOutput: data(#"{"results":[{"id":"1","title":"CIS Level 1"}]}"#),
+            configured: []))
     }
 
     func testTheTitleGoesAheadOfTheFlags() {

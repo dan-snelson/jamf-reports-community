@@ -797,6 +797,8 @@ enum DiagnosticBundleService {
         }
         var content = String(decoding: data, as: UTF8.self)
         if let redactor {
+            // Comments are free text no pattern can find, so none are staged.
+            content = YAMLCodec.removingComments(from: content)
             content = redactor.redactText(try redactingExceptionText(in: content, with: redactor))
         }
         try writeText(content, to: staging.appendingPathComponent("config.yaml"))
@@ -804,14 +806,18 @@ enum DiagnosticBundleService {
     }
 
     /// The `exceptions[]` fields an admin types as free text, with the category whose
-    /// placeholder replaces each: a person's name and a justification.
-    private static let exceptionTextFields = [("signed_off_by", "user"), ("description", "org")]
+    /// placeholder replaces each: a person's name, a justification and the two labels an admin
+    /// invents (the entry's id and the finding it links to).
+    private static let exceptionTextFields = [
+        ("signed_off_by", "user"), ("description", "org"), ("id", "org"), ("linked_finding", "org"),
+    ]
 
-    /// Replaces `signed_off_by` and `description` in each `exceptions` entry with the
-    /// redactor's placeholders. Parsed with `YAMLCodec`, as the app reads the file, so a flow
-    /// mapping or a block value is covered too. Only the `exceptions:` block is re-emitted
-    /// (its quoting and comments are normalized); every other line stays as written, and a
-    /// file with nothing to replace comes back unchanged.
+    /// Replaces those fields in each entry of every `exceptions` block with the redactor's
+    /// placeholders: an earlier copy of a repeated key too, which the app does not read but the
+    /// file still holds. Parsed with `YAMLCodec`, as the app reads the file, so a flow mapping or
+    /// a block value is covered too. Only a block with something to replace is re-emitted (its
+    /// quoting is normalized); every other line stays as written, and a file with nothing to
+    /// replace comes back unchanged.
     static func redactingExceptionText(
         in yaml: String, with redactor: DiagnosticRedactor
     ) throws -> String {
@@ -820,8 +826,24 @@ enum DiagnosticBundleService {
                 "DiagnosticBundle: config.yaml is not a mapping; exception text not replaced")
             return yaml
         }
-        guard case .mapping(var root) = document.root,
-              case .sequence(let entries)? = root.value(for: "exceptions") else { return yaml }
+        var lines = document.originalText.components(separatedBy: .newlines)
+        var changed = false
+        for range in YAMLCodec.topLevelBlockRanges(of: "exceptions", in: lines).reversed() {
+            let block = lines[range].joined(separator: "\n")
+            guard let edited = try redactingExceptionBlock(block, with: redactor) else { continue }
+            lines.replaceSubrange(range, with: edited)
+            changed = true
+        }
+        return changed ? lines.joined(separator: "\n") : yaml
+    }
+
+    /// The lines of one `exceptions:` block with its free text replaced, nil when it has none.
+    private static func redactingExceptionBlock(
+        _ block: String, with redactor: DiagnosticRedactor
+    ) throws -> [String]? {
+        guard let document = try? YAMLCodec.decode(block),
+              case .mapping(var root) = document.root,
+              case .sequence(let entries)? = root.value(for: "exceptions") else { return nil }
         var replaced = false
         let redacted = entries.map { entry -> YAMLCodec.YAMLValue in
             guard case .mapping(var fields) = entry else { return entry }
@@ -836,11 +858,12 @@ enum DiagnosticBundleService {
             }
             return .mapping(fields)
         }
-        guard replaced else { return yaml }
+        guard replaced else { return nil }
         root.set("exceptions", value: .sequence(redacted))
         var edited = document
         edited.root = .mapping(root)
-        return try YAMLCodec.encode(edited, replacingTopLevelKeys: ["exceptions"])
+        let text = try YAMLCodec.encode(edited, replacingTopLevelKeys: ["exceptions"])
+        return String(text.dropLast(text.hasSuffix("\n") ? 1 : 0)).components(separatedBy: "\n")
     }
 
     private static func scalarText(_ scalar: YAMLCodec.YAMLScalar) -> String? {

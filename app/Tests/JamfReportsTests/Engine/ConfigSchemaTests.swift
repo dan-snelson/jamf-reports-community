@@ -100,12 +100,11 @@ final class ConfigSchemaTests: XCTestCase {
               rule_cuont: 120
         charts:
           compliance_trend:
-            bands:
-              - {label: "Pass", min_failures: 0, max_failures: 0, colour: "#4472C4"}
+            enabld: false
         """)
         XCTAssertEqual(keys, [
             UnknownKey(keyPath: "alerts.rules[0].treshold", suggestion: "threshold"),
-            UnknownKey(keyPath: "charts.compliance_trend.bands[0].colour", suggestion: "color"),
+            UnknownKey(keyPath: "charts.compliance_trend.enabld", suggestion: "enabled"),
             UnknownKey(keyPath: "compliance.baselines[0].rule_cuont", suggestion: "rule_count"),
             UnknownKey(keyPath: "exceptions[0].expires", suggestion: nil),
             UnknownKey(keyPath: "security_agents[0].conected_value",
@@ -224,6 +223,22 @@ final class ConfigSchemaTests: XCTestCase {
             XCTAssertNotNil(parent, "\(path): the block that held it is still read")
             XCTAssertFalse(parent?.contains(parts.last ?? "") ?? true, path)
         }
+    }
+
+    /// `bands` held the chart's labels and ranges until 2.10; the chart is gone, so the whole list
+    /// is one retired key and its entries are not walked.
+    func testTheRetiredComplianceBandsAreOneRetiredKey() throws {
+        let keys = try unknownKeys("""
+        charts:
+          compliance_trend:
+            enabled: true
+            bands:
+              - {label: "Pass", min_failures: 0, max_failures: 0, colour: "#4472C4"}
+        """)
+        XCTAssertEqual(keys, [
+            UnknownKey(keyPath: "charts.compliance_trend.bands", suggestion: nil,
+                       retiredSince: "2.10"),
+        ])
     }
 
     func testARetiredKeyIsMarkedWithItsReleaseAndAnyOtherUnknownKeyIsNot() throws {
@@ -454,7 +469,6 @@ final class ConfigSchemaTests: XCTestCase {
             (["charts"], keys(ChartsConfig.CodingKeys.self)),
             (["charts", "os_adoption"], keys(OSAdoptionConfig.CodingKeys.self)),
             (["charts", "compliance_trend"], keys(ComplianceTrendConfig.CodingKeys.self)),
-            (["charts", "compliance_trend", "bands"], keys(ComplianceBandConfig.CodingKeys.self)),
             (["charts", "device_state_trend"], keys(DeviceStateTrendConfig.CodingKeys.self)),
             (["branding"], keys(BrandingConfig.CodingKeys.self)),
             (["platform"], keys(PlatformConfig.CodingKeys.self)),

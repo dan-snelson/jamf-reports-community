@@ -422,6 +422,12 @@ text inside names.
   in /tmp or another system folder is no longer embedded.
 - The patch release-date snapshot and the SOFA feed cache are written atomically, so a symbolic
   link planted at their file names is replaced instead of followed.
+- A CSV-assisted run, Devices and Config Doctor no longer pick a link, pipe or folder named
+  `*.csv` in `csv-inbox/` (each is named in a warning), and the report reads the CSV through one
+  safe open that refuses a link and stops at 256 MB, so another Mac on a shared workspace can no
+  longer plant a link that pulls a file from this Mac into the workbook, or a pipe or huge file
+  that hangs the run. A run whose CSV is too large or not a regular file fails with an error
+  naming the file.
 
 ### Dependencies
 

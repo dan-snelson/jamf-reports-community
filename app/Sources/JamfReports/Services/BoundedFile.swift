@@ -15,9 +15,11 @@ enum BoundedFile {
         case unreadable(Int32)
     }
 
-    /// At most `limit` bytes of the regular file at `url`.
-    static func read(_ url: URL, limit: Int) throws -> Data {
-        let descriptor = open(url.path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+    /// At most `limit` bytes of the regular file at `url`. With `followSymlinks` false a link at
+    /// the final path component is refused (`unreadable(ELOOP)`) instead of opened.
+    static func read(_ url: URL, limit: Int, followSymlinks: Bool = true) throws -> Data {
+        let flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC | (followSymlinks ? 0 : O_NOFOLLOW)
+        let descriptor = open(url.path, flags)
         guard descriptor >= 0 else { throw Failure.unreadable(errno) }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? handle.close() }

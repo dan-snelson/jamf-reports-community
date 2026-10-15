@@ -130,10 +130,9 @@ enum ConfigDoctorService {
     /// when no CSV is present (its checks are then skipped).
     private static func loadNewestCSVHeaders(profile: String) -> [String]? {
         guard let url = CLIBridge.newestCSV(in: profile),
-              var text = try? String(contentsOf: url, encoding: .utf8) else {
+              let text = try? InventoryCSV.readText(url) else {
             return nil
         }
-        if text.hasPrefix("\u{FEFF}") { text = String(text.dropFirst()) }
         let firstLine = text.components(separatedBy: CharacterSet.newlines).first ?? ""
         let headers = firstLine.components(separatedBy: ",")
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \t\"")) }
@@ -1037,7 +1036,7 @@ extension ConfigDoctorService {
     /// unreadable (its dependent checks then skip).
     private static func loadAccuracyCSV(profile: String) -> AccuracyCSV? {
         guard let url = CLIBridge.newestCSV(in: profile),
-              let data = try? Data(contentsOf: url),
+              let data = try? InventoryCSV.read(url),
               let (columns, rows) = try? CSVParser.parse(data) else { return nil }
         let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
             .contentModificationDate ?? Date()

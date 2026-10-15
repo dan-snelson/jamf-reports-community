@@ -377,7 +377,15 @@ private extension DeviceInventoryService {
         if let primary { return primary }
 
         let inbox = root.appendingPathComponent("csv-inbox", isDirectory: true)
-        if let inboxLatest = latestFile(in: inbox, root: root, extensions: ["csv"]) {
+        // A link, FIFO or directory named *.csv is never read: another Mac can plant one.
+        for skipped in InventoryCSV.entries(in: inbox).skipped {
+            warnings.append(
+                "Ignoring \(displayPath(skipped.url, root: root)) — it is \(skipped.reason), and "
+                    + "only regular files are read. Replace it with the export itself.")
+        }
+        if let inboxLatest = latestFile(
+            in: inbox, root: root, extensions: ["csv"], refusingLinks: true
+        ) {
             return inboxLatest
         }
         // The conflict-copy filter is right for JSON snapshots — a forked
@@ -433,11 +441,14 @@ private extension DeviceInventoryService {
         root: URL,
         extensions: Set<String>,
         maxDepth: Int = 1,
+        refusingLinks: Bool = false,
         predicate: (String) -> Bool = { _ in true }
     ) -> URL? {
         guard let dir = validatedDirectory(directory, root: root) else { return nil }
         var files: [URL] = []
-        collectFiles(in: dir, root: root, extensions: extensions, maxDepth: maxDepth, into: &files)
+        collectFiles(
+            in: dir, root: root, extensions: extensions, maxDepth: maxDepth,
+            refusingLinks: refusingLinks, into: &files)
         // `newest` applies the shared exclusions (manifest.json, `.partial`,
         // sync-conflict copies) and the shared ordering, so this picker can no
         // longer drift from the workbook's. Only the caller-supplied name
@@ -450,6 +461,7 @@ private extension DeviceInventoryService {
         root: URL,
         extensions: Set<String>,
         maxDepth: Int,
+        refusingLinks: Bool = false,
         into files: inout [URL]
     ) {
         guard maxDepth >= 1,
@@ -462,13 +474,18 @@ private extension DeviceInventoryService {
         }
 
         for entry in entries {
+            // `validatedFile` resolves a link first, so a link to a file inside the workspace
+            // would pass; judge the entry itself.
             if let file = validatedFile(entry, root: root),
-               extensions.contains(file.pathExtension.lowercased()) {
+               extensions.contains(file.pathExtension.lowercased()),
+               !refusingLinks || InventoryCSV.nonRegularReason(entry) == nil {
                 files.append(file)
                 continue
             }
             if maxDepth > 1, let childDir = validatedDirectory(entry, root: root) {
-                collectFiles(in: childDir, root: root, extensions: extensions, maxDepth: maxDepth - 1, into: &files)
+                collectFiles(
+                    in: childDir, root: root, extensions: extensions, maxDepth: maxDepth - 1,
+                    refusingLinks: refusingLinks, into: &files)
             }
         }
     }

@@ -380,7 +380,11 @@ private func scheduledRunSingleBody(
     // front so we don't run an expensive collect just to fail at generate.
     let resolvedCSV: URL?
     if mode == .csvAssisted {
-        guard let csv = CLIBridge.newestCSV(in: profile) else {
+        let picked = CLIBridge.newestCSV(in: profile) { warning in
+            print(warning)
+            recorder?.record(warning)
+        }
+        guard let csv = picked else {
             let message = "[error] csv-assisted requires a CSV in csv-inbox/ — none found for '\(profile)'"
             fputs(message + "\n", stderr)
             recorder?.record(message)

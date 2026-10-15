@@ -651,6 +651,45 @@ final class CoreDashboardTests: XCTestCase {
         XCTAssertNoThrow(try dash.writeComplianceRules())
     }
 
+    /// A rule jamf-cli gives no pass rate is not a 0% result: it gets the neutral style, not red.
+    func testComplianceRulesPassRateColoursOnlyRealPercentages() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let subdir = tmp.appendingPathComponent("compliance-rules", isDirectory: true)
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        let json = """
+        [{"benchmark":"B","rule":"high","ruleId":"1","passed":19,"failed":1,"unknown":0,
+          "devices":20,"passRate":"96.5%"},
+         {"benchmark":"B","rule":"mid","ruleId":"2","passed":17,"failed":3,"unknown":0,
+          "devices":20,"passRate":"85%"},
+         {"benchmark":"B","rule":"low","ruleId":"3","passed":2,"failed":18,"unknown":0,
+          "devices":20,"passRate":"10.0%"},
+         {"benchmark":"B","rule":"blank","ruleId":"4","passed":0,"unknown":0,
+          "devices":0,"passRate":""},
+         {"benchmark":"B","rule":"missing","ruleId":"5","devices":0},
+         {"benchmark":"B","rule":"text","ruleId":"6","devices":0,"passRate":"n/a"}]
+        """
+        try Data(json.utf8).write(to: subdir.appendingPathComponent("compliance-rules.json"))
+
+        let dash = makeDashboard(dataDir: tmp)
+        try dash.writeComplianceRules()
+        let ws = try XCTUnwrap(dash.workbook.sheet(named: "Compliance Rules"))
+        func rateFormat(of rule: String) -> CellFormat? {
+            guard let row = ws.dedupedCells.first(where: { cell in
+                if case .string(rule) = cell.value { return cell.col == 1 }
+                return false
+            })?.row else { return nil }
+            return ws.dedupedCells.first { $0.row == row && $0.col == 6 }?.format
+        }
+        XCTAssertEqual(rateFormat(of: "high"), .green)
+        XCTAssertEqual(rateFormat(of: "mid"), .yellow)
+        XCTAssertEqual(rateFormat(of: "low"), .red)
+        XCTAssertEqual(rateFormat(of: "blank"), .cell)
+        XCTAssertEqual(rateFormat(of: "missing"), .cell)
+        XCTAssertEqual(rateFormat(of: "text"), .cell)
+    }
+
     func testWriteDDMStatus() throws {
         let dataDir = try tempDataDir(
             seeding: "ddm-status",

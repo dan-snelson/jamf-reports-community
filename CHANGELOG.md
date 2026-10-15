@@ -328,6 +328,9 @@ text inside names.
   failed rules down, a rule or Mac with no count last, then by name, and the headings say so.
   The DDM screen no longer drops or repeats rows when two declarations share a source, or two
   blueprints share a name or have none.
+- The workbook's Compliance Rules sheet no longer colours a rule red when jamf-cli gives it no
+  pass rate. A blank or unreadable rate now has the plain cell style, as a rule with no
+  figure to grade should, and a patch title with no compliance figure reads the same way.
 
 ### Security
 

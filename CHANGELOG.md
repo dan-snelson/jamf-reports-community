@@ -427,6 +427,10 @@ text inside names.
   in /tmp or another system folder is no longer embedded.
 - The patch release-date snapshot and the SOFA feed cache are written atomically, so a symbolic
   link planted at their file names is replaced instead of followed.
+- Setting up a Jamf Account integration checks the environment or tenant ID for stray
+  characters, as Add environments does. An ID that could read as a jamf-cli option, or holds
+  anything but letters, digits, dots, hyphens and underscores, keeps Continue disabled and shows
+  why, instead of being passed to jamf-cli.
 
 ### Dependencies
 

@@ -575,6 +575,11 @@ struct OnboardingView: View {
                                 ? "your-environment-id" : "your-tenant-id",
                             mono: true
                         )
+                        if let problem = flow.platformScopeIDProblem {
+                            Text(problem)
+                                .font(.caption)
+                                .foregroundStyle(Theme.Colors.danger)
+                        }
                     }
 
                     HStack(alignment: .top, spacing: 12) {

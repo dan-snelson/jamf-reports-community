@@ -103,6 +103,7 @@ final class OnboardingFlow {
         case invalidProfile
         case profileCaseConflict(existing: String)
         case invalidJamfURL
+        case invalidScopeID
         case missingJamfCLI
         case missingWorkspace
         case csvOutsideAllowedZones
@@ -119,6 +120,8 @@ final class OnboardingFlow {
                     + "only by letter case would share its folder. Choose a different name."
             case .invalidJamfURL:
                 "Jamf Pro URL must start with https:// and include a valid host."
+            case .invalidScopeID:
+                OnboardingFlow.scopeIDProblemText
             case .missingJamfCLI:
                 "Could not find jamf-cli on PATH."
             case .missingWorkspace:
@@ -354,7 +357,7 @@ final class OnboardingFlow {
                     && (!clientSecret.isEmpty || secretFieldHasText) && !isRegisteringProfile
             case .platformGateway:
                 isProfileNameValid && isGatewayURLValid
-                    && !platformScopeID.trimmed.isEmpty
+                    && isPlatformScopeIDValid
                     && !platformClientID.trimmed.isEmpty
                     && (!platformClientSecret.isEmpty || platformSecretFieldHasText)
                     && !isRegisteringProfile
@@ -610,6 +613,7 @@ final class OnboardingFlow {
     }
 
     private func registerPlatformGatewayProfile() async throws {
+        guard isPlatformScopeIDValid else { throw FlowError.invalidScopeID }
         guard let binary = CLIBridge().locate("jamf-cli") else { throw FlowError.missingJamfCLI }
         try Self.signatureGate(binary: binary)
         guard isProfileNameValid else { throw FlowError.invalidProfile }
@@ -1285,6 +1289,19 @@ final class OnboardingFlow {
     }
 
     var isGatewayURLValid: Bool { normalizedURL(gatewayURL.trimmed) != nil }
+
+    /// The ID goes to `config add-profile` as a flag value, so it passes the check Add
+    /// environments applies to each ID.
+    var isPlatformScopeIDValid: Bool { ConnectionEnvironments.isUsableID(platformScopeID.trimmed) }
+
+    nonisolated static let scopeIDProblemText = "Use only letters, digits, dots, hyphens and "
+        + "underscores, and don't start with a hyphen. Copy the ID from Jamf Account without "
+        + "spaces."
+
+    /// Shown under the ID field once something is typed that the check refuses.
+    var platformScopeIDProblem: String? {
+        platformScopeID.trimmed.isEmpty || isPlatformScopeIDValid ? nil : Self.scopeIDProblemText
+    }
     var isProtectURLValid: Bool { normalizedURL(protectURL.trimmed) != nil }
     var isSchoolURLValid: Bool { normalizedURL(schoolURL.trimmed) != nil }
 

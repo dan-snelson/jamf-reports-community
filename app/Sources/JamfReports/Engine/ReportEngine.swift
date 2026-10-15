@@ -24,6 +24,8 @@ struct ReportEngine: Sendable {
     /// pinned logo and HTML history file look the profile's workspace up by it; the profile in
     /// config.yaml is not used for that, since a peer on a shared workspace can edit it.
     var profile: String? = nil
+    /// The most bytes of a CSV export `generate` reads; a larger file fails the run. A test seam.
+    var csvByteLimit = InventoryCSV.maxBytes
 
     /// The trend-chart tab, the one tab no sheet plan writes.
     static let chartsSheetName = "Charts"
@@ -177,7 +179,7 @@ struct ReportEngine: Sendable {
     private func csvDashboard(
         at csvURL: URL, workbook: Workbook, profile: String
     ) throws -> CSVDashboard {
-        let csvData = try Data(contentsOf: csvURL)
+        let csvData = try InventoryCSV.read(csvURL, limit: csvByteLimit)
         guard let csv = CSVDashboard(config: config, csvData: csvData, workbook: workbook,
                                      currentCSVURL: csvURL, profile: profile) else {
             throw ReportEngineError.csvParseFailed(csvURL)
@@ -403,6 +405,18 @@ struct ReportEngine: Sendable {
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) {
         let fm = FileManager.default
+        // Read through the same bounded, link-refusing open as the report, so a link planted at
+        // the CSV's name is never copied and the archive cannot hold more than the report read.
+        let data: Data
+        do {
+            data = try InventoryCSV.read(csvURL, limit: csvByteLimit)
+        } catch {
+            let msg = "[warn] Could not archive CSV snapshot: \(error.localizedDescription)"
+            AppLogger.report.warning("\(msg, privacy: .private)")
+            print(msg)
+            onLine?(.init(timestamp: Date(), level: .warn, text: msg))
+            return
+        }
         do {
             try fm.createDirectory(at: historicalDir, withIntermediateDirectories: true)
         } catch {
@@ -417,7 +431,12 @@ struct ReportEngine: Sendable {
         let ts = formatter.string(from: Date())
         let dest = historicalDir.appendingPathComponent("computers_\(ts).csv")
         do {
-            try fm.copyItem(at: csvURL, to: dest)
+            try data.write(to: dest, options: .withoutOverwriting)
+            // Keep the export's own date: Fleet Drift picks the prior snapshot by modification time.
+            if let modified = (try? csvURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate {
+                try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: dest.path)
+            }
         } catch {
             let msg = "[warn] Could not archive CSV snapshot: \(error)"
             AppLogger.report.warning("\(msg, privacy: .private)")
@@ -3561,6 +3580,7 @@ struct ReportEngine: Sendable {
         csvURL: URL?,
         dataDir: URL,
         outputURL: URL,
+        csvByteLimit: Int = InventoryCSV.maxBytes,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async throws -> [SheetFailure] {
         // PR-10 / threat-model T-11: strict-mode pre-flight applies to School
@@ -3575,7 +3595,7 @@ struct ReportEngine: Sendable {
         let (_, schoolFailures) = core.writeAll(sheets: sheets)
 
         if let csvURL {
-            let csvData = try Data(contentsOf: csvURL)
+            let csvData = try InventoryCSV.read(csvURL, limit: csvByteLimit)
             let school = SchoolCSVDashboard(config: config, csvData: csvData, workbook: workbook)
             // SchoolCSVDashboard.writeAll() is currently a stub returning [].
             _ = school?.writeAll()

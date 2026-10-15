@@ -290,9 +290,7 @@ enum ScaffoldService {
     ///   compliance columns.
     /// - Throws: `CocoaError` or `ScaffoldError` if the file cannot be read.
     static func matchColumns(from csvURL: URL, profile: String) throws -> ScaffoldResult {
-        var text = try String(contentsOf: csvURL, encoding: .utf8)
-        // Strip UTF-8 BOM if present.
-        if text.hasPrefix("\u{FEFF}") { text = String(text.dropFirst()) }
+        let text = try InventoryCSV.readText(csvURL, followLinks: true)
 
         let firstLine = text.components(separatedBy: CharacterSet.newlines).first ?? ""
         let headers = parseHeaderLine(firstLine)
@@ -797,8 +795,7 @@ enum ScaffoldService {
     /// - Returns: Parsed headers and sample rows.
     /// - Throws: If the file cannot be read as UTF-8.
     static func readSample(from csvURL: URL, maxRows: Int = 50) throws -> CSVSample {
-        var text = try String(contentsOf: csvURL, encoding: .utf8)
-        if text.hasPrefix("\u{FEFF}") { text = String(text.dropFirst()) }
+        let text = try InventoryCSV.readText(csvURL, followLinks: true)
 
         let lines = text
             .components(separatedBy: CharacterSet.newlines)

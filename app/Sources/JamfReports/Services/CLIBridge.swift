@@ -2127,8 +2127,7 @@ final class CLIBridge {
                 let csvURL = URL(fileURLWithPath: csvPath)
                 if FileManager.default.fileExists(atPath: csvURL.path) {
                     do {
-                        var text = try String(contentsOf: csvURL, encoding: .utf8)
-                        if text.hasPrefix("\u{FEFF}") { text = String(text.dropFirst()) }
+                        let text = try InventoryCSV.readText(csvURL, followLinks: true)
                         let firstLine = text.split(separator: "\n", maxSplits: 1).first ?? ""
                         let headers = Set(firstLine.split(separator: ",").map {
                             String($0).trimmingCharacters(in: .init(charactersIn: "\" \t\r"))

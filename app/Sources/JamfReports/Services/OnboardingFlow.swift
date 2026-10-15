@@ -986,13 +986,15 @@ final class OnboardingFlow {
     }
 
     /// Only an answering Jamf Pro validates. A rejected ID stays unvalidated, an unconfirmed one
-    /// offers Continue without validating, and an environment with no Jamf Pro is probably Jamf
-    /// School: the banner points to a School workspace and offers no way on with this profile.
+    /// or one whose check lacks a permission offers Continue without validating (the ID passed
+    /// the gateway; only the data that needs the permission is missing), and an environment with
+    /// no Jamf Pro is probably Jamf School: the banner points to a School workspace and offers no
+    /// way on with this profile.
     func applyConnectionCheck(_ verdict: ConnectionCheck.Verdict) {
         connectionCheck = verdict
         switch verdict {
         case .accepted: connectionValidated = true
-        case .rejectedID, .noJamfPro, .undecided: connectionValidated = false
+        case .rejectedID, .noJamfPro, .missingPermission, .undecided: connectionValidated = false
         }
         if connectionValidated { recordConnectionMember(for: verdict) }
     }
@@ -1027,8 +1029,10 @@ final class OnboardingFlow {
     var offersContinueWithoutValidating: Bool {
         guard !connectionValidated, canAdvance, let exit = validationExitCode else { return false }
         guard proConnectionType == .platformGateway, exit == 0 else { return exit != 0 }
-        if case .undecided = connectionCheck { return true }
-        return false
+        switch connectionCheck {
+        case .undecided, .missingPermission: return true
+        case .accepted, .rejectedID, .noJamfPro, nil: return false
+        }
     }
 
     func scaffoldCSV(from url: URL) async {

@@ -32,6 +32,14 @@ final class OnboardingConnectionCheckTests: XCTestCase {
         XCTAssertTrue(flow.offersContinueWithoutValidating)
     }
 
+    func testAMissingPermissionDoesNotValidateButOffersTheBypass() {
+        let flow = flowAtValidate(.platformGateway, exit: 0)
+        flow.applyConnectionCheck(.missingPermission(names: ["Read"]))
+        XCTAssertFalse(flow.connectionValidated)
+        XCTAssertTrue(flow.offersContinueWithoutValidating)
+        XCTAssertEqual(flow.connectionCheck, .missingPermission(names: ["Read"]))
+    }
+
     func testNoJamfProDoesNotValidateAndOffersNoWayOn() {
         let flow = flowAtValidate(.platformGateway, exit: 0)
         flow.applyConnectionCheck(.noJamfPro)

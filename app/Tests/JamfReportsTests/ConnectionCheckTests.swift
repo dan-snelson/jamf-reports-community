@@ -65,6 +65,54 @@ final class ConnectionCheckTests: XCTestCase {
         XCTAssertEqual(ConnectionCheck.verdict(version: bare404, probe: probe), .noJamfPro)
     }
 
+    // MARK: - a permission 403 is not a rejected ID (#207 M3)
+
+    private let gatewayPermissionHint = "grant the Jamf Platform API integration these "
+        + "permissions in Jamf Account: Settings > Jamf Pro version: Read (jamf-pro:read). "
+        + "Names are shown as in the permission picker."
+
+    /// A plain 403 on the version call: the gateway read the scope and let the ID through.
+    func testAPermissionErrorOnStepOneNamesThePermissionAndDoesNotBlock() {
+        let version = failure(5, "permission denied (HTTP 403)", hint: gatewayPermissionHint)
+        let verdict = ConnectionCheck.verdict(version: version, probe: nil)
+        let name = "Settings > Jamf Pro version: Read (jamf-pro:read)"
+        XCTAssertEqual(verdict, .missingPermission(names: [name]))
+        XCTAssertFalse(verdict.blocksContinue)
+        XCTAssertFalse(verdict.suggestsJamfSchool)
+        XCTAssertTrue(verdict.message.contains("Settings > Jamf Pro version: Read"))
+        XCTAssertFalse(verdict.message.contains("Jamf School"))
+        XCTAssertFalse(ConnectionCheck.needsProbe(version), "a 403 asks no second question")
+    }
+
+    func testAPermissionErrorThatNamesNothingSaysAPermissionTheCheckNeeds() {
+        let version = failure(5, "permission denied (HTTP 403)")
+        let verdict = ConnectionCheck.verdict(version: version, probe: nil)
+        XCTAssertEqual(verdict, .missingPermission(names: []))
+        XCTAssertTrue(verdict.message.contains("a permission the check needs."), verdict.message)
+    }
+
+    func testAJamfProPrivilegeHintNamesThePrivilege() {
+        let version = failure(5, "permission denied (HTTP 403)",
+                              hint: "Required privilege(s): Read Jamf Pro Version.")
+        XCTAssertEqual(ConnectionCheck.verdict(version: version, probe: nil),
+                       .missingPermission(names: ["Read Jamf Pro Version"]))
+    }
+
+    /// The scope refusal is also a 403 and exit 5; it stays a rejected ID whatever the hint says.
+    func testOwnershipForbiddenWithAPermissionHintStaysRejected() {
+        let version = failure(5, "permission denied (HTTP 403): {\"code\":\"OWNERSHIP_FORBIDDEN\"}",
+                              hint: gatewayPermissionHint)
+        XCTAssertEqual(ConnectionCheck.verdict(version: version, probe: nil),
+                       .rejectedID(.scopeRejected))
+    }
+
+    func testAMissingPermissionMessageNeverClaimsJamfSchool() {
+        let text = ConnectionCheck.Verdict.missingPermission(names: ["Read"]).message
+        XCTAssertTrue(text.contains("You can continue"))
+        let bare = ConnectionCheck.Verdict.missingPermission(names: [])
+        XCTAssertEqual(bare.message(tenantLevel: true), bare.message)
+    }
+
     /// Organization level sends no scope header; every scoped call answers 400.
     func testAMissingScopeHeaderOnStepOneBlocks() {
         let version = failure(1, "request failed (HTTP 400): {\"httpStatus\":400,\"traceId\":"

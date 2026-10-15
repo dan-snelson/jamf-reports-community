@@ -35,7 +35,7 @@ extension ReportEngine {
     }
 
     /// Titles from `compliance-benchmarks list`, narrowed to `configured` when it is set.
-    /// nil when the output is neither a JSON array nor `{"benchmarks": [...]}`.
+    /// nil when the output is not a JSON array.
     static func benchmarkSelection(
         fromListOutput data: Data, configured: [String]
     ) -> BenchmarkSelection? {
@@ -94,8 +94,7 @@ extension ReportEngine {
         guard !isBlank(data) else { return [] }
         guard let payload = jsonPayload(from: data),
               let object = try? JSONSerialization.jsonObject(with: payload) else { return nil }
-        if let array = object as? [[String: Any]] { return array }
-        return (object as? [String: Any])?["benchmarks"] as? [[String: Any]]
+        return object as? [[String: Any]]
     }
 
     /// Whitespace only — what jamf-cli leaves on stdout for an empty report.

@@ -68,6 +68,17 @@ final class ReauthenticateTests: XCTestCase {
             clientID: "abc", hasSecret: true))
     }
 
+    func testPlatformVerifyDisabledOnAnUnusableScopeID() {
+        for bad in ["--tenant-id", "my env", "é"] {
+            XCTAssertFalse(ReauthenticateSheet.canVerifyPlatform(
+                isBusy: false, gatewayURLValid: true, scopeID: bad,
+                clientID: "abc", hasSecret: true), bad)
+        }
+        XCTAssertTrue(ReauthenticateSheet.canVerifyPlatform(
+            isBusy: false, gatewayURLValid: true, scopeID: " e1 ",
+            clientID: "abc", hasSecret: true))
+    }
+
     func testPlatformVerifyDisabledOnInvalidGatewayURL() {
         XCTAssertFalse(ReauthenticateSheet.canVerifyPlatform(
             isBusy: false, gatewayURLValid: false, scopeID: "e1",

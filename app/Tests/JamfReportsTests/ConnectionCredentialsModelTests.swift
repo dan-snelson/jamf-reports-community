@@ -168,6 +168,23 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         XCTAssertEqual(members(h).map(\.profile), ["acme-prod"])
     }
 
+    func testAMissingPermissionAddsNothingAndNamesIt() async throws {
+        let h = try harness(
+            mode: .addEnvironments,
+            verdicts: ["acme-perm": .missingPermission(names: ["Settings: Read"])])
+        fill(h.model, ids: "env-perm Perm")
+        await h.model.run()
+
+        let row = try XCTUnwrap(h.model.rows.first)
+        XCTAssertEqual(row.outcome, .missingPermission(names: ["Settings: Read"]))
+        XCTAssertFalse(row.suggestsJamfSchool)
+        XCTAssertFalse(row.isSuccess)
+        XCTAssertTrue(row.leavesProfileRegistered)
+        XCTAssertTrue(row.message.contains("Settings: Read"), row.message)
+        XCTAssertTrue(h.provisioned.profiles.isEmpty)
+        XCTAssertEqual(members(h).map(\.profile), ["acme-prod"])
+    }
+
     func testAnUndecidedCheckAddsNothing() async throws {
         let h = try harness(
             mode: .addEnvironments, verdicts: ["acme-slow": .undecided(exitCode: -2)])

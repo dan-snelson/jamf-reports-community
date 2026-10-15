@@ -316,6 +316,11 @@ text inside names.
 - Devices stays fast when thousands of Macs carry the same placeholder serial number. A serial
   or ID that more than 50 Macs share no longer joins rows from different sources; a row left
   with nothing else to go on is matched by computer name, as a row with no serial is.
+- Setting up a Jamf Account integration no longer calls a missing permission a problem with the
+  ID. When the check for an environment or tenant ID is refused for a permission the
+  integration lacks, setup names the permission when jamf-cli does, does not suggest Jamf
+  School, and offers **Continue without validating**. Add environments lists the ID as not
+  added and says which permission to grant. An ID the gateway rejects still stops setup.
 
 ### Security
 
@@ -428,6 +433,10 @@ text inside names.
   longer plant a link that pulls a file from this Mac into the workbook, or a pipe or huge file
   that hangs the run. A run whose CSV is too large or not a regular file fails with an error
   naming the file.
+- Setting up a Jamf Account integration checks the environment or tenant ID for stray
+  characters, as Add environments does. An ID that could read as a jamf-cli option, or holds
+  anything but letters, digits, dots, hyphens and underscores, keeps Continue disabled and shows
+  why, instead of being passed to jamf-cli.
 
 ### Dependencies
 

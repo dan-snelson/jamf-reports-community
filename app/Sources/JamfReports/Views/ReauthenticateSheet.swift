@@ -60,7 +60,8 @@ struct ReauthenticateSheet: View {
     nonisolated static func canVerifyPlatform(
         isBusy: Bool, gatewayURLValid: Bool, scopeID: String, clientID: String, hasSecret: Bool
     ) -> Bool {
-        let scopeFilled = !scopeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let scopeFilled = ConnectionEnvironments.isUsableID(
+            scopeID.trimmingCharacters(in: .whitespacesAndNewlines))
         let idFilled = !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return !isBusy && gatewayURLValid && scopeFilled && idFilled && hasSecret
     }
@@ -221,6 +222,11 @@ struct ReauthenticateSheet: View {
                             ? "your-environment-id" : "your-tenant-id",
                         mono: true
                     )
+                    if let problem = flow.platformScopeIDProblem {
+                        Text(problem)
+                            .font(.caption)
+                            .foregroundStyle(Theme.Colors.danger)
+                    }
                 }
 
                 HStack(alignment: .top, spacing: 12) {

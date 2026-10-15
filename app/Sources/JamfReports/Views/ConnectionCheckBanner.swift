@@ -31,7 +31,7 @@ struct ConnectionCheckBanner: View {
         switch verdict {
         case .accepted: .info
         case .rejectedID: .danger
-        case .noJamfPro, .undecided: .warn
+        case .noJamfPro, .missingPermission, .undecided: .warn
         }
     }
 
@@ -39,7 +39,7 @@ struct ConnectionCheckBanner: View {
         switch verdict {
         case .accepted: "checkmark.seal"
         case .rejectedID: "xmark.octagon.fill"
-        case .noJamfPro, .undecided: "exclamationmark.triangle.fill"
+        case .noJamfPro, .missingPermission, .undecided: "exclamationmark.triangle.fill"
         }
     }
 }

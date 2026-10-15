@@ -116,6 +116,11 @@ permission:
   **Add Jamf School workspace** in the sidebar's workspace menu) and no way to continue with
   this profile. If it should be Jamf Pro, check that the ID is for the environment that
   holds your Jamf Pro tenant.
+- **Missing permission:** the gateway did not reject the ID, but the integration lacks a
+  permission the check needs. Setup names the permission when jamf-cli does and offers
+  **Continue without validating**. Grant it on the integration in Jamf
+  Account (or on the API role for a Jamf Pro privilege) and check again with **Update
+  credentials…**. **Add environments** does not add an ID in this state.
 - **Undecided:** the answer was not conclusive, and setup offers **Continue without
   validating**.
 

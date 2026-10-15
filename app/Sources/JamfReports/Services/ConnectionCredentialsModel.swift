@@ -49,6 +49,8 @@ final class ConnectionCredentialsModel {
         case notJamfPro
         case rejected(FailureCause.Kind)
         case notConfirmed(exitCode: Int32?)
+        /// The ID passed the gateway, but the integration lacks a permission the check needs.
+        case missingPermission(names: [String])
         case skipped(String)
     }
 
@@ -68,7 +70,7 @@ final class ConnectionCredentialsModel {
         var leavesProfileRegistered: Bool {
             guard isNew else { return false }
             switch outcome {
-            case .notJamfPro, .rejected, .notConfirmed: return true
+            case .notJamfPro, .rejected, .notConfirmed, .missingPermission: return true
             case .refused, .registrationFailed, .added, .updated, .skipped: return false
             }
         }
@@ -276,6 +278,7 @@ final class ConnectionCredentialsModel {
             return .added(jamfProVersion: version, workspaceNote: addMember(planned))
         case .noJamfPro: return .notJamfPro
         case .rejectedID(let kind): return .rejected(kind)
+        case .missingPermission(let names): return .missingPermission(names: names)
         case .undecided(let exitCode): return .notConfirmed(exitCode: exitCode)
         }
     }
@@ -316,6 +319,7 @@ final class ConnectionCredentialsModel {
             refreshProduct(member, .unknown)
             return .notJamfPro
         case .rejectedID(let kind): return .rejected(kind)
+        case .missingPermission(let names): return .missingPermission(names: names)
         case .undecided(let exitCode): return .notConfirmed(exitCode: exitCode)
         }
     }
@@ -366,6 +370,9 @@ extension ConnectionCredentialsModel.Row {
                 : exitCode.map { "exit \($0)" } ?? "jamf-cli did not run"
             return (isNew ? "Not added: " : "") + "the check could not confirm the ID (\(cause)). "
                 + "Check the client ID, secret and API privileges. " + removalHint
+        case .missingPermission(let names):
+            return (isNew ? "Not added: " : "")
+                + ConnectionCheck.Verdict.missingPermissionText(names: names) + " " + removalHint
         case .skipped(let reason):
             return reason
         }

@@ -322,6 +322,15 @@ text inside names.
   Jamf Pro answers behind it, names a permission when jamf-cli does, does not suggest Jamf
   School, and offers **Continue without validating**. Add environments lists the ID as not
   added and says why. An ID the gateway rejects still stops setup.
+- On a real tenant the Compliance Benchmarks screen lists the worst rules and Macs first. It
+  showed the first 20 rules and 30 Macs in the order jamf-cli printed them, so a failing rule
+  could sit outside the list. The rules now run from most failures down and the Macs from most
+  failed rules down, a rule or Mac with no count last, then by name, and the headings say so.
+  The DDM screen no longer drops or repeats rows when two declarations share a source, or two
+  blueprints share a name or have none.
+- The workbook's Compliance Rules sheet no longer colours a rule red when jamf-cli gives it no
+  pass rate. A blank or unreadable rate now has the plain cell style, as a rule with no
+  figure to grade should, and a patch title with no compliance figure reads the same way.
 
 ### Security
 

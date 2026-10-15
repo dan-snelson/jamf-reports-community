@@ -241,12 +241,15 @@ struct ComplianceBenchmarksView: View {
     private var ruleDistributionCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Per-Rule Distribution")
-                ForEach(shown.rules.prefix(20)) { rule in
+                SectionHeader(title: "Per-Rule Distribution",
+                              trailing: "Top 20 by failures, name")
+                ForEach(
+                    ComplianceBenchmarksService.rankedRules(shown.rules).prefix(20)
+                ) { rule in
                     ComplianceBenchmarksView.ruleBar(rule, contrast: contrast)
                 }
                 if shown.rules.count > 20 {
-                    Text("Showing the first 20 rules. Full data is in the Excel workbook (\"Compliance Rules\" sheet).")
+                    Text("Showing the 20 rules with the most failures. Full data is in the Excel workbook (\"Compliance Rules\" sheet).")
                         .font(.caption.monospaced())
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                 }
@@ -258,7 +261,8 @@ struct ComplianceBenchmarksView: View {
         let agg = shown.deviceAggregate
         return Card {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Devices", trailing: "\(shown.totalDevices) devices")
+                SectionHeader(title: "Devices",
+                              trailing: "\(shown.totalDevices) devices, top 30 by failed rules")
                 HStack(spacing: 10) {
                     ComplianceBenchmarksView.deviceCounter(label: "Failing",
                                                            value: agg.failing,
@@ -270,11 +274,13 @@ struct ComplianceBenchmarksView: View {
                                                            value: agg.unknown,
                                                            color: Theme.Colors.warn)
                 }
-                ForEach(shown.devices.prefix(30)) { device in
+                ForEach(
+                    ComplianceBenchmarksService.rankedDevices(shown.devices).prefix(30)
+                ) { device in
                     ComplianceBenchmarksView.deviceRow(device, contrast: contrast)
                 }
                 if shown.devices.count > 30 {
-                    Text("Showing the first 30 devices. Full data is in the Excel workbook (\"Compliance Devices\" sheet).")
+                    Text("Showing the 30 devices with the most failed rules. Full data is in the Excel workbook (\"Compliance Devices\" sheet).")
                         .font(.caption.monospaced())
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                 }

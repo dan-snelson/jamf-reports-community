@@ -68,18 +68,18 @@ final class ConnectionCheckTests: XCTestCase {
     // MARK: - a permission 403 is not a rejected ID (#207 M3)
 
     private let gatewayPermissionHint = "grant the Jamf Platform API integration these "
-        + "permissions in Jamf Account: Settings > Jamf Pro version: Read (jamf-pro:read). "
+        + "permissions in Jamf Account: Inventory > Devices: Read (devices:read) (jamf-pro:read). "
         + "Names are shown as in the permission picker."
 
     /// A plain 403 on the version call: the gateway read the scope and let the ID through.
     func testAPermissionErrorOnStepOneNamesThePermissionAndDoesNotBlock() {
         let version = failure(5, "permission denied (HTTP 403)", hint: gatewayPermissionHint)
         let verdict = ConnectionCheck.verdict(version: version, probe: nil)
-        let name = "Settings > Jamf Pro version: Read (jamf-pro:read)"
+        let name = "Inventory > Devices: Read (devices:read) (jamf-pro:read)"
         XCTAssertEqual(verdict, .missingPermission(names: [name]))
         XCTAssertFalse(verdict.blocksContinue)
         XCTAssertFalse(verdict.suggestsJamfSchool)
-        XCTAssertTrue(verdict.message.contains("Settings > Jamf Pro version: Read"))
+        XCTAssertTrue(verdict.message.contains("Inventory > Devices: Read (devices:read)"))
         XCTAssertFalse(verdict.message.contains("Jamf School"))
         XCTAssertFalse(ConnectionCheck.needsProbe(version), "a 403 asks no second question")
     }
@@ -88,7 +88,8 @@ final class ConnectionCheckTests: XCTestCase {
         let version = failure(5, "permission denied (HTTP 403)")
         let verdict = ConnectionCheck.verdict(version: version, probe: nil)
         XCTAssertEqual(verdict, .missingPermission(names: []))
-        XCTAssertTrue(verdict.message.contains("a permission the check needs."), verdict.message)
+        XCTAssertTrue(verdict.message.contains("refused the request"), verdict.message)
+        XCTAssertFalse(verdict.message.contains("the check needs"), "the check needs no permission")
     }
 
     func testAJamfProPrivilegeHintNamesThePrivilege() {

@@ -316,11 +316,12 @@ text inside names.
 - Devices stays fast when thousands of Macs carry the same placeholder serial number. A serial
   or ID that more than 50 Macs share no longer joins rows from different sources; a row left
   with nothing else to go on is matched by computer name, as a row with no serial is.
-- Setting up a Jamf Account integration no longer calls a missing permission a problem with the
-  ID. When the check for an environment or tenant ID is refused for a permission the
-  integration lacks, setup names the permission when jamf-cli does, does not suggest Jamf
+- Setting up a Jamf Account integration no longer reads a refused check as "could not confirm".
+  When the gateway accepts an environment or tenant ID but refuses the check with a permission
+  error, setup says the integration holds no Jamf Pro permission for that environment or no
+  Jamf Pro answers behind it, names a permission when jamf-cli does, does not suggest Jamf
   School, and offers **Continue without validating**. Add environments lists the ID as not
-  added and says which permission to grant. An ID the gateway rejects still stops setup.
+  added and says why. An ID the gateway rejects still stops setup.
 
 ### Security
 

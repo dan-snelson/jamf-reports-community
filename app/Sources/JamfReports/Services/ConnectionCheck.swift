@@ -149,11 +149,19 @@ extension ConnectionCheck.Verdict {
 
     /// What the verdict says without its advice on continuing, for a list of results.
     static func missingPermissionText(names: [String]) -> String {
-        let missing = names.isEmpty
-            ? "a permission the check needs"
-            : "a permission the check needs (" + names.joined(separator: "; ") + ")"
-        return "The gateway did not reject this ID, but the integration lacks \(missing). Grant it "
-            + "on the integration in Jamf Account, or on the API role for a Jamf Pro privilege."
+        // The version request itself needs no permission, and the gateway answers the same 403
+        // for a path it does not route, so a refusal is about the integration or the environment
+        // as a whole, not about one permission the check needs.
+        if !names.isEmpty {
+            return "The gateway did not reject this ID, but the integration lacks a permission ("
+                + names.joined(separator: "; ") + "). Grant it on the integration in Jamf "
+                + "Account, or on the API role for a Jamf Pro privilege."
+        }
+        return "The gateway did not reject this ID but refused the request. Either the "
+            + "integration holds no Jamf Pro permission for this environment, or no Jamf Pro "
+            + "answers behind it. Grant the Jamf Pro permissions Jamf Reports reads on the "
+            + "integration in Jamf Account, and check that the ID is for the environment that "
+            + "holds your Jamf Pro tenant."
     }
 
     var message: String { message(tenantLevel: false) }

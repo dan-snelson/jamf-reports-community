@@ -49,7 +49,7 @@ final class ConnectionCredentialsModel {
         case notJamfPro
         case rejected(FailureCause.Kind)
         case notConfirmed(exitCode: Int32?)
-        /// The ID passed the gateway, but the integration lacks a permission the check needs.
+        /// The ID passed the gateway, but the integration lacks Jamf Pro access for it (HTTP 403).
         case missingPermission(names: [String])
         case skipped(String)
     }

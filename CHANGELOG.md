@@ -7,7 +7,7 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
-## [2.10.0] - 2026-10-13
+## [2.10.0] - 2026-10-15
 
 2.10 connects Jamf Cloud through a Jamf Account integration (the Jamf Platform API) and makes
 Jamf School a workspace of its own. It answers seven community reports: live logs colour lines by
@@ -43,8 +43,8 @@ text inside names.
   the lowest count or score. (#272)
 - The HTML report has a **Mobile devices** group: iPad, iPhone and Apple TV counts, how many are
   managed and supervised, passcode, Activation Lock and jailbreak counts (shown as Unknown when
-  no device reports the field, never 0) and the iOS and iPadOS version spread. It lists no individual
-  device. Every HTML report template includes it, as does a Custom report that picks a mobile
+  no device reports the field, never 0) and the iOS and iPadOS version spread. It lists no
+  individual device. Every HTML report template includes it, as does a Custom report that picks a mobile
   sheet. When no mobile data was collected, the audit appendix says so, with the recorded cause
   when the last attempt failed. (#275)
 - Under Security agent health, the HTML report lists the Macs missing each agent with their

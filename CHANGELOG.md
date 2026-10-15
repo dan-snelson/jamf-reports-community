@@ -326,6 +326,8 @@ text inside names.
   showed the first 20 rules and 30 Macs in the order jamf-cli printed them, so a failing rule
   could sit outside the list. The rules now run from most failures down and the Macs from most
   failed rules down, a rule or Mac with no count last, then by name, and the headings say so.
+  The DDM screen no longer drops or repeats rows when two declarations share a source, or two
+  blueprints share a name or have none.
 
 ### Security
 

@@ -14,6 +14,11 @@ versions in this repository map to git tags.
   record kept that name, its old security state and a 1970 check-in after it enrolled. The CSV
   now only fills in what the collected data leaves blank, such as department names, and the
   check-in and inventory dates show the later of the two. (#290)
+- **Help → Jamf Reports Help** (⌘?) opens the project wiki in your browser. It used to say help
+  was not available. (#292)
+- Every folder picker for the workspace location, including first-launch setup and the
+  Overview's "Configuration incomplete" banner, now has a **New Folder** button and opens at
+  the current workspace folder, or the nearest folder above it that exists. (#289)
 
 ## [2.10.0] - 2026-10-15
 

@@ -26,6 +26,12 @@ plant among its snapshots and state files.
 
 ### Fixed
 
+- Clearing a number on **Config → Thresholds** (or the number of runs to keep) no longer breaks
+  the workspace. The field was saved as text that reports could not read, so every refresh,
+  report and scheduled run failed until config.yaml was edited by hand. A cleared field now
+  uses the default, and text that is not a whole number is refused with a message, saving
+  nothing.
+
 - Devices and the Overview show what jamf-cli last collected when an imported inventory CSV
   still counts as current. Before, the CSV won: a Mac imported as an unenrolled "DEP - serial"
   record kept that name, its old security state and a 1970 check-in after it enrolled. The CSV

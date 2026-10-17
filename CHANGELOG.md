@@ -7,6 +7,15 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+### Added
+
+- Jamf Reports tells you when a new stable release is out. Once a day it asks GitHub for the
+  latest release and, when it is newer than yours, shows a notice with a link to the release
+  notes. It never downloads or installs anything, and never offers a beta or release
+  candidate, so you decide when to update. **Skip this version** hides the notice until a
+  later release. Turn the check off under **Settings → App updates**, or for every Mac with a
+  configuration profile (see Security and Operational Considerations in the wiki).
+
 ### Fixed
 
 - Devices and the Overview show what jamf-cli last collected when an imported inventory CSV

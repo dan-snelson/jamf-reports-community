@@ -7,6 +7,14 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-10-17
+
+2.10.1 tells you when a new stable release is out, without ever installing one. It fixes Jamf
+School setup and credential updates that a School tester reported, keeps an imported CSV from
+overriding what jamf-cli collected, and stops one unexpected value from blanking the Jamf
+Platform API screens. On a shared team folder, the app no longer follows links another Mac could
+plant among its snapshots and state files.
+
 ### Added
 
 - Jamf Reports tells you when a new stable release is out. Once a day it asks GitHub for the

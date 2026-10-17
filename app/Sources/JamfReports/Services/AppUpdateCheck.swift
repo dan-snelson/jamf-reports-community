@@ -11,7 +11,6 @@ enum AppUpdateCheck {
     static let enabledKey = "checkForAppUpdates"
     static let lastCheckKey = "appUpdateLastCheck"
     static let latestVersionKey = "appUpdateLatestVersion"
-    static let latestPageKey = "appUpdateLatestPage"
     static let skippedVersionKey = "appUpdateSkippedVersion"
 
     /// `releases/latest` never returns a draft or a release marked pre-release.
@@ -25,10 +24,14 @@ enum AppUpdateCheck {
     static let requestTimeout: TimeInterval = 15
 
     struct Release: Equatable, Sendable {
-        /// The version without its `v`, e.g. `2.10.1`.
+        /// The version without its `v`, e.g. `2.10.1`; digits and dots only (`stableVersion`).
         let version: String
-        /// The release's GitHub page, or `releasesPage` when the answer named another one.
-        let page: URL
+
+        /// This project's page for the release, built from the version rather than taken from
+        /// the answer, so it can only open this project's release notes.
+        var page: URL {
+            URL(string: "\(releasesPage.absoluteString)/tag/v\(version)") ?? releasesPage
+        }
     }
 
     enum Outcome: Equatable, Sendable {
@@ -64,13 +67,12 @@ enum AppUpdateCheck {
             let tag_name: String
             let prerelease: Bool?
             let draft: Bool?
-            let html_url: String?
         }
         let raw = try JSONDecoder().decode(Raw.self, from: data)
         guard raw.prerelease != true, raw.draft != true,
               let version = stableVersion(fromTag: raw.tag_name)
         else { throw CheckError.notAStableRelease }
-        return Release(version: version, page: releasePage(raw.html_url))
+        return Release(version: version)
     }
 
     /// `v2.10.1` → `2.10.1`; nil for anything with a suffix or other characters.
@@ -83,15 +85,6 @@ enum AppUpdateCheck {
                   && $0.allSatisfy(\.isNumber) })
         else { return nil }
         return String(text)
-    }
-
-    /// The release's own page when it is this project's release on github.com, else the list.
-    static func releasePage(_ raw: String?) -> URL {
-        guard let raw, let url = URL(string: raw), url.scheme == "https",
-              url.host == "github.com",
-              url.path.hasPrefix("/tonyyo11/jamf-reports-community/releases/")
-        else { return releasesPage }
-        return url
     }
 
     /// A release newer than the running version is offered; a beta of the next version
@@ -188,9 +181,7 @@ final class AppUpdateModel {
         if let version = defaults.string(forKey: AppUpdateCheck.latestVersionKey),
            AppUpdateCheck.stableVersion(fromTag: version) != nil,
            case .available(let release) = AppUpdateCheck.outcome(
-               current: currentVersion,
-               release: .init(version: version, page: AppUpdateCheck.releasePage(
-                   defaults.string(forKey: AppUpdateCheck.latestPageKey))))
+               current: currentVersion, release: .init(version: version))
         {
             latest = release
         }
@@ -236,12 +227,10 @@ final class AppUpdateModel {
             latest = release
             lastError = nil
             defaults.set(release.version, forKey: AppUpdateCheck.latestVersionKey)
-            defaults.set(release.page.absoluteString, forKey: AppUpdateCheck.latestPageKey)
         case .upToDate:
             latest = nil
             lastError = nil
             defaults.removeObject(forKey: AppUpdateCheck.latestVersionKey)
-            defaults.removeObject(forKey: AppUpdateCheck.latestPageKey)
         case .failed(let reason):
             lastError = reason
             AppLogger.event(.ui, .notice, "App update check failed: \(reason)")

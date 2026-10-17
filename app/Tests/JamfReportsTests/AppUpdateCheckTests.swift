@@ -69,19 +69,18 @@ final class AppUpdateCheckTests: XCTestCase {
         XCTAssertEqual(AppUpdateCheck.stableVersion(fromTag: "2.11"), "2.11")
     }
 
-    func testAPageOffThisProjectFallsBackToTheReleasesList() throws {
-        for page in ["https://evil.example/tonyyo11/jamf-reports-community/releases/x",
-                     "http://github.com/tonyyo11/jamf-reports-community/releases/tag/v2.10.1",
-                     "https://github.com/someone/else/releases/tag/v2.10.1"] {
-            let release = try AppUpdateCheck.release(from: releaseJSON(tag: "v2.10.1", page: page))
-            XCTAssertEqual(release.page, AppUpdateCheck.releasesPage, page)
-        }
+    /// The page comes from the version, never from the answer's `html_url`.
+    func testThePageIsThisProjectsReleaseWhateverTheAnswerSays() throws {
+        let release = try AppUpdateCheck.release(from: releaseJSON(
+            tag: "v2.10.1", page: "https://evil.example/tonyyo11/releases/x"))
+        XCTAssertEqual(release.page.absoluteString,
+                       "https://github.com/tonyyo11/jamf-reports-community/releases/tag/v2.10.1")
     }
 
     // MARK: - Version comparison
 
     func testOnlyANewerReleaseIsOffered() {
-        let release = AppUpdateCheck.Release(version: "2.10.1", page: AppUpdateCheck.releasesPage)
+        let release = AppUpdateCheck.Release(version: "2.10.1")
         XCTAssertEqual(AppUpdateCheck.outcome(current: "2.10.0", release: release),
                        .available(release))
         XCTAssertEqual(AppUpdateCheck.outcome(current: "2.10.1", release: release),
@@ -93,8 +92,8 @@ final class AppUpdateCheckTests: XCTestCase {
     /// Someone on a beta of the next version is not offered the older stable release, and is
     /// offered that version's final release when it ships.
     func testABetaOfTheNextVersionWaitsForItsRelease() {
-        let older = AppUpdateCheck.Release(version: "2.10.1", page: AppUpdateCheck.releasesPage)
-        let final = AppUpdateCheck.Release(version: "2.11.0", page: AppUpdateCheck.releasesPage)
+        let older = AppUpdateCheck.Release(version: "2.10.1")
+        let final = AppUpdateCheck.Release(version: "2.11.0")
         XCTAssertEqual(AppUpdateCheck.outcome(current: "2.11.0-beta1", release: older),
                        .upToDate(latest: "2.10.1"))
         XCTAssertEqual(AppUpdateCheck.outcome(current: "2.11.0-beta1", release: final),

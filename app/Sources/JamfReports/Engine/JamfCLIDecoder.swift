@@ -1236,3 +1236,73 @@ struct AnyCodable: Codable, Sendable, CustomStringConvertible {
         }
     }
 }
+
+// MARK: - Lenient rows
+// For report rows read field by field: a value of an unexpected type costs that field, and an
+// element that is not an object costs that row, never the whole list.
+
+extension KeyedDecodingContainer {
+    /// The value as text whatever its JSON type (`90` reads as "90"); nil when absent, null or
+    /// not a scalar.
+    func lenientText(forKey key: Key) -> String? {
+        guard let value = try? decodeIfPresent(AnyCodable.self, forKey: key),
+              value.value != nil else { return nil }
+        return value.stringValue
+    }
+
+    /// A count: a whole number from 0 to `Int32.max`, also from text ("3"). Anything else is
+    /// nil, so a negative, fractional or huge value reads as unknown instead of a false figure
+    /// or an overflow when counts are summed.
+    func lenientCount(forKey key: Key) -> Int? {
+        guard let value = try? decodeIfPresent(AnyCodable.self, forKey: key) else { return nil }
+        if let number = value.value as? Double, number.rounded(.towardZero) != number {
+            return nil
+        }
+        guard let count = value.intValue, (0...Int(Int32.max)).contains(count) else { return nil }
+        return count
+    }
+}
+
+/// A list element that does not decode is nil instead of failing the list.
+struct LenientElement<Row: Decodable>: Decodable {
+    let row: Row?
+
+    init(from decoder: Decoder) throws {
+        row = try? Row(from: decoder)
+    }
+
+    /// The rows of a JSON array, or nil when the data is not one. `skipped` counts the elements
+    /// that were not rows.
+    static func rows(in data: Data) -> (rows: [Row], skipped: Int)? {
+        guard let elements = try? JSONDecoder().decode([LenientElement<Row>].self, from: data)
+        else { return nil }
+        let rows = elements.compactMap(\.row)
+        return (rows, elements.count - rows.count)
+    }
+
+    /// Largest report snapshot `rows(at:)` reads.
+    static var maxSnapshotBytes: Int { 64 * 1024 * 1024 }
+
+    /// The rows of the snapshot at `url`, logging a file that is not a list and any element
+    /// skipped; nil when the file cannot be read or is not a list.
+    static func rows(at url: URL, logging category: AppLogger.Category) -> [Row]? {
+        let name = ConfigSchema.displayText(url.lastPathComponent)
+        let data: Data
+        do {
+            data = try BoundedFile.read(url, limit: maxSnapshotBytes, followSymlinks: false)
+        } catch {
+            AppLogger.event(category, .error,
+                            "\(name) not read: a link, not a regular file, or over 64 MB")
+            return nil
+        }
+        guard let result = rows(in: data) else {
+            AppLogger.event(category, .error, "\(name) is not a JSON list of rows; nothing read")
+            return nil
+        }
+        if result.skipped > 0 {
+            AppLogger.event(category, .notice,
+                            "\(name): skipped \(result.skipped) entries that are not rows")
+        }
+        return result.rows
+    }
+}

@@ -19,6 +19,31 @@ versions in this repository map to git tags.
 - Every folder picker for the workspace location, including first-launch setup and the
   Overview's "Configuration incomplete" banner, now has a **New Folder** button and opens at
   the current workspace folder, or the nearest folder above it that exists. (#289)
+- Compliance Benchmarks, DDM Blueprints and the Overview's top failing rules no longer go
+  blank when one row of a Jamf Platform API report carries a value of an unexpected type, such
+  as a count written as text. Only that value is left out, and a failure count that is
+  negative, fractional or out of range shows as unknown, never as a pass. (#284)
+- Jamf School setup removes a trailing `/api` from the School URL, as copied from School's
+  API settings page. jamf-cli adds `/api` itself, so with it every list command failed with
+  "not found" while the overview still worked. A School URL typed without `https://` is
+  accepted, as jamf-cli accepts it.
+- **Data Sources → Update credentials** on a Jamf School workspace shows the School form (URL,
+  Network ID and API key) and re-runs School setup. It used to show the Jamf Pro connection
+  types and a "Jamf Pro URL" field that rejected the School address, so School credentials
+  could not be changed in the app.
+
+### Security
+
+- Devices, Offline Outreach and the Overview's recent activity no longer read a snapshot,
+  snapshot folder or inventory CSV that is a symbolic link, even one pointing inside the
+  workspace, where another Mac on a shared folder could plant it. Each file is checked and read
+  through one open, so it cannot be swapped between the check and the read. A snapshot folder
+  or `csv-inbox` that is a link is named in a warning on Devices instead of leaving the screen
+  blank. A `config.yaml` that is a link is still read, as everywhere else in the app. (#207)
+- Scheduled runs no longer follow a symbolic link, or read an oversized or non-regular file,
+  where they keep their once-a-day markers, alert record, shared-folder claim and per-source
+  collect state. Another Mac on a shared folder could plant one, for example to mark today's
+  overdue notice as already sent. Such a file now counts as no record. (#207)
 
 ## [2.10.0] - 2026-10-15
 

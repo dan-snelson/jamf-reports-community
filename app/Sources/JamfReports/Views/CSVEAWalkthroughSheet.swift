@@ -1,9 +1,9 @@
 import SwiftUI
 import TipKit
 
-/// Guided walkthrough that explains which Jamf Pro export-only fields to include
-/// for Extension Attribute tracking, detects EA-like columns in the newest inbox
-/// CSV, and lets the operator one-click-adopt selected EAs into `config.yaml`.
+/// Guided walkthrough that lists the Extension Attributes jamf-cli already collected and
+/// lets the operator adopt selected ones into `config.yaml`. A CSV export the operator
+/// picks can be imported once instead; it only proposes, and is not read again.
 ///
 /// Adoption is additive (never deletes config) and explicit (the user selects
 /// which EAs to adopt — no silent auto-write).
@@ -14,7 +14,13 @@ struct CSVEAWalkthroughSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorSchemeContrast) private var contrast
 
-    @State private var proposals: [ScaffoldService.ProposedEA] = []
+    @State private var proposals: [ProposedEA] = []
+    /// Proposal id → values for the dry-run parse check (a CSV column, or collected values).
+    @State private var valueSamples: [String: [String]] = [:]
+    /// Proposal id → caption for a collected EA that has no values yet.
+    @State private var rowNotes: [String: String] = [:]
+    /// Collected EAs left out because `config.yaml` already tracks them.
+    @State private var alreadyTrackedCount = 0
     @State private var selected: Set<String> = []
     /// Proposal ids the operator chose to adopt as a Security Agent rather than a
     /// Custom EA. Default (absent) is Custom EA.
@@ -25,19 +31,16 @@ struct CSVEAWalkthroughSheet: View {
     /// Per-proposal type override, defaulting to the detected guess. Drives both
     /// adoption and the dry-run parse-health verdict.
     @State private var typeOverrides: [String: CustomEAConfig.EAType] = [:]
-    @State private var sourceName: String?
+    /// The CSV the operator imported; nil while showing the collected EAs.
+    @State private var importedCSVName: String?
     @State private var loaded = false
     @State private var adoptError: String?
     @State private var confirmation: String?
     /// The save left notes (a block left as typed, a copy made), so the banner warns.
     @State private var confirmationHasNotes = false
-    /// Full sample rows from the source CSV, kept for the dry-run parse check —
-    /// `proposals` only carries one sample value per column.
-    @State private var csvSample: ScaffoldService.CSVSample?
-
     private enum AdoptTarget: Hashable { case customEA, securityAgent }
 
-    private var selectedProposals: [ScaffoldService.ProposedEA] {
+    private var selectedProposals: [ProposedEA] {
         proposals.filter { selected.contains($0.id) }
     }
 
@@ -84,12 +87,15 @@ struct CSVEAWalkthroughSheet: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Kicker(text: "CSV · Extension Attributes", tone: .teal)
-            Text("Set up EA tracking")
+            Kicker(
+                text: importedCSVName == nil
+                    ? "Collected data · Extension Attributes" : "CSV import · Extension Attributes",
+                tone: .teal)
+            Text(importedCSVName == nil ? "Adopt EAs" : "Set up EA tracking")
                 .font(Theme.Fonts.serif(22, weight: .bold))
                 .foregroundStyle(Theme.Text.primary)
-            if let sourceName {
-                Mono(text: sourceName)
+            if let importedCSVName {
+                Mono(text: importedCSVName)
             }
         }
     }
@@ -97,20 +103,25 @@ struct CSVEAWalkthroughSheet: View {
     private var guidanceCard: some View {
         Card(padding: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: "Before You Export")
-                Text("When exporting from Jamf Pro, add your Extension Attribute "
-                    + "columns to the export. Built-in inventory fields alone won't "
-                    + "include EA values — pick the EAs you track (compliance state, "
-                    + "agent versions, certificate dates) under \"Export-only fields\".")
+                SectionHeader(
+                    title: importedCSVName == nil ? "From Collected Data" : "Before You Export")
+                Text(importedCSVName == nil
+                    ? "These are the Extension Attributes jamf-cli collected on its last "
+                        + "refresh. Select the ones to track and adopt them into config.yaml "
+                        + "— your existing settings are preserved."
+                    : "The candidates below were detected in the CSV you picked. Add your "
+                        + "Extension Attribute columns to the Jamf Pro export under "
+                        + "\"Export-only fields\", then select the ones to track. The file "
+                        + "is read once; config.yaml is all that is kept.")
                     .font(.footnote)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                     .fixedSize(horizontal: false, vertical: true)
-                Text("The candidates below were detected in your newest inbox CSV. "
-                    + "Select the ones to track and adopt them into config.yaml — "
-                    + "your existing settings are preserved.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .fixedSize(horizontal: false, vertical: true)
+                if importedCSVName == nil {
+                    PNPButton(
+                        title: "Import from a CSV export (one time)",
+                        icon: "tablecells.badge.ellipsis", style: .ghost, size: .sm
+                    ) { pickCSV() }
+                }
             }
         }
     }
@@ -135,7 +146,7 @@ struct CSVEAWalkthroughSheet: View {
         }
     }
 
-    private func candidateRow(_ ea: ScaffoldService.ProposedEA) -> some View {
+    private func candidateRow(_ ea: ProposedEA) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
                 toggle(ea.id)
@@ -150,7 +161,12 @@ struct CSVEAWalkthroughSheet: View {
                         Text(ea.name)
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(Theme.Text.primary)
-                        Mono(text: ea.column, size: 10.5)
+                        if importedCSVName != nil { Mono(text: ea.column, size: 10.5) }
+                        if let note = rowNotes[ea.id] {
+                            Text(note)
+                                .font(.caption2)
+                                .foregroundStyle(Theme.Text.tertiary(contrast))
+                        }
                         if !ea.sampleValue.isEmpty {
                             Text("e.g. \(ea.sampleValue)")
                                 .font(.caption2)
@@ -234,7 +250,7 @@ struct CSVEAWalkthroughSheet: View {
     }
 
     /// Custom EA (default) vs Security Agent for a proposal.
-    private func targetBinding(_ ea: ScaffoldService.ProposedEA) -> Binding<AdoptTarget> {
+    private func targetBinding(_ ea: ProposedEA) -> Binding<AdoptTarget> {
         Binding(
             get: { agentTargets.contains(ea.id) ? .securityAgent : .customEA },
             set: { newValue in
@@ -246,7 +262,7 @@ struct CSVEAWalkthroughSheet: View {
     }
 
     /// Connected value for a Security Agent adoption; defaults to the sample value.
-    private func connectedBinding(_ ea: ScaffoldService.ProposedEA) -> Binding<String> {
+    private func connectedBinding(_ ea: ProposedEA) -> Binding<String> {
         Binding(
             get: { connectedValues[ea.id] ?? ea.sampleValue },
             set: { connectedValues[ea.id] = $0 }
@@ -254,7 +270,7 @@ struct CSVEAWalkthroughSheet: View {
     }
 
     /// EA type for a proposal; defaults to `ScaffoldService`'s detected guess.
-    private func typeBinding(_ ea: ScaffoldService.ProposedEA) -> Binding<CustomEAConfig.EAType> {
+    private func typeBinding(_ ea: ProposedEA) -> Binding<CustomEAConfig.EAType> {
         Binding(
             get: { typeOverrides[ea.id] ?? Self.eaType(from: ea.type) },
             set: { typeOverrides[ea.id] = $0 }
@@ -269,23 +285,17 @@ struct CSVEAWalkthroughSheet: View {
     }
 
     /// In-memory dry-run parse verdict for a proposal's chosen type, computed
-    /// from the sample rows already loaded for the walkthrough (cheap — capped
-    /// at `ScaffoldService.readSample`'s default 50-row sample).
+    /// from the values already loaded for the walkthrough (cheap — capped at 50 per EA).
     private func parseHealth(
-        for ea: ScaffoldService.ProposedEA
+        for ea: ProposedEA
     ) -> EAParseHealthService.ColumnHealth? {
-        guard let csvSample, let colIndex = csvSample.headers.firstIndex(of: ea.column) else {
-            return nil
-        }
-        let values = csvSample.rows.compactMap { row in
-            colIndex < row.count ? row[colIndex] : nil
-        }
+        guard let values = valueSamples[ea.id] else { return nil }
         let type = typeOverrides[ea.id] ?? Self.eaType(from: ea.type)
         return EAParseHealthService.assess(column: ea.column, values: values, type: type)
     }
 
     @ViewBuilder
-    private func parseHealthVerdict(for ea: ScaffoldService.ProposedEA) -> some View {
+    private func parseHealthVerdict(for ea: ProposedEA) -> some View {
         if let health = parseHealth(for: ea), let rate = health.parseRate {
             let type = typeOverrides[ea.id] ?? Self.eaType(from: ea.type)
             let pct = Int((rate * 100).rounded())
@@ -321,7 +331,7 @@ struct CSVEAWalkthroughSheet: View {
     private var loadingState: some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
-            Text("Scanning the newest inbox CSV…")
+            Text("Reading the collected Extension Attributes…")
                 .font(.footnote)
                 .foregroundStyle(Theme.Text.tertiary(contrast))
         }
@@ -330,18 +340,26 @@ struct CSVEAWalkthroughSheet: View {
 
     private var noCandidatesState: some View {
         Card(padding: 16) {
-            EmptyStateView(
-                systemImage: "tablecells.badge.ellipsis",
-                title: sourceName == nil
-                    ? "No CSV in the inbox yet."
-                    : "No EA-like columns detected.",
-                message: sourceName == nil
-                    ? "Drop a Jamf Pro export into the csv-inbox folder, then reopen "
-                        + "this guide to detect Extension Attribute columns."
-                    : "This export looks like built-in inventory fields only. Re-export "
+            if importedCSVName != nil {
+                EmptyStateView(
+                    systemImage: "tablecells.badge.ellipsis",
+                    title: "No EA-like columns detected.",
+                    message: "This export looks like built-in inventory fields only. Re-export "
                         + "with your Extension Attribute columns added under "
                         + "\"Export-only fields\"."
-            )
+                )
+            } else {
+                EmptyStateView(
+                    systemImage: "tablecells.badge.ellipsis",
+                    title: alreadyTrackedCount > 0
+                        ? "Every collected EA is already tracked."
+                        : "No Extension Attributes collected yet.",
+                    message: alreadyTrackedCount > 0
+                        ? "All \(alreadyTrackedCount) are in config.yaml."
+                        : "Refresh from the Overview to collect them, or import a CSV "
+                            + "export once."
+                )
+            }
         }
     }
 
@@ -403,28 +421,76 @@ struct CSVEAWalkthroughSheet: View {
 
     private func load() async {
         defer { loaded = true }
-        guard let url = newestInboxCSV() else { return }
-        sourceName = url.lastPathComponent
-        guard let sample = try? ScaffoldService.readSample(from: url) else { return }
-        csvSample = sample
-        let mapped = mappedHeaders(for: sample.headers)
+        guard let dir = try? WorkspacePaths.dataDir(for: profile) else { return }
+        let tracked = trackedColumns()
+        let found = await Task.detached(priority: .utility) {
+            CollectedEACandidates.load(dataDir: dir, tracked: tracked)
+        }.value
+        let open = found.filter { !$0.alreadyTracked }
+        alreadyTrackedCount = found.count - open.count
+        proposals = open.map(\.proposal)
+        valueSamples = Dictionary(uniqueKeysWithValues: open.map { ($0.id, $0.sampleValues) })
+        rowNotes = Dictionary(uniqueKeysWithValues: open.filter(\.hasNoValues).map {
+            ($0.id, "Defined in Jamf Pro; no values collected yet")
+        })
+        selected = Set(open.filter { !$0.hasNoValues && $0.type != "text" }.map(\.id))
+    }
+
+    /// One-time import: the operator picks a CSV export; it proposes columns and is not kept.
+    private func pickCSV() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.prompt = "Import"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in importCSV(url) }
+        }
+    }
+
+    private func importCSV(_ url: URL) {
+        importedCSVName = url.lastPathComponent
+        adoptError = nil
+        confirmation = nil
+        proposals = []
+        valueSamples = [:]
+        rowNotes = [:]
+        selected = []
+        agentTargets = []
+        typeOverrides = [:]
+        guard let sample = try? ScaffoldService.readSample(from: url) else {
+            adoptError = "Couldn't read \(url.lastPathComponent) as a CSV export."
+            return
+        }
         let detected = ScaffoldService.proposeEAs(
             headers: sample.headers,
             sampleRows: sample.rows,
-            mappedHeaders: mapped
+            mappedHeaders: mappedHeaders(for: sample.headers)
         )
         proposals = detected
+        for ea in detected {
+            guard let col = sample.headers.firstIndex(of: ea.column) else { continue }
+            valueSamples[ea.id] = sample.rows.compactMap { $0.count > col ? $0[col] : nil }
+        }
         // Default-select clear EA-looking candidates (non-text guesses).
         selected = Set(detected.filter { $0.type != "text" }.map { $0.id })
+    }
+
+    /// Columns `config.yaml` already tracks as custom EAs or security agents.
+    private func trackedColumns() -> Set<String> {
+        guard let state = try? ConfigService.load(profile: profile).state else { return [] }
+        return Set(state.customEAs.map(\.column) + state.securityAgents.map(\.column))
     }
 
     /// The operator's type pick is what gets adopted — rebuild the proposal
     /// when it differs from the scaffold's guess.
     private func applyingTypeOverride(
-        _ ea: ScaffoldService.ProposedEA
-    ) -> ScaffoldService.ProposedEA {
+        _ ea: ProposedEA
+    ) -> ProposedEA {
         guard let override = typeOverrides[ea.id], override.rawValue != ea.type else { return ea }
-        return ScaffoldService.ProposedEA(
+        return ProposedEA(
             name: ea.name, column: ea.column,
             type: override.rawValue, sampleValue: ea.sampleValue)
     }
@@ -471,27 +537,7 @@ struct CSVEAWalkthroughSheet: View {
         }
     }
 
-    // MARK: - Inbox lookup
-
-    /// Resolve the newest non-archived inbox CSV's URL through the same workspace
-    /// path guard `CSVInboxService` uses. Returns `nil` when none exists.
-    private func newestInboxCSV() -> URL? {
-        let files = CSVInboxService().list(profile: profile)
-            .filter { $0.status != .archived }
-        guard let newest = files.first,
-              let root = WorkspacePathGuard.root(for: profile) else {
-            return nil
-        }
-        let inbox = root.appendingPathComponent("csv-inbox", isDirectory: true)
-        guard let validatedInbox = WorkspacePathGuard.validate(inbox, under: root) else {
-            return nil
-        }
-        let candidate = validatedInbox.appendingPathComponent(
-            newest.name,
-            isDirectory: false
-        )
-        return WorkspacePathGuard.validate(candidate, under: root)
-    }
+    // MARK: - CSV import
 
     /// Headers already mapped to logical columns/compliance fields, so they are
     /// excluded from EA proposals.

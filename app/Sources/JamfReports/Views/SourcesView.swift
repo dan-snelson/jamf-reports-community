@@ -432,9 +432,9 @@ struct SourcesView: View {
                     .help(workspace.demoMode
                           ? DemoData.liveOnlyHelp
                           : "Open the csv-inbox folder where you drop fresh CSV exports.")
-                    // Reads the real inbox's newest CSV and writes config.yaml.
+                    // Lists the collected EAs (or imports a CSV once) and writes config.yaml.
                     PNPButton(
-                        title: "EA tracking guide",
+                        title: "Adopt EAs",
                         icon: "tablecells.badge.ellipsis",
                         style: .ghost,
                         size: .sm
@@ -445,8 +445,8 @@ struct SourcesView: View {
                     .disabled(workspace.demoMode)
                     .help(workspace.demoMode
                           ? DemoData.liveOnlyHelp
-                          : "Detect Extension Attribute columns in your newest CSV and adopt "
-                              + "them into config.yaml.")
+                          : "Pick collected Extension Attributes (or import a CSV once) to "
+                              + "track in config.yaml.")
                 }
                 .padding(.top, 4)
                 TipView(SourcesTips.eaTracking)
@@ -771,7 +771,7 @@ struct SourcesView: View {
             title: "No CSV files in the inbox.",
             message: "Drop Jamf Pro exports here before running a CSV-assisted report. "
                 + "Add your Extension Attribute columns to the export to track them.",
-            // The walkthrough reads the real inbox and writes config.yaml.
+            // The walkthrough writes config.yaml.
             primaryAction: workspace.demoMode ? nil : EmptyStateAction(
                 label: "Set up EA tracking",
                 icon: "tablecells.badge.ellipsis",

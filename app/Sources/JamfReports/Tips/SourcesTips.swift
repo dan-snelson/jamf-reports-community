@@ -21,12 +21,12 @@ struct ConnectionHealthTip: Tip {
     var options: [TipOption] { [Tips.MaxDisplayCount(3)] }
 }
 
-/// Anchored to the "EA tracking guide" button.
+/// Anchored to the "Adopt EAs" button.
 struct EATrackingTip: Tip {
     var title: Text { Text("Bring in custom EAs") }
 
     var message: Text? {
-        Text("Detect Extension Attribute columns in your newest CSV and adopt "
+        Text("Pick the Extension Attributes jamf-cli already collected and adopt "
             + "them as tracked fields — no manual config editing required.")
     }
 

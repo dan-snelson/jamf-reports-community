@@ -23,6 +23,16 @@ struct BackupProductResult: Sendable, Hashable {
 
     var objectTotal: Int { objectCounts.values.reduce(0, +) }
 
+    /// A count a manifest may hold: a whole number from 0 to `Int32.max`, as the Platform count
+    /// checks read one. `manifest.json` sits in a folder a peer can write, and a larger value
+    /// would trap `objectTotal`'s sum.
+    static func manifestCounts(_ raw: Any?) -> [String: Int] {
+        (raw as? [String: Any] ?? [:]).compactMapValues { value in
+            guard let count = value as? Int, (0...Int(Int32.max)).contains(count) else { return nil }
+            return count
+        }
+    }
+
     /// One sentence for the Backups screen about this Jamf Protect part.
     var protectSummary: String {
         let counts = objectCounts.sorted { $0.key < $1.key }
@@ -75,7 +85,7 @@ struct BackupProductResult: Sendable, Hashable {
             state: state,
             exitCode: (object["exit_code"] as? Int).map { Int32(clamping: $0) },
             reason: object["reason"] as? String,
-            objectCounts: object["object_counts"] as? [String: Int] ?? [:],
+            objectCounts: Self.manifestCounts(object["object_counts"]),
             hasFailuresFile: object["failures_file"] is String)
     }
 

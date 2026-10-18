@@ -133,6 +133,8 @@ versions in this repository map to git tags.
   used, instead of writing to the working directory or the temporary folder. A refused
   `archive_dir` skips archiving old runs, with one warning, instead of moving them into a folder
   beside the reports. (#284)
+- A backup manifest with an out-of-range Jamf Protect object count no longer crashes the Backups
+  screen. A count that is not a whole number from 0 to 2,147,483,647 is ignored. (#284)
 
 ## [2.10.1] - 2026-10-17
 

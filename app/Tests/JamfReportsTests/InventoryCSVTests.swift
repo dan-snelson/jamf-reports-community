@@ -87,22 +87,6 @@ final class InventoryCSVTests: XCTestCase {
         XCTAssertTrue(warnings.all.isEmpty)
     }
 
-    func testDevicesInventoryDoesNotPickALinkToAFileInsideTheWorkspace() throws {
-        let (profile, root) = try makeWorkspace()
-        let target = root.appendingPathComponent("elsewhere.csv")
-        try writeCSV(to: target)
-        try fileManager.createSymbolicLink(
-            at: try inboxURL(root).appendingPathComponent("link.csv"), withDestinationURL: target)
-
-        let snapshot = DeviceInventoryService.load(profile: profile, demoMode: false)
-
-        XCTAssertTrue(snapshot.devices.isEmpty)
-        XCTAssertFalse(snapshot.sourceFiles.contains("link.csv"))
-        XCTAssertTrue(
-            snapshot.warnings.contains { $0.contains("link.csv") && $0.contains("symbolic link") },
-            "\(snapshot.warnings)")
-    }
-
     // MARK: - Reading
 
     func testReadRefusesALinkAndAnOverCapFileAndReadsANormalOne() throws {

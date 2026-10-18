@@ -409,7 +409,6 @@ enum DemoData {
             firewall: "Enabled",
             gatekeeper: "Enabled",
             bootstrapToken: "Escrowed",
-            diskUsage: failedRules > 30 ? "91%" : "68%",
             failedRules: failedRules,
             patchFailures: patchFailures,
             source: "demo"

@@ -276,8 +276,7 @@ enum OverviewLiveDataLoader {
         data.recentDevices = recentDevices(inventory.devices, limit: recentLimit).map { record in
             RecentDeviceRow(
                 record: record,
-                failedRules: failedRules(
-                    for: record, eaCounts: counts, baselineConfigured: baseline != nil),
+                failedRules: failedRules(for: record, eaCounts: counts),
                 policy: inventory.securityPolicy)
         }
     }
@@ -420,18 +419,12 @@ enum OverviewLiveDataLoader {
         return counts
     }
 
-    /// The extension attribute is the jamf-cli source; a CSV's count is used
-    /// only when compliance is configured, since without that column every
-    /// CSV row reads 0 and would print as a pass.
-    static func failedRules(
-        for record: DeviceInventoryRecord, eaCounts: [String: Int], baselineConfigured: Bool
-    ) -> Int? {
+    /// The extension attribute's count for the Mac, nil when the attribute has none.
+    static func failedRules(for record: DeviceInventoryRecord, eaCounts: [String: Int]) -> Int? {
         let keys = [record.serial, record.jamfID ?? "", record.name]
             .map { $0.lowercased() }
             .filter { !$0.isEmpty }
-        if let count = keys.lazy.compactMap({ eaCounts[$0] }).first { return count }
-        let fromCSV = record.source.lowercased().contains(".csv")
-        return baselineConfigured && fromCSV ? record.failedRules : nil
+        return keys.lazy.compactMap({ eaCounts[$0] }).first
     }
 
     /// Most recent check-in first: fewest days since contact, then the newest

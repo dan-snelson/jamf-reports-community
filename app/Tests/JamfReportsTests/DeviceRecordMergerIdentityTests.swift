@@ -299,18 +299,6 @@ final class DeviceRecordMergerIdentityTests: XCTestCase {
         XCTAssertNil(record.platformID)
     }
 
-    func testCSVRowReadsJSSComputerIDUDIDAndManagementID() {
-        let record = csv([
-            "Computer Name": "FIXTURE-E", "JSS Computer ID": "8", "UDID": "FIXTURE-UDID-8",
-            "Management ID": mgmt("8"),
-        ])
-
-        XCTAssertEqual(record.numericJamfID, "8")
-        XCTAssertEqual(record.udid, "FIXTURE-UDID-8")
-        XCTAssertEqual(record.managementID, mgmt("8"))
-        XCTAssertNil(csv(["Computer Name": "FIXTURE-F"]).udid)
-    }
-
     func testMergeFillsAnIdentifierTheRecordLacked() {
         var merger = merged(csv(["Serial Number": "FXTR0001AA"]))
         merger.upsert(computer(1, "FIXTURE-A", serial: "FXTR0001AA", udid: "FIXTURE-UDID-1"))

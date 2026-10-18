@@ -92,7 +92,9 @@ final class SecurityValueVocabularySurfacesTests: XCTestCase {
         XCTAssertEqual(records.map(\.firewall), ["Pass", "Fail", "Non-Compliant", "Compliant"])
 
         XCTAssertEqual(records.map { $0.securityGapCount(policy: policy) }, [0, 1, 1, 0])
-        XCTAssertEqual(records.map { RiskScoringService.risk(for: $0, policy: policy).level },
+        XCTAssertEqual(records.map {
+            RiskScoringService.risk(for: $0, policy: policy, staleRule: StaleRule(days: 30)).level
+        },
                        [.clean, .low, .low, .clean])
         let snapshot = DeviceInventorySnapshot(
             devices: records, patchTitles: [], sourceFiles: [], warnings: [],

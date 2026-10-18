@@ -231,23 +231,15 @@ final class OverviewLiveDataTests: XCTestCase {
         ])
     }
 
-    func testFailedRulesComeFromTheExtensionAttributeFirst() {
-        var mac = record("mac-1", days: 0, source: "export.csv + computers.json")
-        mac.failedRules = 4
+    func testFailedRulesComeFromTheExtensionAttribute() {
+        let mac = record("mac-1", days: 0)
         let counts = OverviewLiveDataLoader.failureCounts(
             rows: (try? eaRows(#"[{"device": "MAC-1", "ea_name": "Failed Count", "value": 9}]"#))
                 ?? [],
             countColumn: "failed count")
 
-        XCTAssertEqual(OverviewLiveDataLoader.failedRules(
-            for: mac, eaCounts: counts, baselineConfigured: true), 9)
-        XCTAssertEqual(OverviewLiveDataLoader.failedRules(
-            for: mac, eaCounts: [:], baselineConfigured: true), 4, "CSV count as fallback")
-        XCTAssertNil(OverviewLiveDataLoader.failedRules(
-            for: mac, eaCounts: [:], baselineConfigured: false),
-                     "Without a compliance column every CSV row reads 0; that is not a pass")
-        XCTAssertNil(OverviewLiveDataLoader.failedRules(
-            for: record("jamf-only", days: 0), eaCounts: [:], baselineConfigured: true))
+        XCTAssertEqual(OverviewLiveDataLoader.failedRules(for: mac, eaCounts: counts), 9)
+        XCTAssertNil(OverviewLiveDataLoader.failedRules(for: mac, eaCounts: [:]))
     }
 
     func testRecentRowShowsUnknownsAsUnknown() {

@@ -95,9 +95,9 @@ final class OutputDirResolutionTests: XCTestCase {
         try yaml.write(to: configURL, atomically: true, encoding: .utf8)
         let engine = ReportEngine(config: try ConfigLoader.load(from: configURL),
                                   dataDir: workspace.appendingPathComponent("jamf-cli-data"))
-        let url = engine.resolveOutputURL(stem: "report", profile: profile,
+        let url = try engine.resolveOutputURL(stem: "report", profile: profile,
                                           onLine: { lines.add($0.text) })
-        try await engine.generate(csvURL: nil, outputURL: url, template: ComplianceTemplate(),
+        try await engine.generate(outputURL: url, template: ComplianceTemplate(),
                                   locateJamfCLI: { nil })
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
         return (url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path,

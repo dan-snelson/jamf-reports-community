@@ -186,7 +186,7 @@ struct MergeRange: Sendable {
 /// All operations are append-only; the final XML is emitted by `Workbook.finalize()`.
 ///
 /// Thread safety: `@unchecked Sendable` is declared so that dashboard structs
-/// (`CoreDashboard`, `CSVDashboard`, `SchoolDashboard`) — which hold a `Workbook` and
+/// (`CoreDashboard`, `SchoolDashboard`) — which hold a `Workbook` and
 /// must themselves be `Sendable` for Swift 6 strict concurrency — can compile without
 /// error. This class is NOT safe for concurrent mutation. All sheet writes within a
 /// single `Workbook` must be serialized on one task or actor. Generating multiple
@@ -276,7 +276,7 @@ final class Worksheet: @unchecked Sendable {
 /// ```
 ///
 /// Thread safety: `@unchecked Sendable` is declared so that dashboard structs
-/// (`CoreDashboard`, `CSVDashboard`, `SchoolDashboard`) — which hold a `Workbook` and
+/// (`CoreDashboard`, `SchoolDashboard`) — which hold a `Workbook` and
 /// must themselves be `Sendable` for Swift 6 strict concurrency — can compile without
 /// error. This class is NOT safe for concurrent mutation. All sheet writes within a
 /// single `Workbook` must be serialized on one task or actor. Generating multiple
@@ -297,6 +297,8 @@ final class Workbook: @unchecked Sendable {
         sheets.append(ws)
         return ws
     }
+
+    var firstSheet: Worksheet? { sheets.first }
 
     /// Return the first worksheet whose name matches `name` (exact, after sanitization).
     func sheet(named name: String) -> Worksheet? {

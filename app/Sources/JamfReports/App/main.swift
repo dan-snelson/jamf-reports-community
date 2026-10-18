@@ -382,31 +382,9 @@ private func scheduledRunSingleBody(
         }
     }
 
-    // PR-21: csv-assisted hard-fails when csv-inbox/ is empty. Resolve up
-    // front so we don't run an expensive collect just to fail at generate.
-    let resolvedCSV: URL?
-    if mode == .csvAssisted {
-        let picked = CLIBridge.newestCSV(in: profile) { warning in
-            print(warning)
-            recorder?.record(warning)
-        }
-        guard let csv = picked else {
-            let message = "[error] csv-assisted requires a CSV in csv-inbox/ — none found for '\(profile)'"
-            fputs(message + "\n", stderr)
-            recorder?.record(message)
-            recorder?.finish(exitCode: 1)
-            return 1
-        }
-        resolvedCSV = csv
-    } else if mode == .jamfCLIFull {
-        resolvedCSV = nil  // jamf-cli-full is the no-CSV path
-    } else {
-        resolvedCSV = nil
-    }
-
     do {
         // jamf-cli-only generates from cache only — no collect, no fresh API calls.
-        // The other three modes all need fresh snapshots.
+        // The other modes all need fresh snapshots.
         if mode != .jamfCLIOnly {
             // PR-23 T-20: the schedule's plist pins the tier set via
             // --tiers. When present, it wins — it's the operator's choice
@@ -502,26 +480,17 @@ private func scheduledRunSingleBody(
         defer { if holdsGenerateClaim { SharedWorkspace.release(profile: profile) } }
 
         let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
-        let outputURL = engine.resolveOutputURL(stem: "report", profile: profile, onLine: onLine)
+        let outputURL = try engine.resolveOutputURL(
+            stem: "report", profile: profile, onLine: onLine)
         // onLine only carries CLIBridge.LogLine progress during generate; per-sheet
         // [fail] lines are raw `print` calls in SheetRegistry and bypass both onLine
         // and the recorder — they reach the console/launchd log only, not Run History.
         let template = FullInstanceTemplate()
         let failures = try await engine.generate(
-            csvURL: resolvedCSV,
             outputURL: outputURL,
             template: template,
             onLine: onLine
         )
-        if let csv = resolvedCSV {
-            do {
-                try CSVInboxService.markConsumed(csv, profile: profile)
-            } catch {
-                let warning = "[warn] \(error.localizedDescription)"
-                print(warning)
-                recorder?.record(warning)
-            }
-        }
         if !failures.isEmpty {
             let partialMsg = partialRunMarker(sheetFailures: failures.count)
             recorder?.record(partialMsg)
@@ -744,8 +713,7 @@ func runCheck(profile: String) -> Int32 {
         }
 
         // The checks above only prove the file parses. Everything an operator
-        // actually gets wrong — column mappings that no longer match their CSV,
-        // baselines pointing at absent EAs, malformed alert rules, a workspace
+        // actually gets wrong — baselines pointing at absent EAs, malformed alert rules, a workspace
         // on a shared folder with no coordination — lives in the Config Doctor,
         // which the GUI has surfaced since 2.3.0 while `check` did not. Same
         // report, same rules, one implementation.

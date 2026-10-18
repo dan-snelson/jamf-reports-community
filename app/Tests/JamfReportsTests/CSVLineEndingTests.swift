@@ -4,7 +4,7 @@ import XCTest
 
 /// Swift reads "\r\n" as ONE Character that equals neither "\r" nor "\n", so a parser that
 /// walks Characters saw a CSV saved by Excel or Windows as a single row with no records, and
-/// the csv-assisted report wrote empty CSV sheets with exit 0. Both CSV parsers, one test
+/// the report wrote empty CSV sheets with exit 0. Both CSV parsers, one test
 /// per line-ending shape.
 final class CSVLineEndingTests: XCTestCase {
 

@@ -107,7 +107,7 @@ extension CoreDashboard {
         func section(
             _ title: String, note: String? = nil, _ headers: [String], _ cells: [[String]]
         ) {
-            row = FleetDriftWriter.writeSectionWithNote(
+            row = Self.writeSectionWithNote(
                 ws: ws, row: row, title: title, note: note, headers: headers, dataRows: cells)
         }
         func listing(_ mac: ComputerDates) -> [String] {
@@ -137,5 +137,37 @@ extension CoreDashboard {
             [$0.current.name ?? "", $0.current.serial ?? "",
              $0.prior.osVersion ?? "", $0.current.osVersion ?? ""]
         })
+    }
+
+    @discardableResult
+    private static func writeSectionWithNote(
+        ws: Worksheet,
+        row: Int,
+        title: String,
+        note: String?,
+        headers: [String],
+        dataRows: [[String]]
+    ) -> Int {
+        var r = row
+        ws.write(title, row: r, col: 0, format: .header)
+        if let note { ws.write(note, row: r, col: 1, format: .subtitle) }
+        r += 1
+        for (colIdx, header) in headers.enumerated() {
+            ws.write(header, row: r, col: colIdx, format: .header)
+        }
+        r += 1
+        if dataRows.isEmpty {
+            ws.write("No changes", row: r, col: 0, format: .cell)
+            r += 1
+        } else {
+            for cells in dataRows {
+                for (colIdx, cell) in cells.enumerated() {
+                    ws.write(cell, row: r, col: colIdx, format: .cell)
+                }
+                r += 1
+            }
+        }
+        r += 1  // blank separator row
+        return r
     }
 }

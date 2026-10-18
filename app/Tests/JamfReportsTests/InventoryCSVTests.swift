@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import JamfReports
 
-/// The CSV a csv-assisted run reads comes from `csv-inbox/`, which another Mac can write on a
+/// The CSV an onboarding or Devices read takes from `csv-inbox/`, which another Mac can write on a
 /// shared workspace: a link, FIFO or directory named `*.csv` is never picked, and a read refuses
 /// a link and stops at a size cap.
 final class InventoryCSVTests: XCTestCase {
@@ -132,92 +132,6 @@ final class InventoryCSVTests: XCTestCase {
 
         XCTAssertNoThrow(try BoundedFile.read(link, limit: 1_000))
         XCTAssertThrowsError(try BoundedFile.read(link, limit: 1_000, followSymlinks: false))
-    }
-
-    // MARK: - The run
-
-    func testGenerateFailsNamingAnOverCapCSVAndWritesNoWorkbook() async throws {
-        let (profile, root) = try makeWorkspace()
-        let csv = root.appendingPathComponent("big.csv")
-        try writeCSV(to: csv)
-        var engine = ReportEngine(
-            config: ReportConfig(), dataDir: root.appendingPathComponent("data"),
-            profile: profile)
-        engine.csvByteLimit = 8
-        let out = root.appendingPathComponent("out.xlsx")
-
-        do {
-            try await engine.generate(csvURL: csv, outputURL: out, locateJamfCLI: { nil })
-            XCTFail("an over-cap CSV must fail the run")
-        } catch let error as InventoryCSV.ReadError {
-            XCTAssertEqual(error.fileName, "big.csv")
-            XCTAssertTrue(error.localizedDescription.contains("big.csv"))
-            XCTAssertTrue(error.localizedDescription.contains("larger than"))
-        }
-        XCTAssertFalse(fileManager.fileExists(atPath: out.path))
-    }
-
-    func testGenerateFailsOnALinkedCSVInsteadOfReadingItsTarget() async throws {
-        let (profile, root) = try makeWorkspace()
-        let target = root.appendingPathComponent("real.csv")
-        try writeCSV(to: target)
-        let link = root.appendingPathComponent("linked.csv")
-        try fileManager.createSymbolicLink(at: link, withDestinationURL: target)
-        let engine = ReportEngine(
-            config: ReportConfig(), dataDir: root.appendingPathComponent("data"),
-            profile: profile)
-
-        do {
-            try await engine.generate(
-                csvURL: link, outputURL: root.appendingPathComponent("out.xlsx"),
-                locateJamfCLI: { nil })
-            XCTFail("a linked CSV must fail the run")
-        } catch let error as InventoryCSV.ReadError {
-            XCTAssertEqual(error.reason, "a symbolic link")
-        }
-    }
-
-    func testGenerateReadsANormalCSVWithinTheCap() async throws {
-        let (profile, root) = try makeWorkspace()
-        let csv = root.appendingPathComponent("export.csv")
-        try writeCSV(to: csv)
-        let engine = ReportEngine(
-            config: ReportConfig(), dataDir: root.appendingPathComponent("data"),
-            profile: profile)
-
-        do {
-            try await engine.generate(
-                csvURL: csv, outputURL: root.appendingPathComponent("out.xlsx"),
-                locateJamfCLI: { nil })
-        } catch is InventoryCSV.ReadError {
-            XCTFail("a normal CSV within the cap must be read")
-        } catch {
-            // Anything past the read (a config with no column map) is not this test's subject.
-        }
-    }
-
-    func testArchiveDoesNotCopyALinksTargetAndKeepsTheExportDate() throws {
-        let (profile, root) = try makeWorkspace()
-        let target = root.appendingPathComponent("real.csv")
-        try writeCSV(to: target)
-        let link = root.appendingPathComponent("linked.csv")
-        try fileManager.createSymbolicLink(at: link, withDestinationURL: target)
-        let engine = ReportEngine(
-            config: ReportConfig(), dataDir: root.appendingPathComponent("data"),
-            profile: profile)
-        let history = root.appendingPathComponent("snapshots", isDirectory: true)
-
-        engine.archiveCurrentCSV(csvURL: link, historicalDir: history)
-        XCTAssertEqual((try? fileManager.contentsOfDirectory(atPath: history.path)) ?? [], [])
-
-        let old = Date(timeIntervalSince1970: 1_700_000_000)
-        try fileManager.setAttributes([.modificationDate: old], ofItemAtPath: target.path)
-        engine.archiveCurrentCSV(csvURL: target, historicalDir: history)
-        let name = try XCTUnwrap(fileManager.contentsOfDirectory(atPath: history.path).first)
-        let archived = history.appendingPathComponent(name)
-        let attributes = try fileManager.attributesOfItem(atPath: archived.path)
-        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeRegular)
-        XCTAssertEqual(attributes[.modificationDate] as? Date, old)
     }
 
     // MARK: - Helpers

@@ -60,7 +60,7 @@ final class ReportNamingProfileTests: XCTestCase {
 
     /// The folder now comes from the profile's config.yaml, so a profile name must never reach
     /// the real workspaces folder.
-    private func inEmptyWorkspacesRoot(_ body: () -> URL) -> URL {
+    private func inEmptyWorkspacesRoot(_ body: () throws -> URL) rethrows -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("jrc-naming-\(UUID().uuidString)", isDirectory: true)
         let saved = ProcessInfo.processInfo.environment["JRC_TEST_WORKSPACES_ROOT"]
@@ -69,17 +69,19 @@ final class ReportNamingProfileTests: XCTestCase {
             if let saved { setenv("JRC_TEST_WORKSPACES_ROOT", saved, 1) }
             else { unsetenv("JRC_TEST_WORKSPACES_ROOT") }
         }
-        return body()
+        return try body()
     }
 
-    func testResolveOutputURLIncludesProfile() {
+    func testResolveOutputURLIncludesProfile() throws {
         var config = ReportConfig()
         config.output = OutputConfig()
         config.output?.outputDir = "/tmp/reports"
         config.output?.timestampOutputs = true
 
         let engine = ReportEngine(config: config, dataDir: URL(fileURLWithPath: "/tmp"))
-        let url = inEmptyWorkspacesRoot { engine.resolveOutputURL(stem: "report", profile: "prod") }
+        let url = try inEmptyWorkspacesRoot {
+            try engine.resolveOutputURL(stem: "report", profile: "prod")
+        }
 
         XCTAssertTrue(
             url.lastPathComponent.hasPrefix("report_prod_"),
@@ -88,26 +90,28 @@ final class ReportNamingProfileTests: XCTestCase {
         XCTAssertEqual(url.pathExtension, "xlsx")
     }
 
-    func testResolveOutputURLIncludesProfileWithoutTimestamp() {
+    func testResolveOutputURLIncludesProfileWithoutTimestamp() throws {
         var config = ReportConfig()
         config.output = OutputConfig()
         config.output?.outputDir = "/tmp/reports"
         config.output?.timestampOutputs = false
 
         let engine = ReportEngine(config: config, dataDir: URL(fileURLWithPath: "/tmp"))
-        let url = inEmptyWorkspacesRoot { engine.resolveOutputURL(stem: "report", profile: "prod") }
+        let url = try inEmptyWorkspacesRoot {
+            try engine.resolveOutputURL(stem: "report", profile: "prod")
+        }
 
         XCTAssertEqual(url.lastPathComponent, "report_prod.xlsx")
     }
 
-    func testResolveOutputURLWithoutProfileKeepsLegacyName() {
+    func testResolveOutputURLWithoutProfileKeepsLegacyName() throws {
         var config = ReportConfig()
         config.output = OutputConfig()
         config.output?.outputDir = "/tmp/reports"
         config.output?.timestampOutputs = true
 
         let engine = ReportEngine(config: config, dataDir: URL(fileURLWithPath: "/tmp"))
-        let url = engine.resolveOutputURL(stem: "report")
+        let url = try engine.resolveOutputURL(stem: "report")
 
         XCTAssertTrue(
             url.lastPathComponent.hasPrefix("report_2"),
@@ -129,14 +133,14 @@ final class ReportNamingProfileTests: XCTestCase {
 
     /// The workbook writers name their file through `resolveOutputURL`, which appends the
     /// profile itself; that name starts with the format's stem.
-    func testTheEngineNamesAWorkbookWithItsStem() {
+    func testTheEngineNamesAWorkbookWithItsStem() throws {
         var config = ReportConfig()
         config.output = OutputConfig()
         config.output?.outputDir = "/tmp/reports"
         let engine = ReportEngine(config: config, dataDir: URL(fileURLWithPath: "/tmp"))
         for school in [false, true] {
-            let url = inEmptyWorkspacesRoot {
-                engine.resolveOutputURL(
+            let url = try inEmptyWorkspacesRoot {
+                try engine.resolveOutputURL(
                     stem: ExportNaming.reportKind(for: .xlsx, schoolMode: school),
                     profile: "prod")
             }
@@ -165,7 +169,8 @@ final class WorkbookTimestampTests: XCTestCase {
         config.output?.timestampOutputs = true
         let engine = ReportEngine(config: config, dataDir: URL(fileURLWithPath: "/tmp"))
 
-        let name = engine.resolveOutputURL(stem: "report").deletingPathExtension().lastPathComponent
+        let name = try engine.resolveOutputURL(stem: "report").deletingPathExtension()
+            .lastPathComponent
         let stamp = String(name.dropFirst("report_".count))
 
         // Read back as UTC, the stamp is now: the example and the file agree on the zone.

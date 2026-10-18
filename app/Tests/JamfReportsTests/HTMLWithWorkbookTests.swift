@@ -79,8 +79,8 @@ final class HTMLWithWorkbookTests: XCTestCase {
         try await withHTMLWorkbookFixture { fixture in
             let engine = try fixture.engine(config: withWorkbookOn)
             let lines = HTMLWorkbookLines()
-            let workbook = engine.resolveOutputURL(stem: "report", profile: fixture.profile)
-            try await engine.generate(csvURL: nil, outputURL: workbook, locateJamfCLI: { nil })
+            let workbook = try engine.resolveOutputURL(stem: "report", profile: fixture.profile)
+            try await engine.generate(outputURL: workbook, locateJamfCLI: { nil })
             let page = await engine.writeHTMLWithWorkbook(
                 besideWorkbook: workbook, template: FullInstanceTemplate(), onLine: lines.add)
 
@@ -104,8 +104,8 @@ final class HTMLWithWorkbookTests: XCTestCase {
                      "html:\n  track_history: true\n", "html:\n  with_workbook: maybe\n"] {
             try await withHTMLWorkbookFixture { fixture in
                 let engine = try fixture.engine(config: yaml)
-                let workbook = engine.resolveOutputURL(stem: "report", profile: fixture.profile)
-                try await engine.generate(csvURL: nil, outputURL: workbook, locateJamfCLI: { nil })
+                let workbook = try engine.resolveOutputURL(stem: "report", profile: fixture.profile)
+                try await engine.generate(outputURL: workbook, locateJamfCLI: { nil })
                 let page = await engine.writeHTMLWithWorkbook(
                     besideWorkbook: workbook, template: FullInstanceTemplate())
 
@@ -122,12 +122,12 @@ final class HTMLWithWorkbookTests: XCTestCase {
         try await withHTMLWorkbookFixture { fixture in
             let engine = try fixture.engine(
                 config: "output:\n  timestamp_outputs: false\n" + withWorkbookOn)
-            let workbook = engine.resolveOutputURL(stem: "report", profile: fixture.profile)
+            let workbook = try engine.resolveOutputURL(stem: "report", profile: fixture.profile)
             let blocked = workbook.deletingPathExtension().appendingPathExtension("html")
             try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: true)
             try Data("x".utf8).write(to: blocked.appendingPathComponent("held"))
             let lines = HTMLWorkbookLines()
-            try await engine.generate(csvURL: nil, outputURL: workbook, locateJamfCLI: { nil })
+            try await engine.generate(outputURL: workbook, locateJamfCLI: { nil })
 
             let page = await engine.writeHTMLWithWorkbook(
                 besideWorkbook: workbook, template: FullInstanceTemplate(), onLine: lines.add)

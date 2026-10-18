@@ -28,8 +28,8 @@ The native SwiftUI app (macOS 15+) is a complete reporting console: collect data
 Pro, generate workbooks and HTML reports, schedule unattended runs, and review fleet health
 over time — all from a GUI.
 
-It works from a Jamf Pro CSV export, live `jamf-cli` data, or cached snapshots — whatever
-you have. A guided first run gets you from a blank Mac to a first report.
+It works from live `jamf-cli` data or cached snapshots. A guided first run gets you from a
+blank Mac to a first report.
 
 ### Dashboards
 
@@ -115,7 +115,7 @@ config, schedules, and generated reports, switchable from the sidebar.
 ### Requirements and install
 
 macOS 15 or later. [jamf-cli](https://github.com/Jamf-Concepts/jamf-cli) is optional — it
-powers live collection, but the app also works from CSV exports and cached snapshots.
+powers live collection, but the app also works from cached snapshots.
 Minimum supported version is v1.29.0 (older releases from v1.18.0 still run, with a warning),
 and this project currently tracks v1.33.0. The prebuilt `.pkg`/`.dmg`
 are Apple silicon (arm64) only — on an Intel Mac, build from source.

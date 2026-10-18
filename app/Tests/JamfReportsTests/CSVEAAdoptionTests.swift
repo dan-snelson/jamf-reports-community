@@ -29,13 +29,13 @@ final class CSVEAAdoptionTests: XCTestCase {
         )
 
         let proposals = [
-            ScaffoldService.ProposedEA(
+            ProposedEA(
                 name: "Systrack Install Status",
                 column: "SysTrack Install Status",
                 type: "boolean",
                 sampleValue: "Installed"
             ),
-            ScaffoldService.ProposedEA(
+            ProposedEA(
                 name: "Mcafee Agent Version",
                 column: "McAfee Agent Version",
                 type: "version",
@@ -82,9 +82,9 @@ final class CSVEAAdoptionTests: XCTestCase {
             "columns:\n  # names\n  computer_name: Name\n"
                 + "custom_eas:\n  Battery:\n    column: Battery\nsecurity_agents: []\n",
             profile: profile, root: root)
-        let proposal = ScaffoldService.ProposedEA(
+        let proposal = ProposedEA(
             name: "Disk", column: "Disk Free", type: "text", sampleValue: "50")
-        let agent = ScaffoldService.ProposedEA(
+        let agent = ProposedEA(
             name: "Agent", column: "Agent Status", type: "text", sampleValue: "Running")
 
         let result = try ConfigEAAdopter.adopt(
@@ -121,13 +121,13 @@ final class CSVEAAdoptionTests: XCTestCase {
 
         let proposals = [
             // Duplicate column (case-insensitive) — must be skipped.
-            ScaffoldService.ProposedEA(
+            ProposedEA(
                 name: "FileVault Status",
                 column: "filevault 2 - status",
                 type: "boolean",
                 sampleValue: "Encrypted"
             ),
-            ScaffoldService.ProposedEA(
+            ProposedEA(
                 name: "New EA",
                 column: "New EA",
                 type: "text",
@@ -169,10 +169,10 @@ final class CSVEAAdoptionTests: XCTestCase {
         try writeConfig("columns: {}\ncustom_eas: []\nsecurity_agents: []\n",
                         profile: profile, root: root)
 
-        let falcon = ScaffoldService.ProposedEA(
+        let falcon = ProposedEA(
             name: "CrowdStrike Falcon", column: "CrowdStrike Falcon - Status",
             type: "boolean", sampleValue: "Installed")
-        let fileVault = ScaffoldService.ProposedEA(
+        let fileVault = ProposedEA(
             name: "FileVault", column: "FileVault 2 - Status",
             type: "boolean", sampleValue: "Encrypted")
 
@@ -195,7 +195,7 @@ final class CSVEAAdoptionTests: XCTestCase {
         let profile = "ea-adopt-cv-\(UUID().uuidString.lowercased())"
         try writeConfig("columns: {}\nsecurity_agents: []\n", profile: profile, root: root)
 
-        let agent = ScaffoldService.ProposedEA(
+        let agent = ProposedEA(
             name: "Nessus", column: "Nessus - Status", type: "boolean", sampleValue: "Online")
         let result = try ConfigEAAdopter.adopt(
             eaProposals: [], agentProposals: [agent],
@@ -219,7 +219,7 @@ final class CSVEAAdoptionTests: XCTestCase {
             """,
             profile: profile, root: root)
 
-        let dup = ScaffoldService.ProposedEA(
+        let dup = ProposedEA(
             name: "Falcon", column: "crowdstrike falcon - status",
             type: "boolean", sampleValue: "Installed")
         let result = try ConfigEAAdopter.adopt(

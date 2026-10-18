@@ -455,13 +455,11 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
     }
 
     func testEveryFileScaffoldWritesStatesNothing() throws {
-        let result = ScaffoldService.ScaffoldResult(
-            family: .computers, columns: ["computer_name": "Computer Name"],
-            complianceColumns: [:], mobileColumns: [:])
+        let eas = [ProposedEA(name: "Disk", column: "Disk Percent", type: "percentage", sampleValue: "41")]
         try withWorkspacesRoot { root, workspace in
             let url = workspace.appendingPathComponent("config.yaml")
             for write in [
-                { try ScaffoldService.writeConfig(to: url, result: result, profile: "values") },
+                { try ScaffoldService.writeConfig(to: url, eas: eas, profile: "values") },
                 { try ScaffoldService.writeMinimalConfig(to: url, profile: "values") },
             ] {
                 try write()

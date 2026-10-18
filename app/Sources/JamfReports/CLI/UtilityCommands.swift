@@ -37,12 +37,12 @@ struct Backup: AsyncParsableCommand {
 
 struct Scaffold: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Scaffold a config.yaml, from a Jamf Pro CSV export or as a minimal "
-            + "jamf-cli-only config.")
+        abstract: "Scaffold a minimal jamf-cli config.yaml, optionally importing Extension "
+            + "Attributes from a Jamf Pro CSV export once.")
     @Option(help: ArgumentHelp(
-        "Path to a Jamf Pro CSV export. Omit to write a minimal jamf-cli-only config "
-            + "(no column mapping) — the same starting point the GUI's \"Skip for now\" "
-            + "onboarding path writes."
+        "Path to a Jamf Pro CSV export. Its non-built-in columns are written as custom_eas "
+            + "once; no column mapping is written or read. Omit to write the minimal config "
+            + "alone, the same starting point the GUI's workspace step writes."
     )) var csv: String?
     @Option(help: "Output config.yaml path.") var out: String
 
@@ -51,23 +51,21 @@ struct Scaffold: AsyncParsableCommand {
         let outURL = URL(fileURLWithPath: out)
         try FileManager.default.createDirectory(
             at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        // Profile-agnostic: empty slug → `jamf_cli.profile: ""` (matches the old
-        // Python `scaffold`; the user sets the profile when they wire it up). Like
-        // Python's `scaffold`, this OVERWRITES `--out` if it exists — it's an
-        // initial-setup command; the GUI re-scaffold does a non-destructive merge.
-        // The file it replaces is copied aside first.
+        // Profile-agnostic: empty slug → `jamf_cli.profile: ""` (the user sets the profile
+        // when they wire it up). Like Python's `scaffold`, this OVERWRITES `--out` if it
+        // exists — it's an initial-setup command. The file it replaces is copied aside first.
         guard let csv else {
-            // Same shape the GUI onboarding "Skip for now" path writes, and the
-            // same unconditional-overwrite semantics as the CSV branch below.
             try keepCopy(of: outURL)
             try ScaffoldService.writeMinimalConfig(to: outURL, profile: "")
             SharedConfigPin.confirmWrittenConfig(at: outURL)
             print(outURL.path)
             return
         }
-        let result = try ScaffoldService.matchColumns(from: URL(fileURLWithPath: csv), profile: "")
+        let sample = try ScaffoldService.readSample(from: URL(fileURLWithPath: csv))
+        let eas = ScaffoldService.proposeEAs(
+            headers: sample.headers, sampleRows: sample.rows, mappedHeaders: [])
         try keepCopy(of: outURL)
-        try ScaffoldService.writeConfig(to: outURL, result: result, profile: "")
+        try ScaffoldService.writeConfig(to: outURL, eas: eas, profile: "")
         SharedConfigPin.confirmWrittenConfig(at: outURL)
         print(outURL.path)
     }

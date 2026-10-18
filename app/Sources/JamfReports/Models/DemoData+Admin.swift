@@ -280,21 +280,6 @@ extension DemoData {
         "computers", "ea-results", "app-status", "update-status",
     ]
 
-    /// A demo profile's csv-inbox: the export a CSV-assisted schedule runs
-    /// from — meridian-prod's executive report, dropped the morning of its Apr
-    /// 20 run — or nothing for a profile without one.
-    static func inboxFiles(for profile: String) -> [InboxFile] {
-        let needsCSV = scheduledRuns.contains { $0.profile == profile && $0.mode == .csvAssisted }
-        guard needsCSV else { return [] }
-        let name = "meridian-computers-2026-04-20.csv"
-        let dropped = Calendar(identifier: .gregorian).date(from: DateComponents(
-            year: 2026, month: 4, day: 20, hour: 6, minute: 48)) ?? referenceDate
-        return [
-            InboxFile(name: name, relativePath: name, size: FileDisplay.size(638_976),
-                      mtime: dropped, status: .pending),
-        ]
-    }
-
     /// A demo profile's snapshot families: the daily summaries its collects
     /// wrote, the newest by its latest collect. meridian-prod has as many as
     /// its trend history has points, another profile one per collect in its

@@ -2,8 +2,8 @@ import Foundation
 import XCTest
 @testable import JamfReports
 
-/// Unit tests for ScaffoldService — scoring, YAML output, RFC 4180 header parsing,
-/// BOM stripping, and file permissions.
+/// Unit tests for ScaffoldService: the minimal config it writes, the one-time CSV import
+/// (`writeConfig(eas:)`), YAML escaping of CSV-supplied text, header parsing and file permissions.
 final class ScaffoldServiceTests: XCTestCase {
 
     // MARK: - Helpers
@@ -13,200 +13,83 @@ final class ScaffoldServiceTests: XCTestCase {
             .appendingPathComponent("ScaffoldServiceTests-\(name)-\(UUID().uuidString).yaml")
     }
 
-    private func csvURL(headers: [String], bom: Bool = false) throws -> URL {
-        let line = headers.joined(separator: ",")
-        let content = bom ? "\u{FEFF}\(line)\n" : "\(line)\n"
+    private func csvURL(content: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ScaffoldServiceTests-\(UUID().uuidString).csv")
         try content.write(to: url, atomically: true, encoding: .utf8)
         return url
     }
 
-    // MARK: - Scoring: exact match wins
-
-    func test_matchColumns_exactMatch_scores_highest() throws {
-        let url = try csvURL(headers: ["Computer Name", "Serial Number", "Operating System Version"])
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["computer_name"], "Computer Name")
-        XCTAssertEqual(result.columns["serial_number"], "Serial Number")
-        XCTAssertEqual(result.columns["operating_system"], "Operating System Version")
+    private func ea(_ column: String, type: String = "text", sample: String = "") -> ProposedEA {
+        ProposedEA(name: column, column: column, type: type, sampleValue: sample)
     }
 
-    // MARK: - Scoring: exclude pattern suppresses match
+    // MARK: - Minimal config
 
-    func test_matchColumns_exclude_suppressesManagerMatch() throws {
-        // "Managed By" contains the exclude "managed"; "Direct Manager" should win.
-        let url = try csvURL(headers: ["Managed By", "Direct Manager", "Serial Number"])
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        // "Managed By" is excluded for manager (contains "managed").
-        // "Direct Manager" matches via hint "direct manager".
-        XCTAssertEqual(result.columns["manager"], "Direct Manager",
-                       "exclude pattern must suppress 'Managed By' from matching manager")
-    }
-
-    // MARK: - BOM stripping
-
-    func test_matchColumns_stripsUTF8BOM() throws {
-        let url = try csvURL(headers: ["Computer Name", "Serial Number"], bom: true)
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["computer_name"], "Computer Name",
-                       "BOM must be stripped before header matching")
-    }
-
-    // MARK: - Empty CSV throws
-
-    func test_matchColumns_emptyFile_returnsEmptyResult() throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ScaffoldServiceTests-empty-\(UUID().uuidString).csv")
-        try "".write(to: url, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: url) }
-        // Empty file has no headers — result should have no columns, not throw.
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertTrue(result.columns.isEmpty)
-    }
-
-    // MARK: - writeConfig embeds profile slug
-
-    func test_writeConfig_containsProfileSlug() throws {
-        let url = try csvURL(headers: ["Computer Name"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "my-profile")
-        let dest = tempURL(name: "writeConfig")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "my-profile")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-        XCTAssertTrue(written.contains("profile: \"my-profile\""),
-                      "written config must contain the profile slug")
-    }
-
-    // MARK: - writeMinimalConfig all columns empty
-
-    func test_writeMinimalConfig_allColumnsEmpty() throws {
+    func test_writeMinimalConfig_hasNoColumnMappingAndLoads() throws {
         let dest = tempURL(name: "minimal")
         defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeMinimalConfig(to: dest, profile: "test-profile")
+        try ScaffoldService.writeMinimalConfig(to: dest, profile: "my-profile")
         let written = try String(contentsOf: dest, encoding: .utf8)
-        // Every column line should have an empty string value.
-        let columnLines = written.components(separatedBy: "\n")
-            .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("computer_name:")
-                    || $0.trimmingCharacters(in: .whitespaces).hasPrefix("serial_number:")
-                    || $0.trimmingCharacters(in: .whitespaces).hasPrefix("filevault:") }
-        for line in columnLines {
-            XCTAssertTrue(line.hasSuffix("\"\""), "column line must have empty string value: \(line)")
-        }
+        XCTAssertTrue(written.contains("profile: \"my-profile\""))
+        XCTAssertFalse(written.contains("columns"), "no column mapping is written")
+        XCTAssertFalse(written.contains("allow_live_overview"), "a key nothing reads")
+        XCTAssertNoThrow(try ConfigLoader.load(from: dest))
     }
 
-    // MARK: - writeConfig sets 0600 permissions
-
-    func test_writeConfig_setsOwnerOnlyPermissions() throws {
-        let url = try csvURL(headers: ["Computer Name"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
+    func test_writeMinimalConfig_setsOwnerOnlyPermissions() throws {
         let dest = tempURL(name: "perms")
         defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
+        try ScaffoldService.writeMinimalConfig(to: dest, profile: "test")
         let attrs = try FileManager.default.attributesOfItem(atPath: dest.path)
         let perms = (attrs[.posixPermissions] as? NSNumber)?.int16Value
         XCTAssertEqual(perms, 0o600, "config.yaml must be written with 0600 permissions")
     }
 
-    // MARK: - YAML injection: special characters in column names are escaped
+    // MARK: - One-time EA import
 
-    func test_writeConfig_escapesBackslashInColumnName() throws {
-        let url = try csvURL(headers: ["Path\\Column"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        let dest = tempURL(name: "escape-backslash")
+    func test_writeConfig_writesTheProposedEAsAsCustomEAs() throws {
+        let dest = tempURL(name: "eas")
         defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-        // A raw backslash in a YAML double-quoted scalar must be escaped as \\.
-        XCTAssertFalse(written.contains("\"Path\\Column\""),
-                       "unescaped backslash must not appear in YAML output")
+        try ScaffoldService.writeConfig(
+            to: dest,
+            eas: [ea("Boot Drive Percentage Full", type: "percentage"),
+                  ea("Agent Running", type: "boolean", sample: "Yes")],
+            profile: "p")
+        let eas = try XCTUnwrap(ConfigLoader.load(from: dest).customEas)
+        XCTAssertEqual(eas.map(\.column), ["Boot Drive Percentage Full", "Agent Running"])
+        XCTAssertEqual(eas.map(\.type.rawValue), ["percentage", "boolean"])
+        XCTAssertEqual(eas.last?.trueValue, "Yes")
     }
 
-    func test_writeConfig_escapesDoubleQuoteInColumnName() throws {
-        // Build a CSV with a quoted field containing a double-quote (RFC 4180: "").
-        let raw = "\"Name \"\"Pro\"\" Column\",Serial Number\n"
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ScaffoldServiceTests-quote-\(UUID().uuidString).csv")
-        try raw.write(to: url, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        let dest = tempURL(name: "escape-quote")
+    // MARK: - YAML injection: CSV-supplied text is escaped
+
+    func test_writeConfig_escapesBackslashAndQuoteInAColumnName() throws {
+        let dest = tempURL(name: "escape")
         defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
+        try ScaffoldService.writeConfig(
+            to: dest, eas: [ea("Path\\Column"), ea("Name \"Pro\" Column")], profile: "test")
         let written = try String(contentsOf: dest, encoding: .utf8)
-        // Embedded " must become \" in YAML output so the scalar stays valid.
-        XCTAssertTrue(written.contains("\\\""),
-                      "double-quote in column name must be escaped as \\\" in YAML output")
+        XCTAssertFalse(written.contains("\"Path\\Column\""), "unescaped backslash")
+        XCTAssertTrue(written.contains("\\\""), "an embedded quote must be escaped")
     }
 
-    // MARK: - YAML injection: Unicode line separators are escaped
-
-    /// `CharacterSet.newlines` includes U+2028 LINE SEPARATOR, and
-    /// `YAMLCodec`'s parser tokenizes the whole document on `.newlines`
-    /// *before* it ever unescapes a quoted scalar. An unescaped U+2028 inside
-    /// a matched column name therefore splits the written config into extra
-    /// "lines" at parse time — a crafted CSV header can inject a duplicate,
-    /// attacker-controlled top-level key that shadows the real one
-    /// (`value(for:)` returns the first match). This must be impossible
-    /// regardless of the exact replacement text `yamlEscape` chooses.
-    ///
-    /// Constructs `ScaffoldResult` directly rather than routing the header
-    /// through `matchColumns(from:profile:)` — that CSV reader has its own,
-    /// separate `CharacterSet.newlines`-based line-splitting (out of scope
-    /// here) that would truncate a multi-segment payload before it ever
-    /// reached `yamlEscape`. This isolates the vulnerability under test.
-    func test_writeConfig_unicodeLineSeparator_cannotInjectTopLevelKey() throws {
-        let maliciousHeader = "Computer Name\u{2028}output:\u{2028}  output_dir: pwned"
-        let result = ScaffoldService.ScaffoldResult(
-            family: nil,
-            columns: ["computer_name": maliciousHeader],
-            complianceColumns: [:],
-            mobileColumns: [:]
-        )
-
-        let dest = tempURL(name: "unicode-line-separator-injection")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-
-        let document = try YAMLCodec.decode(written)
-        guard case .mapping(let root) = document.root else {
-            return XCTFail("top-level document must decode as a mapping")
-        }
-        let outputEntries = root.entries.filter { $0.key == "output" }
-        XCTAssertEqual(outputEntries.count, 1,
-                       "a U+2028 inside a matched column name must not inject a duplicate "
-                       + "top-level 'output' key")
-        XCTAssertEqual(outputEntries.first?.value.mapping?.value(for: "output_dir")?.stringValue,
-                       "Generated Reports",
-                       "the real output_dir must not be shadowed by injected content")
-    }
-
-    /// Same attack via U+2029 PARAGRAPH SEPARATOR, U+0085 NEXT LINE, U+000B
-    /// VERTICAL TAB, and U+000C FORM FEED — all five are members of
-    /// `CharacterSet.newlines` and must all be neutralized.
-    func test_writeConfig_otherLineSeparatorCharacters_cannotInjectTopLevelKey() throws {
+    /// `CharacterSet.newlines` includes U+2028, and `YAMLCodec` splits the document on it before
+    /// it unescapes a quoted scalar. An unescaped one in a column name would let a crafted CSV
+    /// header inject a top-level key. All five members of the set must be neutralized.
+    func test_writeConfig_lineSeparatorCharacters_cannotInjectTopLevelKey() throws {
         let separators: [(name: String, char: String)] = [
+            ("U+2028 LINE SEPARATOR", "\u{2028}"),
             ("U+2029 PARAGRAPH SEPARATOR", "\u{2029}"),
             ("U+0085 NEXT LINE", "\u{0085}"),
             ("U+000B VERTICAL TAB", "\u{000B}"),
             ("U+000C FORM FEED", "\u{000C}"),
         ]
         for (name, separator) in separators {
-            let maliciousHeader = "Computer Name\(separator)output:\(separator)  output_dir: pwned"
-            let result = ScaffoldService.ScaffoldResult(
-                family: nil,
-                columns: ["computer_name": maliciousHeader],
-                complianceColumns: [:],
-                mobileColumns: [:]
-            )
-
+            let header = "Computer Name\(separator)output:\(separator)  output_dir: pwned"
             let dest = tempURL(name: "line-separator-injection")
             defer { try? FileManager.default.removeItem(at: dest) }
-            try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
+            try ScaffoldService.writeConfig(to: dest, eas: [ea(header)], profile: "test")
             let written = try String(contentsOf: dest, encoding: .utf8)
 
             let document = try YAMLCodec.decode(written)
@@ -217,302 +100,32 @@ final class ScaffoldServiceTests: XCTestCase {
             let outputEntries = root.entries.filter { $0.key == "output" }
             XCTAssertEqual(outputEntries.count, 1,
                            "\(name) must not inject a duplicate top-level 'output' key")
+            XCTAssertEqual(
+                outputEntries.first?.value.mapping?.value(for: "output_dir")?.stringValue,
+                "Generated Reports", "\(name): the real output_dir must not be shadowed")
         }
     }
 
-    // MARK: - Family detection in ScaffoldResult
+    // MARK: - Header parsing
 
-    func test_matchColumns_computerCSV_familyIsComputers() throws {
-        let url = try csvURL(headers: [
-            "Computer Name", "JSS Computer ID", "Operating System Version",
-            "Last Check-in", "Gatekeeper", "System Integrity Protection",
-            "FileVault 2 Status", "Firewall Enabled", "Secure Boot Level",
-            "Processor Type", "Apple Silicon", "Boot Drive Percentage Full",
-        ])
+    func test_readSample_stripsBOMAndReadsQuotedFieldsWithCommas() throws {
+        let url = try csvURL(content: "\u{FEFF}Computer Name,\"Name, with comma\"\nMac-1,x\n")
         defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.family, .computers)
-        XCTAssertFalse(result.columns.isEmpty,
-                       "Computer CSV must produce non-empty columns block")
-        XCTAssertTrue(result.mobileColumns.isEmpty,
-                      "Computer CSV must produce empty mobileColumns block")
+        let sample = try ScaffoldService.readSample(from: url)
+        XCTAssertEqual(sample.headers, ["Computer Name", "Name, with comma"])
+        XCTAssertEqual(sample.rows, [["Mac-1", "x"]])
     }
 
-    func test_matchColumns_mobileCSV_familyIsMobile() throws {
-        let url = try csvURL(headers: [
-            "Display Name", "JSS Mobile Device ID", "Device ID", "Serial Number",
-            "OS Version", "Last Inventory Update", "Email Address", "Model",
-            "Device Family", "Managed", "Supervised", "Jailbreak Detected",
-            "Wi-Fi MAC Address", "Battery Level", "Lost Mode Enabled",
-            "Device Ownership Type", "Passcode Status",
-        ])
+    func test_readSample_emptyFile_hasNoHeaders() throws {
+        let url = try csvURL(content: "")
         defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.family, .mobile)
-        XCTAssertFalse(result.mobileColumns.isEmpty,
-                       "Mobile CSV must produce non-empty mobileColumns block")
-        XCTAssertTrue(result.columns.isEmpty,
-                      "Mobile CSV must produce empty columns block")
-        // Key mobile columns must be correctly mapped.
-        XCTAssertEqual(result.mobileColumns["device_name"], "Display Name")
-        XCTAssertEqual(result.mobileColumns["operating_system"], "OS Version")
-        XCTAssertEqual(result.mobileColumns["serial_number"], "Serial Number")
+        XCTAssertTrue(try ScaffoldService.readSample(from: url).headers.isEmpty)
     }
 
-    func test_matchColumns_computerWithManagedAndSupervised_familyIsComputers() throws {
-        // Jamf Pro 11.28 computer exports include Managed + Supervised columns.
-        // These shared columns must not cause misdetection as .mobile.
-        let url = try csvURL(headers: [
-            "Computer Name", "Apple Silicon", "Firewall Enabled", "JSS Computer ID",
-            "Last Check-in", "Gatekeeper", "System Integrity Protection",
-            "FileVault 2 Status", "Secure Boot Level", "Processor Type",
-            "Boot Drive Percentage Full", "Operating System Version",
-            "Managed", "Supervised",
-        ])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.family, .computers,
-                       "Computer CSV with Managed+Supervised must detect as .computers")
-        XCTAssertTrue(result.mobileColumns.isEmpty,
-                      "Computer CSV must not populate mobileColumns")
-    }
+    // MARK: - Config Doctor's per-field scorer
 
-    func test_matchColumns_ambiguousCSV_familyIsNil() throws {
-        // Headers with no discriminators → family is nil.
-        let url = try csvURL(headers: ["Asset Tag", "Serial Number", "Email Address"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertNil(result.family,
-                     "Headers with no discriminators must return nil family")
-    }
-
-    // MARK: - configYAML writes mobile_columns for mobile export
-
-    func test_writeConfig_mobileCSV_writesMobileColumns() throws {
-        let url = try csvURL(headers: [
-            "Display Name", "JSS Mobile Device ID", "OS Version", "Last Inventory Update",
-            "Email Address", "Model", "Device Family", "Managed", "Supervised",
-            "Jailbreak Detected", "Wi-Fi MAC Address", "Battery Level",
-        ])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        let dest = tempURL(name: "mobile-writeConfig")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-        // mobile_columns block must be present with populated device_name.
-        XCTAssertTrue(written.contains("mobile_columns:"),
-                      "mobile_columns section must be written for mobile export")
-        XCTAssertTrue(written.contains("device_name: \"Display Name\""),
-                      "device_name must be mapped to 'Display Name' in mobile export")
-        // columns block must have empty values.
-        XCTAssertTrue(written.contains("computer_name: \"\""),
-                      "computer_name must be empty for mobile export")
-    }
-
-    func test_writeConfig_computerCSV_writesComputerColumns() throws {
-        let url = try csvURL(headers: [
-            "Computer Name", "Serial Number", "Operating System Version",
-            "Last Check-in", "Gatekeeper", "Firewall Enabled",
-        ])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        let dest = tempURL(name: "computer-writeConfig")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-        XCTAssertTrue(written.contains("computer_name: \"Computer Name\""),
-                      "computer_name must be mapped for computer export")
-        // mobile_columns block must be present but empty.
-        XCTAssertTrue(written.contains("mobile_columns:"),
-                      "mobile_columns section must always be written")
-        XCTAssertTrue(written.contains("device_name: \"\""),
-                      "device_name must be empty for computer export")
-    }
-
-    // MARK: - Exact-match scoring: 200 - hintIndex picks first hint on tie
-
-    func test_matchColumns_exactMatch_firstHintWinsOnTie() throws {
-        // Python uses 200 - hintIndex, so "Last Check-in" (hint index 0) must win
-        // over "Last Inventory Update" (hint index 3) when both are present.
-        let url = try csvURL(headers: [
-            "Last Inventory Update", "Last Check-in", "Computer Name",
-        ])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["last_checkin"], "Last Check-in",
-                       "First hint 'Last Check-in' must win over later hint 'Last Inventory Update'")
-    }
-
-    // MARK: - RFC 4180: quoted field with embedded comma
-
-    func test_matchColumns_rfc4180_quotedFieldWithComma() throws {
-        // CSV: "Name, with comma","Serial Number"
-        let raw = "\"Name, with comma\",\"Serial Number\"\n"
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ScaffoldServiceTests-rfc4180-\(UUID().uuidString).csv")
-        try raw.write(to: url, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        // "Serial Number" is the only recognized field; "Name, with comma" won't match.
-        XCTAssertEqual(result.columns["serial_number"], "Serial Number",
-                       "RFC 4180 quoted field with embedded comma must be parsed correctly")
-        // The field count must be 2, not 3 (a naive split would produce "Name", " with comma", "Serial Number").
-        // We verify this indirectly: computer_name should NOT match "with comma".
-        XCTAssertNotEqual(result.columns["computer_name"], "with comma")
-    }
-
-    // MARK: - Extra inventory columns (hints carried over from the retired engine scaffold)
-
-    /// Logical field, then every header variant the retired `ReportEngine.scaffoldMappings`
-    /// tests proved it detects.
-    private static let extraInventoryHeaders: [(logical: String, headers: [String])] = [
-        ("full_name", ["Full Name", "User Full Name", "FullName"]),
-        ("asset_tag", ["Asset Tag", "AssetTag", "Asset ID"]),
-        ("building", ["Building", "Site Building"]),
-        ("position", ["Position", "Job Title"]),
-        ("last_logged_in_user", ["Last Logged In", "Last User", "Logged In User"]),
-        ("recovery_lock", ["Recovery Lock", "RecoveryLock", "Recovery Lock Enabled"]),
-        ("battery_health", ["Battery Health", "Battery Condition", "Battery Cycle Count"]),
-        ("entra_sso_status", ["Entra SSO", "Azure AD Status", "Entra ID SSO"]),
-    ]
-
-    func test_matchColumns_detectsExtraInventoryColumnVariants() throws {
-        for (logical, headers) in Self.extraInventoryHeaders {
-            for header in headers {
-                let url = try csvURL(headers: [header])
-                defer { try? FileManager.default.removeItem(at: url) }
-                let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-                XCTAssertEqual(result.columns[logical], header,
-                               "\(logical) must match header '\(header)'")
-            }
-        }
-    }
-
-    func test_matchColumns_extraInventoryColumnsDoNotDisplaceCoreColumns() throws {
-        let core = [
-            "Computer Name", "Serial Number", "Operating System Version", "Last Check-in",
-            "Department", "Email Address", "Model",
-        ]
-        let extras = Self.extraInventoryHeaders.compactMap { $0.headers.first }
-        let url = try csvURL(headers: core + extras)
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["computer_name"], "Computer Name")
-        XCTAssertEqual(result.columns["serial_number"], "Serial Number")
-        XCTAssertEqual(result.columns["operating_system"], "Operating System Version")
-        XCTAssertEqual(result.columns["last_checkin"], "Last Check-in")
-        XCTAssertEqual(result.columns["email"], "Email Address")
-        XCTAssertEqual(result.columns["model"], "Model")
-        for (logical, headers) in Self.extraInventoryHeaders {
-            XCTAssertEqual(result.columns[logical], headers.first)
-        }
-    }
-
-    /// "Full Name" also contains computer_name's weak "name" hint. The higher score
-    /// (`matchLogicalFields`: score descending, then logical key alphabetically; one header
-    /// per field) gives the header to full_name, so a user's name is never read as a
-    /// computer name.
-    func test_matchColumns_fullNameGoesToFullNameNotComputerName() throws {
-        let url = try csvURL(headers: ["Full Name"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["full_name"], "Full Name")
-        XCTAssertNil(result.columns["computer_name"])
-
-        let both = try csvURL(headers: ["Full Name", "Computer Name"])
-        defer { try? FileManager.default.removeItem(at: both) }
-        let bothResult = try ScaffoldService.matchColumns(from: both, profile: "test")
-        XCTAssertEqual(bothResult.columns["full_name"], "Full Name")
-        XCTAssertEqual(bothResult.columns["computer_name"], "Computer Name")
-    }
-
-    /// Documents current behaviour, not a goal: hints match as substrings, so the `position` hint
-    /// also takes "Disposition". Narrowing it (word boundaries, an exclude) should change this test
-    /// on purpose.
-    func test_matchColumns_positionHintAlsoMatchesDisposition() throws {
-        let url = try csvURL(headers: ["Disposition"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["position"], "Disposition")
-    }
-
-    func test_writeConfig_writesExtraInventoryColumns() throws {
-        let url = try csvURL(headers: Self.extraInventoryHeaders.compactMap { $0.headers.first })
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        let dest = tempURL(name: "extra-columns")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
-
-        let columns = try XCTUnwrap(ConfigLoader.load(from: dest).columns)
-        XCTAssertEqual(columns.fullName, "Full Name")
-        XCTAssertEqual(columns.assetTag, "Asset Tag")
-        XCTAssertEqual(columns.building, "Building")
-        XCTAssertEqual(columns.position, "Position")
-        XCTAssertEqual(columns.lastLoggedInUser, "Last Logged In")
-        XCTAssertEqual(columns.recoveryLock, "Recovery Lock")
-        XCTAssertEqual(columns.batteryHealth, "Battery Health")
-        XCTAssertEqual(columns.entraSSOStatus, "Entra SSO")
-    }
-
-    func test_writeConfig_leavesUnmatchedOptionalColumnsOut() throws {
-        let url = try csvURL(headers: ["Computer Name", "Building"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        let dest = tempURL(name: "optional-omitted")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-
-        XCTAssertTrue(written.contains("building: \"Building\""))
-        for key in ConfigState.optionalColumnKeys where key != "building" {
-            XCTAssertFalse(written.contains("\(key):"), "\(key) matched nothing: omit it")
-        }
-        // The original columns keep their `key: ""` placeholders.
-        XCTAssertTrue(written.contains("department: \"\""))
-    }
-
-    func test_writeMinimalConfig_writesNoOptionalColumns() throws {
-        let dest = tempURL(name: "minimal-optional")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeMinimalConfig(to: dest, profile: "test")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-
-        for key in ConfigState.optionalColumnKeys {
-            XCTAssertFalse(written.contains("\(key):"), "\(key) must not be written empty")
-        }
-        XCTAssertTrue(written.contains("computer_name: \"\""))
-    }
-
-    // MARK: - Hardware columns: model name, model identifier, architecture
-
-    /// Jamf Pro's computer export names the marketing model "Model" and the hardware
-    /// identifier (`Mac16,6`) "Model Identifier"; the architecture column is "Architecture Type".
-    func test_matchColumns_separatesModelFromModelIdentifier() throws {
-        let url = try csvURL(headers: [
-            "Computer Name", "Model", "Model Identifier", "Architecture Type", "Serial Number",
-        ])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["model"], "Model")
-        XCTAssertEqual(result.columns["model_identifier"], "Model Identifier")
-        XCTAssertEqual(result.columns["architecture"], "Architecture Type")
-    }
-
-    /// An export that carries only the identifier leaves `model` unmapped rather than
-    /// reading the identifier as a marketing name.
-    func test_matchColumns_modelNeverMapsToModelIdentifier() throws {
-        let url = try csvURL(headers: ["Computer Name", "Model Identifier"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertNil(result.columns["model"])
-        XCTAssertEqual(result.columns["model_identifier"], "Model Identifier")
-    }
-
-    /// `matchColumns` hands a header to its best field, which already keeps "Model Identifier"
-    /// from `model`. The per-field scorer (Config Doctor, the EA walkthrough) has no such
-    /// exclusivity, so `model` carries an exclude of its own.
+    /// The per-field scorer (Config Doctor) has no exclusivity, so `model` carries an exclude of
+    /// its own for the identifier header.
     func test_bestColumnMatch_modelIgnoresTheIdentifierHeader() {
         let headers = ["Computer Name", "Model Identifier"]
         XCTAssertNil(ScaffoldService.bestColumnMatch(
@@ -525,84 +138,5 @@ final class ScaffoldServiceTests: XCTestCase {
             ScaffoldService.bestColumnMatch(
                 headers: headers + ["Model"], logical: "model", family: .computers)?.header,
             "Model")
-    }
-
-    /// Older exports and hand-built reports call the architecture column "Architecture".
-    func test_matchColumns_architectureStillMapsTheShortHeader() throws {
-        let url = try csvURL(headers: ["Computer Name", "Architecture"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["architecture"], "Architecture")
-    }
-
-    /// Both headers present: the one Jamf exports wins, whatever order they appear in.
-    func test_matchColumns_architectureTypeBeatsArchitecture() throws {
-        let url = try csvURL(headers: ["Architecture", "Architecture Type", "Computer Name"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        XCTAssertEqual(result.columns["architecture"], "Architecture Type")
-    }
-
-    func test_writeConfig_writesModelIdentifier() throws {
-        let url = try csvURL(headers: ["Computer Name", "Model", "Model Identifier"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        let dest = tempURL(name: "model-identifier")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeConfig(to: dest, result: result, profile: "test")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-        XCTAssertTrue(written.contains("  model: \"Model\""))
-        XCTAssertTrue(written.contains("  model_identifier: \"Model Identifier\""))
-        XCTAssertEqual(
-            try ConfigLoader.load(from: dest).columns?.modelIdentifier, "Model Identifier")
-    }
-
-    func test_writeMinimalConfig_writesAnEmptyModelIdentifier() throws {
-        let dest = tempURL(name: "minimal-model-identifier")
-        defer { try? FileManager.default.removeItem(at: dest) }
-        try ScaffoldService.writeMinimalConfig(to: dest, profile: "test-profile")
-        let written = try String(contentsOf: dest, encoding: .utf8)
-        XCTAssertTrue(written.contains("  model_identifier: \"\""))
-    }
-
-    /// jamf_cli.allow_live_overview was written into every new config and read by nothing.
-    func test_scaffoldedConfigsDoNotWriteAKeyNothingReads() throws {
-        let url = try csvURL(headers: ["Computer Name"])
-        defer { try? FileManager.default.removeItem(at: url) }
-        let result = try ScaffoldService.matchColumns(from: url, profile: "test")
-        let full = tempURL(name: "no-dead-keys-full")
-        let minimal = tempURL(name: "no-dead-keys-minimal")
-        defer {
-            try? FileManager.default.removeItem(at: full)
-            try? FileManager.default.removeItem(at: minimal)
-        }
-        try ScaffoldService.writeConfig(to: full, result: result, profile: "test")
-        try ScaffoldService.writeMinimalConfig(to: minimal, profile: "test")
-
-        for dest in [full, minimal] {
-            let written = try String(contentsOf: dest, encoding: .utf8)
-            XCTAssertTrue(written.contains("use_cached_data: true"), "the jamf_cli block is there")
-            XCTAssertFalse(written.contains("allow_live_overview"), dest.lastPathComponent)
-        }
-    }
-
-    func test_mergeColumns_keepsUserMappingForExtraInventoryColumn() {
-        let (merged, report) = ScaffoldService.mergeColumns(
-            existing: ["building": "Site Code"],
-            detected: ["building": "Building"],
-            csvHeaders: ["Site Code", "Building"])
-        XCTAssertEqual(merged["building"], "Site Code")
-        XCTAssertEqual(report.keptCount, 1)
-        XCTAssertTrue(report.added.isEmpty)
-        XCTAssertTrue(report.repaired.isEmpty)
-    }
-
-    func test_mergeColumns_fillsEmptyExtraInventoryColumn() {
-        let (merged, report) = ScaffoldService.mergeColumns(
-            existing: ["asset_tag": ""],
-            detected: ["asset_tag": "Asset Tag"],
-            csvHeaders: ["Asset Tag"])
-        XCTAssertEqual(merged["asset_tag"], "Asset Tag")
-        XCTAssertEqual(report.added, ["asset_tag"])
     }
 }

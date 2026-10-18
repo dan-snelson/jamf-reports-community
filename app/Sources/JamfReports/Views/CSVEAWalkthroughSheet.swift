@@ -467,7 +467,7 @@ struct CSVEAWalkthroughSheet: View {
         let detected = ScaffoldService.proposeEAs(
             headers: sample.headers,
             sampleRows: sample.rows,
-            mappedHeaders: mappedHeaders(for: sample.headers)
+            mappedHeaders: mappedHeaders()
         )
         proposals = detected
         for ea in detected {
@@ -539,44 +539,13 @@ struct CSVEAWalkthroughSheet: View {
 
     // MARK: - CSV import
 
-    /// Headers already mapped to logical columns/compliance fields, so they are
-    /// excluded from EA proposals.
-    private func mappedHeaders(for headers: [String]) -> Set<String> {
-        guard let loaded = try? ConfigService.load(profile: profile) else {
-            // No config yet — use scaffold's best-guess mapping to avoid proposing
-            // obvious column mappings as EAs.
-            let mapping = (try? scaffoldResult(headers: headers)) ?? [:]
-            return Set(mapping.values)
-        }
-        var mapped = Set(loaded.state.columns.values.filter { !$0.isEmpty })
-        if !loaded.state.failuresCountColumn.isEmpty {
-            mapped.insert(loaded.state.failuresCountColumn)
-        }
-        if !loaded.state.failuresListColumn.isEmpty {
-            mapped.insert(loaded.state.failuresListColumn)
-        }
-        for agent in loaded.state.securityAgents where !agent.column.isEmpty {
-            mapped.insert(agent.column)
-        }
-        // Exclude columns already adopted as custom EAs so a second visit doesn't
-        // re-propose them.
-        for ea in loaded.state.customEAs where !ea.column.isEmpty {
-            mapped.insert(ea.column)
-        }
-        return mapped
-    }
-
-    /// Best-guess header → logical mapping (computer + compliance), used only when
-    /// no config.yaml exists yet.
-    private func scaffoldResult(headers: [String]) throws -> [String: String] {
-        var mapping: [String: String] = [:]
-        for logical in ConfigState.columnKeys {
-            if let match = ScaffoldService.bestColumnMatch(
-                headers: headers, logical: logical, family: nil
-            ) {
-                mapping[logical] = match.header
-            }
-        }
-        return mapping
+    /// Headers config.yaml already tracks (compliance, agents, custom EAs), so a second visit
+    /// does not re-propose them.
+    private func mappedHeaders() -> Set<String> {
+        guard let loaded = try? ConfigService.load(profile: profile) else { return [] }
+        let state = loaded.state
+        let columns = [state.failuresCountColumn, state.failuresListColumn]
+            + state.securityAgents.map(\.column) + state.customEAs.map(\.column)
+        return Set(columns.filter { !$0.isEmpty })
     }
 }

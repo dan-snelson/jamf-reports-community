@@ -107,9 +107,8 @@ final class DemoDataAdminTests: XCTestCase {
 
     // MARK: - Data Sources
 
-    func testProfileWithoutSchedulesHasNoCachesInboxOrFamilies() {
+    func testProfileWithoutSchedulesHasNoCachesOrFamilies() {
         XCTAssertNil(DemoData.cacheDate(for: ["overview"], profile: "meridian-msp"))
-        XCTAssertTrue(DemoData.inboxFiles(for: "meridian-msp").isEmpty)
         XCTAssertTrue(DemoData.snapshotFamilies(for: "meridian-msp").isEmpty)
     }
 
@@ -136,13 +135,6 @@ final class DemoDataAdminTests: XCTestCase {
     func testProtectCacheOnlyWhereTheDailySnapshotRuns() {
         XCTAssertNotNil(DemoData.cacheDate(for: ["protect-overview"], profile: "meridian-prod"))
         XCTAssertNil(DemoData.cacheDate(for: ["protect-overview"], profile: "meridianedu"))
-    }
-
-    func testOnlyTheCSVAssistedProfileHasAnInboxCSV() {
-        let inbox = DemoData.inboxFiles(for: DemoData.org.profile)
-        XCTAssertEqual(inbox.count, 1)
-        XCTAssertTrue(inbox.allSatisfy { $0.mtime <= DemoData.referenceDate })
-        XCTAssertTrue(DemoData.inboxFiles(for: "meridianedu").isEmpty)
     }
 
     func testSummariesFamilyMatchesTheTrendHistory() {

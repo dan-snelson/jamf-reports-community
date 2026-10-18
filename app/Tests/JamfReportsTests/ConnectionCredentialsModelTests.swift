@@ -389,6 +389,27 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         XCTAssertEqual(h.model.clientSecret, "")
     }
 
+    /// A stored ID that could read as a flag, or holds other characters, is never sent to jamf-cli.
+    func testUpdateAllSkipsAStoredIDThatIsNotUsable() async throws {
+        let h = try harness(
+            mode: .updateAll,
+            members: [
+                .init(profile: "acme-prod", scopeID: "env-prod", label: "Prod"),
+                .init(profile: "acme-flag", scopeID: "--insecure", label: "Flag"),
+                .init(profile: "acme-space", scopeID: "env prod", label: "Space"),
+            ])
+        fill(h.model)
+        await h.model.run()
+
+        let registrations = await h.recorder.registrations
+        XCTAssertEqual(registrations.map(\.profile), ["acme-prod"])
+        for row in h.model.rows.dropFirst() {
+            guard case .skipped(let reason) = row.outcome else { return XCTFail("expected a skip") }
+            XCTAssertTrue(reason.contains("cannot be used"), reason)
+            XCTAssertFalse(reason.contains("--insecure"), reason)
+        }
+    }
+
     // MARK: Leaving a connection
 
     func testRemovingAMemberLeavesItsWorkspaceInPlace() throws {

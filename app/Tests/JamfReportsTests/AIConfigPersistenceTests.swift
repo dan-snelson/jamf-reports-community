@@ -99,6 +99,25 @@ final class AIConfigPersistenceTests: XCTestCase {
         XCTAssertEqual(AIConfigLoader.load(profile: profile).isEnabled, true)
     }
 
+    /// Dropping the retired keys copies the file first and says which were removed.
+    func testDroppingRetiredKeysBacksTheFileUpAndNamesThem() throws {
+        let profile = "ai-test-\(UUID().uuidString.lowercased())"
+        let workspace = try makeWorkspace(profile: profile)
+        let configURL = workspace.appendingPathComponent("config.yaml")
+        let original = "ai:\n  enabled: true\n  lock_on_device: true\n"
+            + "  external:\n    provider: x\n"
+        try original.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let saved = try AIConfigWriter.save(AIConfigLoader.load(profile: profile), profile: profile)
+
+        XCTAssertEqual(saved.report.removedRetiredKeys, ["ai.external", "ai.lock_on_device"])
+        let backupName = try XCTUnwrap(saved.report.backupName)
+        XCTAssertTrue(backupName.hasPrefix("config.yaml.bak-"), backupName)
+        let backup = try String(
+            contentsOf: workspace.appendingPathComponent(backupName), encoding: .utf8)
+        XCTAssertEqual(backup, original)
+    }
+
     /// Settings models three keys; one it does not model stays in the block a save rewrites.
     /// The retired `external:` and `lock_on_device` still go (see the test above).
     func testSaveKeepsAKeyTheSettingsPanelDoesNotModel() throws {

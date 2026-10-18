@@ -527,10 +527,18 @@ enum ConfigService {
         let tempURL = url.deletingLastPathComponent()
             .appendingPathComponent(".config.yaml.\(UUID().uuidString).tmp")
         try encoded.write(to: tempURL, atomically: true, encoding: .utf8)
-        if !manager.fileExists(atPath: url.path) {
-            manager.createFile(atPath: url.path, contents: Data())
+        do {
+            if !manager.fileExists(atPath: url.path) {
+                manager.createFile(atPath: url.path, contents: Data())
+            }
+            _ = try manager.replaceItemAt(url, withItemAt: tempURL)
+        } catch {
+            // The temp file holds the unscrubbed text, webhook URL included.
+            do { try manager.removeItem(at: tempURL) } catch {
+                AppLogger.collect.warning("ConfigService: could not remove a temporary config copy")
+            }
+            throw error
         }
-        _ = try manager.replaceItemAt(url, withItemAt: tempURL)
         var stamp = ConfigFileStamp.of(url)
         stamp.digest = ConfigFileStamp.digest(encoded)
         return stamp
@@ -867,8 +875,9 @@ enum ConfigService {
         root.set("platform", value: .mapping(platform))
 
         var output = root.value(for: "output")?.mapping ?? .init(entries: [])
-        output.set("output_dir", value: scalar(state.outputDir))
-        output.set("archive_dir", value: scalar(state.archiveDir))
+        let defaults = ConfigState.defaultState
+        setFolder("output_dir", state.outputDir, default: defaults.outputDir, in: &output)
+        setFolder("archive_dir", state.archiveDir, default: defaults.archiveDir, in: &output)
         output.set("timestamp_outputs", value: .scalar(.bool(state.timestampOutputs)))
         output.set("archive_enabled", value: .scalar(.bool(state.archiveEnabled)))
         setWholeNumbers(state, in: "output", to: &output)
@@ -886,6 +895,18 @@ enum ConfigService {
         root.set("branding", value: .mapping(branding))
 
         document.root = .mapping(root)
+    }
+
+    /// Writes a pinned folder key only when the file already sets it or the value is not the
+    /// default: a key the file never had would read as a changed folder in `SharedConfigPin`.
+    private static func setFolder(
+        _ key: String, _ value: String, default fallback: String,
+        in output: inout YAMLCodec.YAMLMapping
+    ) {
+        let isDefault = value.trimmingCharacters(in: .whitespaces)
+            == fallback.trimmingCharacters(in: .whitespaces)
+        guard output.value(for: key) != nil || !isDefault else { return }
+        output.set(key, value: scalar(value))
     }
 
     /// What `thresholds.stale_basis` holds: a date, a list of dates, or nothing the app reads.

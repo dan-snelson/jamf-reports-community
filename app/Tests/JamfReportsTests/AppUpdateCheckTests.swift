@@ -197,6 +197,38 @@ final class AppUpdateCheckTests: XCTestCase {
         XCTAssertTrue(model(current: "2.10.0", github: github).statusText.hasPrefix("Off."))
     }
 
+    /// A configuration profile can set the key after launch; the next check reads it.
+    func testASwitchTurnedOffAfterLaunchStopsTheNextCheck() async {
+        let github = FakeGitHub(.success(releaseJSON(tag: "v2.10.1")))
+        let updates = model(current: "2.10.0", github: github)
+        XCTAssertTrue(updates.isEnabled)
+
+        defaults.set(false, forKey: AppUpdateCheck.enabledKey)
+        await updates.checkIfDue()
+
+        XCTAssertFalse(updates.isEnabled)
+        XCTAssertEqual(github.requests, 0)
+    }
+
+    /// URLSession's timeout is idle-only; a fetch that never finishes ends at the deadline.
+    func testAFetchThatNeverFinishesFailsAtTheDeadline() async {
+        let hung: AppUpdateCheck.Fetch = { _ in
+            try await Task.sleep(for: .seconds(600))
+            return Data()
+        }
+        let started = Date()
+        let outcome = await AppUpdateCheck.check(current: "2.10.0", fetch: hung, deadline: 0.2)
+        XCTAssertEqual(outcome, .failed(AppUpdateCheck.CheckError.timedOut.reason))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+    }
+
+    func testAFetchThatAnswersInTimeIsNotCutOff() async {
+        let body = releaseJSON(tag: "v2.10.1")
+        let outcome = await AppUpdateCheck.check(
+            current: "2.10.0", fetch: { _ in body }, deadline: 30)
+        XCTAssertEqual(outcome, .available(stable("v2.10.1")))
+    }
+
     func testOnByDefault() {
         XCTAssertTrue(model(current: "2.10.0", github: FakeGitHub(.success(Data()))).isEnabled)
     }

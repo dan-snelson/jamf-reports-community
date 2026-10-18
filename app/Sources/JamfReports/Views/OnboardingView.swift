@@ -1,13 +1,11 @@
 import AppKit
 import SwiftUI
 import TipKit
-import UniformTypeIdentifiers
 
 struct OnboardingView: View {
     @Environment(WorkspaceStore.self) private var workspaceStore
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var flow = OnboardingFlow()
-    @State private var showingCSVImporter = false
     @State private var confirmingStartOver = false
     @State private var isStartingOver = false
     /// Set on first launch only: returns to the chooser, where the path was picked.
@@ -56,32 +54,13 @@ struct OnboardingView: View {
         } message: {
             Text(flow.startOverMessage)
         }
-        .fileImporter(isPresented: $showingCSVImporter, allowedContentTypes: csvTypes) { result in
-            switch result {
-            case .success(let url):
-                let scoped = url.startAccessingSecurityScopedResource()
-                Task {
-                    defer {
-                        if scoped { url.stopAccessingSecurityScopedResource() }
-                    }
-                    await flow.scaffoldCSV(from: url)
-                }
-            case .failure(let error):
-                flow.lastError = error.localizedDescription
-            }
-        }
-    }
-
-    private var csvTypes: [UTType] {
-        [UTType(filenameExtension: "csv") ?? .commaSeparatedText]
     }
 
     private var progressStrip: some View {
         let sequence = flow.stepSequence
         let currentIndex = sequence.firstIndex(of: flow.currentStep) ?? 0
-        // The 8-step Pro strip, named, needs about 920 pt, more than the 800 pt setup column at
-        // any window size, so it always falls to the compact row; the 6-step School strip
-        // stays named on a wide window.
+        // The named Pro strip is the widest and falls to the compact row first; the shorter
+        // School strip stays named on a wide window.
         return ViewThatFits(in: .horizontal) {
             stepRow(sequence, currentIndex: currentIndex, compact: false)
             stepRow(sequence, currentIndex: currentIndex, compact: true)
@@ -97,7 +76,7 @@ struct OnboardingView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "Step \(flow.stepPosition) of \(flow.stepCount): \(flow.label(for: flow.currentStep))"
+            "Step \(flow.stepPosition) of \(flow.stepCount): \(flow.currentStep.label)"
         )
     }
 
@@ -132,7 +111,7 @@ struct OnboardingView: View {
                     .foregroundStyle(current ? Theme.Colors.goldBright : Theme.Text.tertiary(contrast))
             }
             if !compact || current {
-                Text(flow.label(for: step))
+                Text(step.label)
                     .font(.caption)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -155,14 +134,14 @@ struct OnboardingView: View {
                 lineWidth: 0.5
             )
         )
-        .help(flow.label(for: step))
+        .help(step.label)
     }
 
     private var stepHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
             Kicker(
                 text: "Step \(flow.stepPosition) of \(flow.stepCount) - "
-                    + flow.label(for: flow.currentStep),
+                    + flow.currentStep.label,
                 tone: .gold
             )
             Text(headerTitle)
@@ -186,8 +165,6 @@ struct OnboardingView: View {
                 : "Connect to Jamf Pro."
         case .validate: "Validate the profile."
         case .addProducts: "Add more products."
-        case .csvMapping:
-            flow.offersCSVMapping ? "Map your first CSV export." : "Write the workspace config."
         case .firstReport:
             flow.productPath == .school
                 ? "Generate the first report."
@@ -213,10 +190,6 @@ struct OnboardingView: View {
             "jamf-cli validates the saved profile before report setup continues."
         case .addProducts:
             "Optionally connect Jamf Protect. It is skippable — you can add it later from Data Sources. Jamf School uses its own workspace."
-        case .csvMapping:
-            flow.offersCSVMapping
-                ? "CSV imports are accepted from ~/Documents, ~/Downloads, or ~/Desktop. The app's scaffold tool reads the CSV headers and writes the workspace config."
-                : "Jamf School reports come from jamf-cli, so there is no CSV to map. This writes the workspace's config.yaml; the next step connects Jamf School to it."
         case .firstReport:
             flow.productPath == .school
                 ? "The final step runs generate for the new profile and streams output here."
@@ -242,8 +215,6 @@ struct OnboardingView: View {
             validateStep
         case .addProducts:
             addProductsStep
-        case .csvMapping:
-            csvMappingStep
         case .firstReport:
             firstReportStep
         case .schoolConnect:
@@ -309,7 +280,7 @@ struct OnboardingView: View {
                     .background(Theme.Colors.gold.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("A workspace is a local, per-Jamf-instance home for config, snapshots, generated reports, automation logs, and CSV intake.")
+                    Text("A workspace is a local, per-Jamf-instance home for config, snapshots, generated reports, and automation logs.")
                         .font(.title3)
                         .foregroundStyle(Theme.Colors.fg2)
                         .frame(maxWidth: 640, alignment: .leading)
@@ -847,108 +818,6 @@ struct OnboardingView: View {
         }
     }
 
-    @ViewBuilder
-    private var csvMappingStep: some View {
-        if flow.offersCSVMapping {
-            proCSVMappingStep
-        } else {
-            schoolConfigStep
-        }
-    }
-
-    /// The School path's CSV step: no CSV, one button that writes config.yaml.
-    private var schoolConfigStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Card(padding: 22) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "doc.badge.gearshape")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.goldBright)
-                            .frame(width: 40, height: 40)
-                            .background(
-                                Theme.Colors.gold.opacity(0.14),
-                                in: RoundedRectangle(cornerRadius: 8))
-                        Text("Workspace config")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(Theme.Colors.fg)
-                        Spacer()
-                        PNPButton(title: "Write config", icon: "square.and.pencil") {
-                            Task { await flow.skipCSVMapping() }
-                        }
-                        .disabled(flow.isSkippingCSVMapping)
-                    }
-                    if flow.csvMappingSkipped {
-                        Pill(text: "CONFIG WRITTEN", tone: .teal, icon: "checkmark")
-                    }
-                }
-            }
-            logViewer(
-                title: csvLogViewerTitle,
-                lines: flow.csvOutput,
-                exitCode: flow.csvMappingSkipped ? 0 : nil
-            )
-        }
-    }
-
-    private var proCSVMappingStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Card(padding: 22) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "tablecells")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.goldBright)
-                            .frame(width: 40, height: 40)
-                            .background(Theme.Colors.gold.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("First Jamf Pro CSV export")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(Theme.Colors.fg)
-                            Text("Policy: accepted locations are Documents, Downloads, and Desktop.")
-                                .font(.footnote)
-                                .foregroundStyle(Theme.Text.tertiary(contrast))
-                        }
-                        Spacer()
-                        PNPButton(title: "Choose CSV", icon: "folder") {
-                            showingCSVImporter = true
-                        }
-                        .disabled(flow.isScaffoldingCSV || flow.isSkippingCSVMapping)
-                        PNPButton(title: "Skip for now", icon: "forward.fill") {
-                            Task { await flow.skipCSVMapping() }
-                        }
-                        .disabled(flow.isScaffoldingCSV || flow.isSkippingCSVMapping)
-                    }
-
-                    if let selected = flow.selectedCSVURL {
-                        HStack(spacing: 8) {
-                            Image(systemName: flow.csvScaffolded ? "checkmark.circle.fill" : "doc.text")
-                                .foregroundStyle(flow.csvScaffolded ? Theme.Colors.ok : Theme.Colors.fgMuted)
-                            Mono(text: selected.path, size: 11.5, color: Theme.Colors.fg2)
-                        }
-                    }
-
-                    if flow.csvMappingSkipped {
-                        Pill(text: "MINIMAL CONFIG SEEDED", tone: .teal, icon: "checkmark")
-                    }
-                }
-            }
-
-            logViewer(
-                title: csvLogViewerTitle,
-                lines: flow.csvOutput,
-                exitCode: (flow.csvScaffolded || flow.csvMappingSkipped) ? 0 : nil
-            )
-        }
-    }
-
-    private var csvLogViewerTitle: String {
-        if flow.isScaffoldingCSV { return "Scaffold running" }
-        if flow.isSkippingCSVMapping { return "Workspace init running" }
-        if flow.csvMappingSkipped || !flow.offersCSVMapping { return "Workspace init output" }
-        return "Scaffold output"
-    }
-
     private var firstReportStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Card(padding: 18) {
@@ -1154,10 +1023,6 @@ struct OnboardingView: View {
             if flow.isValidatingConnection { "Validating" }
             else { flow.connectionValidated ? "Continue" : "Validate" }
         case .addProducts: "Continue"
-        case .csvMapping:
-            if flow.isScaffoldingCSV { "Mapping" }
-            else if flow.isSkippingCSVMapping { "Seeding" }
-            else { "Continue" }
         case .firstReport: flow.isRunningFirstReport ? "Running" : "Run now"
         case .schoolConnect: flow.schoolConnected ? "Continue" : "Connect School to continue"
         }
@@ -1171,7 +1036,6 @@ struct OnboardingView: View {
         case .authenticate: "checkmark"
         case .validate: flow.connectionValidated ? "arrow.right" : "network.badge.shield.half.filled"
         case .addProducts: "arrow.right"
-        case .csvMapping: "arrow.right"
         case .firstReport: "play.fill"
         case .schoolConnect: flow.schoolConnected ? "arrow.right" : "graduationcap.fill"
         }
@@ -1211,8 +1075,6 @@ struct OnboardingView: View {
                 }
             }
         case .addProducts:
-            flow.nextStep()
-        case .csvMapping:
             flow.nextStep()
         case .schoolConnect:
             // The connection itself is driven by the in-card Connect button;

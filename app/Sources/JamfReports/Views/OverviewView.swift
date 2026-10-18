@@ -1920,7 +1920,7 @@ struct OverviewView: View {
         let customized = await Task.detached(priority: .utility) {
             (try? ConfigService.load(profile: profile))
                 .map { loaded in
-                    loaded.state.columns.values.contains { !$0.isEmpty }
+                    !loaded.state.customEAs.isEmpty || !loaded.state.securityAgents.isEmpty
                 } ?? false
         }.value
 

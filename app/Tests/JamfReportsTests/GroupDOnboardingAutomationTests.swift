@@ -5,7 +5,7 @@ import XCTest
 // MARK: - GroupD: first-time-admin review fixes
 //
 // D1 — onboarding's first report collects before it generates (Jamf Pro path).
-// D5 — the optional "Map your columns" checklist row doesn't block completion.
+// D5 — the optional "Track your Extension Attributes" checklist row doesn't block completion.
 // D10 — the "Automation is off" banner only fires when something wants the ticker.
 
 @MainActor
@@ -93,14 +93,14 @@ final class GroupDOnboardingAutomationTests: XCTestCase {
     // process. It is exercised by the existing School-path onboarding tests,
     // not this group.
 
-    // MARK: - D5: the optional "Map your columns" row doesn't block completion
+    // MARK: - D5: the optional "Track your Extension Attributes" row doesn't block completion
 
     func test_checklist_customizeStep_isMarkedOptional() {
         let checklist = GettingStartedChecklist.build(
             connected: false, collected: false, customized: false, scheduled: false, reported: false
         )
         let customize = checklist.steps.first { $0.kind == .customize }
-        XCTAssertEqual(customize?.isOptional, true, "'Map your columns' must be optional")
+        XCTAssertEqual(customize?.isOptional, true, "'Track your Extension Attributes' must be optional")
         for step in checklist.steps where step.kind != .customize {
             XCTAssertFalse(step.isOptional, "\(step.kind) must remain a required step")
         }

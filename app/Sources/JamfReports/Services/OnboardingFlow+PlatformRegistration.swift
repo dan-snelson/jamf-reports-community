@@ -42,9 +42,9 @@ extension OnboardingFlow {
         return redacted
     }
 
-    /// A workspace for a profile that has no CSV: the folders and the minimal config.yaml the
-    /// "skip CSV mapping" step writes, confirmed on this Mac as onboarding confirms it. A
-    /// config.yaml already there is kept as it is. Returns whether it wrote one.
+    /// A workspace for a profile: the folders and the minimal config.yaml, confirmed on this Mac
+    /// as onboarding confirms it. A config.yaml already there is kept as it is. Returns whether
+    /// it wrote one.
     @discardableResult
     static func createJamfCLIOnlyWorkspace(for profile: String) throws -> Bool {
         try createWorkspaceFolders(for: profile)

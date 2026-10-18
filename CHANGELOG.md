@@ -17,8 +17,19 @@ versions in this repository map to git tags.
 - **Fleet Drift** now compares the collected inventory from two different days, so it no longer
   needs a CSV export. It lists Macs that joined or left, macOS changes, and Macs that became or
   stopped being stale under your stale settings. The "Compliance Changed" section is gone from this
-  sheet, since collected inventory carries no per-Mac compliance count. A report built from a CSV
-  still gets its CSV-based Fleet Drift when there is no earlier day of collected inventory.
+  sheet, since collected inventory carries no per-Mac compliance count.
+- `branding.logo_path` now puts the logo on the first tab of the workbook. It used to sit on the
+  CSV-based tabs only.
+
+### Removed
+
+- The **CSV Assisted** schedule mode is retired. A schedule that used it runs as
+  **Refresh + Generate** (`jamf-cli-full`) from now on, and Run History notes that on each run.
+  `jamf-reports schedules add --mode csv-assisted` is refused and names `jamf-cli-full`.
+- Workbooks no longer have tabs built from a CSV export. Custom EA tabs and EA Warnings come
+  from the collected extension attribute results, and `charts.archive_current_csv` has no effect.
+- `csv-inbox/` is no longer read by reports. Config Doctor suggests deleting the folder when it
+  holds files.
 
 ### Fixed
 
@@ -37,6 +48,10 @@ versions in this repository map to git tags.
 
 ### Security
 
+- A report run now stops with an error that names the profile when its report folder cannot be
+  used, instead of writing to the working directory or the temporary folder. A refused
+  `archive_dir` skips archiving old runs, with one warning, instead of moving them into a folder
+  beside the reports. (#284)
 - A link another Mac plants on a shared folder at `Generated Reports` or at the default
   `archive` folder no longer redirects where reports and archived runs are written. The app
   refuses the link, logs one warning naming the folder and writes nothing through it. (#284)

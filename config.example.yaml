@@ -366,8 +366,8 @@ branding:
 # with_workbook: when true, every run that writes a report workbook also writes
 #   that profile's HTML report beside it, with the same name and a .html
 #   extension, from the same report template's sections. That covers the app's
-#   Generate buttons, scheduled runs that generate (jamf-cli-only,
-#   jamf-cli-full and csv-assisted) and `jamf-reports generate`. The fleet and
+#   Generate buttons, scheduled runs that generate (jamf-cli-only
+#   and jamf-cli-full) and `jamf-reports generate`. The fleet and
 #   period workbooks and Jamf School workbooks are not included. A run that
 #   already writes the HTML report as a format of its own writes that one only.
 #   If the HTML report cannot be written the workbook stays, and the log gets one
@@ -468,7 +468,7 @@ notify:
 #                 (default 7; ignored by below/above)
 #
 # Alerts are evaluated only on schedule modes that COLLECT fresh data
-# (snapshot-only, jamf-cli-full, csv-assisted) — a jamf-cli-only schedule
+# (snapshot-only, jamf-cli-full) — a jamf-cli-only schedule
 # generates from cache and never evaluates alerts.
 #
 # A rule with an unknown metric or 'when', or a missing/invalid threshold, is

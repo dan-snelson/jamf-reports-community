@@ -16,8 +16,10 @@ _(screenshot: Jamf Pro export builder with Extension Attribute columns added und
 
 ## Path A — The CSV → EA walkthrough (recommended)
 
-**Data Sources → "EA tracking guide"** scans the newest inbox CSV, detects
-EA-like columns, and lets you adopt each one. As of v2.3, each candidate has an
+**Extension Attributes → "Adopt EAs…"** (or **Data Sources → "Adopt EAs"**) lists the
+Extension Attributes jamf-cli already collected and lets you adopt each one. A CSV export
+can still be imported once from the same sheet; it is read when you pick it and not again.
+As of v2.3, each candidate has an
 **"Adopt as"** choice — **Custom EA** or **Security Agent** — so the same flow
 covers both reporting shapes.
 

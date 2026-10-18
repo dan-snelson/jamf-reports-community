@@ -72,6 +72,19 @@ final class TickSchedulerTests: XCTestCase {
             runNowLabels: [], now: date(2026, 9, 7, 6, 25)).isEmpty)
     }
 
+    func testStartStampFarInTheFutureDoesNotStallTheSchedule() {
+        let s = schedule("collect", cadence: "Daily 06:20", mode: .snapshotOnly)
+        let label = s.launchAgentLabel!
+        let now = date(2026, 9, 7, 6, 21)
+        let ahead = tickState(started: [label: now.addingTimeInterval(30 * 86_400)])
+        XCTAssertEqual(TickScheduler.due(
+            schedules: [s], state: ahead, runNowLabels: [], now: now).map(\.reason), [.fire])
+        // Within clock skew it still counts as a start, so a run is not repeated.
+        let skewed = tickState(started: [label: now.addingTimeInterval(60)])
+        XCTAssertTrue(TickScheduler.due(
+            schedules: [s], state: skewed, runNowLabels: [], now: now).isEmpty)
+    }
+
     func testMissedFireFiresOnceNotPerMissedDay() {
         let s = schedule("collect", cadence: "Daily 06:20", mode: .snapshotOnly)
         let label = s.launchAgentLabel!

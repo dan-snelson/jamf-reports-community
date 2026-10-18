@@ -164,7 +164,8 @@ struct StateFileStore: Sendable {
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true
         )
-        let next = (failures(report: report)?.count ?? 0) + 1
+        // Saturates: a count read back from a damaged file can be Int.max.
+        let next = min(failures(report: report)?.count ?? 0, Int.max - 1) + 1
         let truncated = Date(timeIntervalSince1970: floor(date.timeIntervalSince1970))
         var body = "\(next) \(Self.formatter.string(from: truncated))"
         if let exitCode { body += " \(exitCode)" }
@@ -181,7 +182,7 @@ struct StateFileStore: Sendable {
             try? FileManager.default.removeItem(at: timeoutsURL(for: report))
             return
         }
-        let next = readTimeoutStreak(report: report) + 1
+        let next = min(readTimeoutStreak(report: report), Int.max - 1) + 1
         try atomicWrite(data: Data(String(next).utf8), to: timeoutsURL(for: report))
     }
 

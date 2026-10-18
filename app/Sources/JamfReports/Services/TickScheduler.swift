@@ -125,7 +125,7 @@ enum TickScheduler {
                     "tick: \(label, privacy: .public) has an unreadable cadence and was skipped")
                 return nil
             }
-            let started = state.lastStarted[label] ?? .distantPast
+            let started = startStamp(label, state: state, now: now)
             if fire > started {
                 let catchesUp = schedule.mode.runsAtLoad
                     || anchor.timeIntervalSince(fire) <= nonCatchUpWindow
@@ -135,6 +135,15 @@ enum TickScheduler {
                 mode: schedule.mode, label: label, fire: fire, state: state, now: now)
             return retry ? DueRun(schedule: schedule, reason: .retry) : nil
         }
+    }
+
+    /// When `label` last started, or `.distantPast` for a stamp beyond clock skew in the future
+    /// (a clock set ahead once): a future stamp would otherwise cover every fire until then.
+    private static func startStamp(_ label: String, state: TickState, now: Date) -> Date {
+        guard let stamp = state.lastStarted[label],
+              stamp.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance
+        else { return .distantPast }
+        return stamp
     }
 
     /// Same-day retry of a run that started for `fire` but never succeeded:
@@ -147,7 +156,7 @@ enum TickScheduler {
         guard (state.lastSucceeded[label] ?? .distantPast) < fire else { return false }
         let retries = state.retryCount[label] ?? 0
         guard retryBackoffs.indices.contains(retries) else { return false }
-        let started = state.lastStarted[label] ?? .distantPast
+        let started = startStamp(label, state: state, now: now)
         return now.timeIntervalSince(started) >= retryBackoffs[retries]
     }
 }

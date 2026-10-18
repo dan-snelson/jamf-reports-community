@@ -8,14 +8,15 @@ final class FleetRollupTests: XCTestCase {
     private func summary(
         date: String, devices: Int, compliance: Double? = nil, stale: Int? = 0,
         security: Double? = nil, fileVault: Double? = nil,
-        sip: Double? = nil, firewall: Double? = nil, gatekeeper: Double? = nil
+        sip: Double? = nil, firewall: Double? = nil, gatekeeper: Double? = nil,
+        scoreBasis: String? = nil
     ) -> DailySummary {
         DailySummary(
             date: date, totalDevices: devices, fileVaultPct: fileVault,
             compliancePct: compliance, staleCount: stale, osCurrentPct: nil,
             crowdstrikePct: nil, patchPct: nil,
             sipPct: sip, firewallPct: firewall, gatekeeperPct: gatekeeper,
-            securityScore: security
+            securityScore: security, securityScoreBasis: scoreBasis
         )
     }
 
@@ -141,6 +142,22 @@ final class FleetRollupTests: XCTestCase {
         let fileVaultDelta: Double = metric(rollup, "fileVault")?.delta ?? 0
         XCTAssertEqual(fileVaultDelta, 4.0, accuracy: 0.01)
         XCTAssertEqual(metric(rollup, "stale")?.delta, -4)
+    }
+
+    func testSecurityScoreHasNoPriorAcrossAFactorChange() {
+        let changed = FleetRollup.compute(
+            groupName: "Fleet",
+            current: [summary(date: "2026-06-06", devices: 100, security: 80, scoreBasis: "a=10,b=5")],
+            previous: [summary(date: "2026-05-30", devices: 100, security: 70, scoreBasis: "a=10")]
+        )
+        XCTAssertEqual(metric(changed, "securityScore")?.value, 80)
+        XCTAssertNil(metric(changed, "securityScore")?.previous)
+        let same = FleetRollup.compute(
+            groupName: "Fleet",
+            current: [summary(date: "2026-06-06", devices: 100, security: 80, scoreBasis: "a=10")],
+            previous: [summary(date: "2026-05-30", devices: 100, security: 70, scoreBasis: "a=10")]
+        )
+        XCTAssertEqual(metric(same, "securityScore")?.previous, 70)
     }
 
     func testDeltaNilWhenNoPrevious() {

@@ -115,9 +115,7 @@ final class DeviceLookupIndex {
                 })
             }
         }
-        return candidates.max { (l, r) -> Bool in
-            (fileDate(l) ?? .distantPast) < (fileDate(r) ?? .distantPast)
-        }
+        return FileManager.newestSnapshot(among: candidates)
     }
 
     /// Resolve a free-text term against the loaded index.

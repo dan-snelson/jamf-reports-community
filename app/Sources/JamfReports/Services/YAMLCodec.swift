@@ -253,8 +253,8 @@ enum YAMLCodec {
     /// `text` without its `#` comments: a line that is only a comment is dropped, a trailing
     /// comment is cut with its indentation kept. A `#` inside quotes or not after a space stays.
     /// A quote opens only at the start of a scalar, as YAML defines it, so the apostrophe in
-    /// `Don't stop # note` does not hide the comment. Unlike the reader, which `stripInlineComment`
-    /// serves, this is for a copy that leaves the Mac.
+    /// `Don't stop # note` does not hide the comment. The reader's `stripInlineComment` uses the
+    /// same scan; this is for a copy that leaves the Mac.
     static func removingComments(from text: String) -> String {
         text.components(separatedBy: "\n").compactMap { line -> String? in
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("#") { return nil }
@@ -269,7 +269,7 @@ enum YAMLCodec {
     /// whitespace. A quote opens only where a scalar can start (the line start, after `- `, after
     /// `: ` or a colon ending the line, and in a flow collection after `[`, `{` or `,`);
     /// `''` and `\"` inside a quoted scalar are escapes.
-    private static func commentStart(in line: String) -> String.Index? {
+    static func commentStart(in line: String) -> String.Index? {
         var quote: Character?
         var scalarStart = true
         var flowDepth = 0
@@ -431,8 +431,19 @@ enum YAMLCodec {
         case .int(let value): return "\(value)"
         case .bool(let value): return value ? "true" : "false"
         case .null: return "null"
-        case .string(let value): return quotedIfNeeded(value)
+        case .string(let value): return quotedIfNeeded(singleLine(value))
         }
+    }
+
+    /// The reader decodes no backslash escapes and splits lines on `CharacterSet.newlines`, so
+    /// a value holding VT, FF, U+0085, U+2028 or U+2029 would become two lines on the next
+    /// read; a space keeps it whole.
+    private static func singleLine(_ value: String) -> String {
+        let breaks: Set<Unicode.Scalar> = ["\u{0B}", "\u{0C}", "\u{85}", "\u{2028}", "\u{2029}"]
+        guard value.unicodeScalars.contains(where: breaks.contains) else { return value }
+        AppLogger.collect.warning("config.yaml: a value held a line separator, written as a space")
+        return String(String.UnicodeScalarView(
+            value.unicodeScalars.map { breaks.contains($0) ? " " : $0 }))
     }
 
     private static func quotedIfNeeded(_ value: String) -> String {
@@ -485,22 +496,8 @@ enum YAMLCodec {
 /// `value` up to a `#` that starts a comment (outside quotes, at the start or after a
 /// space), trimmed; `value` unchanged when it has no comment.
 private func stripInlineComment(_ value: String) -> String {
-    var inSingle = false
-    var inDouble = false
-    var previous: Character?
-
-    for index in value.indices {
-        let char = value[index]
-        if char == "'", !inDouble { inSingle.toggle() }
-        if char == "\"", !inSingle, previous != "\\" { inDouble.toggle() }
-        if char == "#", !inSingle, !inDouble {
-            if index == value.startIndex || previous?.isWhitespace == true {
-                return String(value[..<index]).trimmingCharacters(in: .whitespaces)
-            }
-        }
-        previous = char
-    }
-    return value
+    guard let start = YAMLCodec.commentStart(in: value) else { return value }
+    return String(value[..<start]).trimmingCharacters(in: .whitespaces)
 }
 
 extension YAMLCodec.YAMLValue {

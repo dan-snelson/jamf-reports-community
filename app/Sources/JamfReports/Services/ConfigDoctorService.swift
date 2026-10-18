@@ -46,35 +46,16 @@ struct DoctorReport: Sendable {
 
 /// Native port of the Python `cmd_check` config-validation logic (EPIC #182 #1).
 ///
-/// Validates a profile's `config.yaml` against its CSV export and cached EA results,
-/// surfacing missing/mismatched column mappings and structural mistakes. Skips the
+/// Validates a profile's `config.yaml` against its cached EA results, surfacing
+/// mismatched mappings and structural mistakes. Skips the
 /// Python check's jamf-cli auth/command probes and the matplotlib check (charts are
 /// native here). The pure `evaluate(...)` seam is the test entry point; `run(...)`
 /// loads the on-disk artifacts and calls it.
 enum ConfigDoctorService {
 
-    private typealias RequiredComputer = (field: ColumnField, label: String, logical: String)
-    private typealias RequiredMobile =
-        (label: String, logical: String, path: KeyPath<MobileColumnConfig, String?>)
-
-    private static let requiredComputerFields: [RequiredComputer] = [
-        (.computerName, "Computer name", "computer_name"),
-        (.serialNumber, "Serial number", "serial_number"),
-        (.operatingSystem, "Operating system", "operating_system"),
-        (.lastCheckin, "Last check-in", "last_checkin"),
-    ]
-
-    nonisolated(unsafe) private static let requiredMobileFields: [RequiredMobile] = [
-        ("Device name", "device_name", \.deviceName),
-        ("Serial number", "serial_number", \.serialNumber),
-        ("Operating system", "operating_system", \.operatingSystem),
-        ("Last check-in", "last_checkin", \.lastCheckin),
-    ]
-
     // MARK: - Wiring
 
-    /// Load `config.yaml`, the newest csv-inbox CSV headers, and cached EA coverage
-    /// names for `profile`, then evaluate. Missing artifacts are non-fatal — their
+    /// Load `config.yaml` and cached EA coverage names for `profile`, then evaluate. Missing artifacts are non-fatal — their
     /// checks are skipped rather than crashing.
     static func run(profile: String, workspaceRoot: URL? = nil) -> DoctorReport {
         var config: ReportConfig?
@@ -90,16 +71,12 @@ enum ConfigDoctorService {
             parseError = error.localizedDescription
         }
 
-        let csvHeaders = loadNewestCSVHeaders(profile: profile)
-        let csvFamily = csvHeaders.map { CSVFamilyDetector.detect(headers: $0) } ?? nil
         let eaSnapshot = ExtensionAttributeService.load(profile: profile)
         let eaNames = eaSnapshot.coverage.map(\.eaName)
 
         var rows = evaluate(
             config: config,
             parseError: parseError,
-            csvHeaders: csvHeaders,
-            csvFamily: csvFamily,
             eaCoverageNames: eaNames,
             eaDefinitionNames: eaSnapshot.definitions.compactMap(\.name)
         )
@@ -111,46 +88,40 @@ enum ConfigDoctorService {
             rows += valueRows(profile: profile, config: config, workspaceRoot: workspaceRoot)
             rows += accuracyRows(config: config, profile: profile)
             rows += securityPolicyRows(profile: profile, config: config)
-            rows += csvHardwareColumnRows(
-                config: config, csvHeaders: csvHeaders, csvFamily: csvFamily)
-            rows += csvInventoryColumnRows(
-                config: config, csvHeaders: csvHeaders, csvFamily: csvFamily)
         }
         rows += organizationLevelRows(profile: profile)
         rows += platformTwinRows(profile: profile)
         rows += sharedConfigRows(profile: profile)
-        rows += automationFolderRows(
-            workspace: (try? ConfigService.configURL(for: profile, workspaceRoot: workspaceRoot))?
-                .deletingLastPathComponent())
+        let workspace = (try? ConfigService.configURL(for: profile, workspaceRoot: workspaceRoot))?
+            .deletingLastPathComponent()
+        rows += automationFolderRows(workspace: workspace)
+        rows += csvInboxRows(workspace: workspace)
         rows += evaluateCloudStorage(cloudStorageInputs(profile: profile, config: config))
         rows += evaluateWorkspaceContinuity(
             workspaceContinuityInputs(profile: profile, config: config))
         return DoctorReport(rows: rows)
     }
 
-    /// Read the header row of the newest CSV in the profile workspace. Returns `nil`
-    /// when no CSV is present (its checks are then skipped).
-    private static func loadNewestCSVHeaders(profile: String) -> [String]? {
-        guard let url = CLIBridge.newestCSV(in: profile),
-              let text = try? InventoryCSV.readText(url) else {
-            return nil
-        }
-        let firstLine = text.components(separatedBy: CharacterSet.newlines).first ?? ""
-        let headers = firstLine.components(separatedBy: ",")
-            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \t\"")) }
-        return headers.allSatisfy(\.isEmpty) ? nil : headers
+    /// `csv-inbox/` is not read since 2.11. A suggestion only, never a warning or failure.
+    static func csvInboxRows(workspace: URL?) -> [DoctorRow] {
+        guard let workspace,
+              let names = try? FileManager.default.contentsOfDirectory(
+                atPath: workspace.appendingPathComponent("csv-inbox").path),
+              names.contains(where: { !$0.hasPrefix(".") }) else { return [] }
+        return [DoctorRow(
+            id: "workspace.csv_inbox", severity: .suggest, title: "csv-inbox",
+            detail: "csv-inbox is no longer read since 2.11; you can delete it.",
+            hint: "Move any export you still need elsewhere, then delete the folder.")]
     }
 
     // MARK: - Pure evaluator (test seam)
 
-    /// Pure evaluation over already-loaded inputs. Order: parse → required columns →
-    /// CSV checks → structural → baselines. Passing checks emit `.pass` rows so the
-    /// doctor shows green confirmations (like Python's `[ok]` lines).
+    /// Pure evaluation over already-loaded inputs. Order: parse → custom EAs → structural →
+    /// baselines. Passing checks emit `.pass` rows so the doctor shows green confirmations
+    /// (like Python's `[ok]` lines).
     static func evaluate(
         config: ReportConfig?,
         parseError: String?,
-        csvHeaders: [String]?,
-        csvFamily: CSVFamily?,
         eaCoverageNames: [String],
         eaDefinitionNames: [String] = []
     ) -> [DoctorRow] {
@@ -165,174 +136,16 @@ enum ConfigDoctorService {
         }
         guard let config else { return [] }
 
-        var rows: [DoctorRow] = []
-        // The workbook takes a custom EA's tab from the collected results when there are any
-        // (`EASheets`); the CSV's EA columns matter only without them.
-        let collectedEAs = !eaCoverageNames.isEmpty
-        if let headers = csvHeaders {
-            // A CSV validates every configured column against real headers, which
-            // supersedes the bare "is it configured" required-column check — running
-            // both would emit a contradictory OK (configured) + ERROR (not in CSV)
-            // pair for the same field. Same reasoning gates the structural agent
-            // checks, which the CSV path already covers.
-            rows += csvRows(config, headers: headers, family: csvFamily,
-                            includeCustomEAs: !collectedEAs)
-        } else {
-            // No CSV to validate against: fall back to config-presence checks.
-            rows += requiredColumnRows(config)
-            rows += securityAgentStructuralRows(config)
-        }
-        if collectedEAs || csvHeaders == nil {
-            rows += customEAResultRows(
-                config, eaCoverageNames: eaCoverageNames, eaDefinitionNames: eaDefinitionNames)
-        }
+        var rows = customEAResultRows(
+            config, eaCoverageNames: eaCoverageNames, eaDefinitionNames: eaDefinitionNames)
+        rows += securityAgentStructuralRows(config)
         rows += structuralRows(config)
         rows += baselineRows(config, eaCoverageNames: eaCoverageNames)
         rows += alertsRows(config)
         return rows
     }
 
-    // MARK: - Required columns
-
-    private static func requiredColumnRows(_ config: ReportConfig) -> [DoctorRow] {
-        var rows: [DoctorRow] = []
-        let columns = config.columns
-        for required in requiredComputerFields {
-            let value = columns?.columnName(for: required.field)
-            rows.append(requiredRow(
-                id: "required.columns.\(required.logical)",
-                label: required.label,
-                value: value
-            ))
-        }
-        // Only validate mobile required columns when the config opts into a mobile
-        // fleet (at least one mobile column mapped). Defaults still populate an empty
-        // mobile_columns, so a computer-only config must not warn on every mobile
-        // field — matches Python cmd_check, which validates the detected CSV family.
-        if let mobile = config.mobileColumns, !mobileMappings(config).isEmpty {
-            for required in requiredMobileFields {
-                rows.append(requiredRow(
-                    id: "required.mobile_columns.\(required.logical)",
-                    label: "Mobile \(required.label.lowercased())",
-                    value: nonEmpty(mobile[keyPath: required.path])
-                ))
-            }
-        }
-        return rows
-    }
-
-    private static func requiredRow(id: String, label: String, value: String?) -> DoctorRow {
-        if let value {
-            return DoctorRow(id: id, severity: .pass, title: label,
-                             detail: "Mapped to '\(value)'.", hint: nil)
-        }
-        return DoctorRow(
-            id: id, severity: .warn, title: label, detail: "Not configured.",
-            hint: "Run scaffold or map this column in Config."
-        )
-    }
-
-    // MARK: - CSV checks
-
-    private static func csvRows(
-        _ config: ReportConfig,
-        headers: [String],
-        family: CSVFamily?,
-        includeCustomEAs: Bool = true
-    ) -> [DoctorRow] {
-        var rows: [DoctorRow] = []
-        let normalized = Set(headers.map { CSVFamilyDetector.normalize($0) })
-
-        if family == nil {
-            rows.append(DoctorRow(
-                id: "csv.family", severity: .warn, title: "CSV family",
-                detail: "CSV doesn't look like a Jamf computer or mobile export.",
-                hint: "Re-export from Jamf Pro, or check the file in csv-inbox."
-            ))
-        }
-
-        rows += mappedColumnRows(config, headers: headers, normalized: normalized, family: family)
-        if includeCustomEAs { rows += customEARows(config, normalized: normalized) }
-        if family != .mobile {
-            rows += securityAgentCSVRows(config, normalized: normalized)
-            rows += complianceColumnCSVRows(config, normalized: normalized)
-        }
-        return rows
-    }
-
-    private static func mappedColumnRows(
-        _ config: ReportConfig,
-        headers: [String],
-        normalized: Set<String>,
-        family: CSVFamily?
-    ) -> [DoctorRow] {
-        let mappings: [(logical: String, column: String)] = family == .mobile
-            ? mobileMappings(config)
-            : computerMappings(config)
-        return mappings.map { mapping in
-            columnRow(
-                logical: mapping.logical, column: mapping.column,
-                headers: headers, normalized: normalized, family: family
-            )
-        }
-    }
-
-    private static func columnRow(
-        logical: String,
-        column: String,
-        headers: [String],
-        normalized: Set<String>,
-        family: CSVFamily?
-    ) -> DoctorRow {
-        let id = "columns.\(logical)"
-        guard normalized.contains(CSVFamilyDetector.normalize(column)) else {
-            return DoctorRow(
-                id: id, severity: .fail, title: logical,
-                detail: "'\(column)' not found in CSV.",
-                hint: "Re-run scaffold or fix the mapping."
-            )
-        }
-        let best = ScaffoldService
-            .bestColumnMatch(headers: headers, logical: logical, family: family)
-        if let best,
-           CSVFamilyDetector.normalize(best.header) != CSVFamilyDetector.normalize(column),
-           best.score > columnScore(column: column, logical: logical, family: family) {
-            return DoctorRow(
-                id: id, severity: .suggest, title: logical,
-                detail: "Mapped to '\(column)', but '\(best.header)' looks like a stronger match.",
-                hint: "Consider re-mapping to '\(best.header)'."
-            )
-        }
-        return DoctorRow(id: id, severity: .pass, title: logical,
-                         detail: "Mapped to '\(column)'.", hint: nil)
-    }
-
-    private static func columnScore(column: String, logical: String, family: CSVFamily?) -> Int {
-        ScaffoldService
-            .bestColumnMatch(headers: [column], logical: logical, family: family)?.score ?? 0
-    }
-
-    private static func customEARows(
-        _ config: ReportConfig,
-        normalized: Set<String>
-    ) -> [DoctorRow] {
-        (config.customEas ?? []).compactMap { ea in
-            let column = ea.column.trimmingCharacters(in: .whitespaces)
-            guard !column.isEmpty else { return nil }
-            let id = "custom_ea.\(ea.name).column"
-            if normalized.contains(CSVFamilyDetector.normalize(column)) {
-                return DoctorRow(id: id, severity: .pass, title: "EA: \(ea.name)",
-                                 detail: "Mapped to '\(column)'.", hint: nil)
-            }
-            return DoctorRow(
-                id: id, severity: .fail, title: "EA: \(ea.name)",
-                detail: "'\(column)' not found in CSV.",
-                hint: "Re-run scaffold or fix the custom_eas column."
-            )
-        }
-    }
-
-    /// The counterpart of `customEARows` for the collected results: a custom EA's tab is built
+    /// A custom EA's tab is built
     /// from the `ea-results` rows whose name is its `column` (`EASheets`). Never `.fail`: only
     /// fail rows reach the run log, and an EA that is not collected yet is a valid setup.
     private static func customEAResultRows(
@@ -366,78 +179,11 @@ enum ConfigDoctorService {
         }
     }
 
-    private static func securityAgentCSVRows(
-        _ config: ReportConfig,
-        normalized: Set<String>
-    ) -> [DoctorRow] {
-        (config.securityAgents ?? []).map { agent in
-            let column = agent.column.trimmingCharacters(in: .whitespaces)
-            let id = "security_agent.\(agent.name).column"
-            if column.isEmpty || !normalized.contains(CSVFamilyDetector.normalize(column)) {
-                return DoctorRow(
-                    id: id, severity: .fail, title: "Agent: \(agent.name)",
-                    detail: column.isEmpty
-                        ? "No column configured."
-                        : "'\(column)' not found in CSV.",
-                    hint: "Map the agent's status column to a CSV header."
-                )
-            }
-            if agent.connectedValue.trimmingCharacters(in: .whitespaces).isEmpty {
-                return DoctorRow(
-                    id: "security_agent.\(agent.name).connected_value", severity: .warn,
-                    title: "Agent: \(agent.name)",
-                    detail: "No connected_value set — any non-empty cell counts as connected.",
-                    hint: "Set connected_value (e.g. 'Installed') for a precise match."
-                )
-            }
-            return DoctorRow(id: id, severity: .pass, title: "Agent: \(agent.name)",
-                             detail: "Mapped to '\(column)'.", hint: nil)
-        }
-    }
-
-    private static func complianceColumnCSVRows(
-        _ config: ReportConfig,
-        normalized: Set<String>
-    ) -> [DoctorRow] {
-        let compliance = config.compliance
-        var rows: [DoctorRow] = []
-        if let count = nonEmpty(compliance?.failuresCountColumn) {
-            rows.append(complianceColumnRow(
-                id: "compliance.failures_count_column", label: "Compliance failures count",
-                column: count, normalized: normalized
-            ))
-        }
-        if let list = nonEmpty(compliance?.failuresListColumn) {
-            rows.append(complianceColumnRow(
-                id: "compliance.failures_list_column", label: "Compliance failures list",
-                column: list, normalized: normalized
-            ))
-        }
-        return rows
-    }
-
-    private static func complianceColumnRow(
-        id: String,
-        label: String,
-        column: String,
-        normalized: Set<String>
-    ) -> DoctorRow {
-        if normalized.contains(CSVFamilyDetector.normalize(column)) {
-            return DoctorRow(id: id, severity: .pass, title: label,
-                             detail: "Mapped to '\(column)'.", hint: nil)
-        }
-        return DoctorRow(
-            id: id, severity: .fail, title: label, detail: "'\(column)' not found in CSV.",
-            hint: "Re-run scaffold or fix the compliance mapping."
-        )
-    }
-
     // MARK: - Structural checks
 
     private static func structuralRows(_ config: ReportConfig) -> [DoctorRow] {
         var rows: [DoctorRow] = []
         rows += complianceStructuralRows(config)
-        rows += duplicateColumnRows(config)
         rows += customEAStructuralRows(config)
         return rows
     }
@@ -452,33 +198,6 @@ enum ConfigDoctorService {
             detail: "Compliance is on but failures_count_column or failures_list_column is empty.",
             hint: "Set both compliance columns, or disable compliance."
         )]
-    }
-
-    private static func duplicateColumnRows(_ config: ReportConfig) -> [DoctorRow] {
-        var rows: [DoctorRow] = []
-        rows += duplicates(in: computerMappings(config), section: "columns")
-        rows += duplicates(in: mobileMappings(config), section: "mobile_columns")
-        return rows
-    }
-
-    private static func duplicates(
-        in mappings: [(logical: String, column: String)],
-        section: String
-    ) -> [DoctorRow] {
-        var byColumn: [String: [String]] = [:]
-        for mapping in mappings {
-            let key = CSVFamilyDetector.normalize(mapping.column)
-            byColumn[key, default: []].append(mapping.logical)
-        }
-        return byColumn.filter { $0.value.count >= 2 }.sorted { $0.key < $1.key }.map { entry in
-            let fields = entry.value.sorted().joined(separator: ", ")
-            return DoctorRow(
-                id: "\(section).duplicate.\(entry.key)", severity: .warn,
-                title: "Duplicate column mapping",
-                detail: "'\(entry.key)' is mapped to: \(fields).",
-                hint: "Each CSV column should map to a single logical field."
-            )
-        }
     }
 
     private static func customEAStructuralRows(_ config: ReportConfig) -> [DoctorRow] {
@@ -870,53 +589,6 @@ enum ConfigDoctorService {
         return rows
     }
 
-    /// On a CSV the hardware rule reads Apple silicon from `columns.architecture` and T2 Macs
-    /// from `columns.model_identifier` (`columns.model` is the marketing name). A mapped column
-    /// the export lacks already gets a `columns.<key>` row; this names one that is not mapped.
-    static func csvHardwareColumnRows(
-        config: ReportConfig, csvHeaders: [String]?, csvFamily: CSVFamily?
-    ) -> [DoctorRow] {
-        guard config.resolvedSecurityPolicy.usesHardwareRule, csvHeaders != nil,
-              csvFamily != .mobile else { return [] }
-        let candidates: [(field: ColumnField, header: String)] = [
-            (field: .modelIdentifier, header: "Model Identifier"),
-            (field: .architecture, header: "Architecture Type"),
-        ]
-        let unmapped = candidates.filter { config.columns?.columnName(for: $0.field) == nil }
-        guard !unmapped.isEmpty else { return [] }
-        let keys = unmapped.map { "columns.\($0.field.configKey)" }
-        let headers = unmapped.map { "'\($0.header)'" }
-        return [DoctorRow(
-            id: "security_policy.csv_hardware_columns", severity: .warn,
-            title: "security_policy.filevault_off_hardware_encrypted",
-            detail: "\(keys.joined(separator: " and ")) "
-                + "\(keys.count == 1 ? "is" : "are") not mapped, so a CSV report cannot tell "
-                + "which Macs are hardware-encrypted. FileVault off counts at the FileVault "
-                + "level for them.",
-            hint: "Map \(keys.count == 1 ? "it" : "them") in Config, or re-run scaffold, "
-                + "to the export's \(headers.joined(separator: " and ")) "
-                + "\(headers.count == 1 ? "column" : "columns")."
-        )]
-    }
-
-    /// A `stale_basis` that counts the inventory date needs the CSV's Last Inventory Update
-    /// column, mapped as `columns.last_inventory`. Without it the CSV sheets leave the
-    /// inventory date out of the rule, which this row says.
-    static func csvInventoryColumnRows(
-        config: ReportConfig, csvHeaders: [String]?, csvFamily: CSVFamily?
-    ) -> [DoctorRow] {
-        guard config.thresholds?.resolvedStaleBasis.contains(.inventory) == true,
-              csvHeaders != nil, csvFamily != .mobile,
-              config.columns?.columnName(for: .lastInventory) == nil else { return [] }
-        return [DoctorRow(
-            id: "thresholds.stale_basis.csv_inventory_column", severity: .warn,
-            title: "thresholds.stale_basis",
-            detail: "stale_basis counts inventory, but columns.last_inventory is not mapped, so "
-                + "a CSV report has no inventory date: inventory does not apply to its rows.",
-            hint: "Map columns.last_inventory to the export's 'Last Inventory Update' column "
-                + "in Config.")]
-    }
-
     private static func securityPolicyDetail(_ issue: SecurityPolicyIssue) -> String {
         if issue.keyPath == SecurityPolicyConfigLoader.edrAgentPath {
             return "Expected the name of a security agent, found \"\(issue.value)\" — "
@@ -964,31 +636,6 @@ enum ConfigDoctorService {
         return "Set it to fail, warning or ignore in config.yaml, or remove the line."
     }
 
-    // MARK: - Column-mapping helpers
-
-    private typealias Mapping = (logical: String, column: String)
-
-    private static func computerMappings(_ config: ReportConfig) -> [Mapping] {
-        guard let columns = config.columns else { return [] }
-        return ColumnField.allCases.compactMap { field in
-            columns.columnName(for: field).map { (field.configKey, $0) }
-        }
-    }
-
-    private static func mobileMappings(_ config: ReportConfig) -> [Mapping] {
-        guard let mobile = config.mobileColumns else { return [] }
-        let pairs: [(String, String?)] = [
-            ("device_name", mobile.deviceName), ("serial_number", mobile.serialNumber),
-            ("operating_system", mobile.operatingSystem), ("last_checkin", mobile.lastCheckin),
-            ("email", mobile.email), ("model", mobile.model),
-            ("device_family", mobile.deviceFamily), ("managed", mobile.managed),
-            ("supervised", mobile.supervised),
-        ]
-        return pairs.compactMap { logical, value in
-            nonEmpty(value).map { (logical, $0) }
-        }
-    }
-
     private static func nonEmpty(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespaces) ?? ""
         return trimmed.isEmpty ? nil : trimmed
@@ -1001,21 +648,10 @@ extension ConfigDoctorService {
 
     // MARK: Pure inputs (test seam)
 
-    /// Newest CSV export, pre-parsed. `columns` is the header row; `rows` are the
-    /// data rows (dictionary per row). `ageDays` is the file's age in whole days.
-    /// Absent when no CSV is present.
-    struct AccuracyCSV: Sendable {
-        let columns: [String]
-        let rows: [CSVRow]
-        let ageDays: Int
-        let fileName: String
-    }
-
     /// Everything the accuracy checks need, already loaded off `evaluate`'s path so
     /// the pure seam never touches disk. Any field may be nil/empty — each check
     /// degrades to a single info row or no row rather than failing the doctor.
     struct AccuracyInputs: Sendable {
-        var csv: AccuracyCSV?
         /// Device count from the newest `computers` snapshot; nil when absent.
         var computersCount: Int?
         /// Newest decodable `ea-results` rows; nil when absent/undecodable.
@@ -1035,28 +671,11 @@ extension ConfigDoctorService {
         let dataDir = try? WorkspacePaths.dataDir(for: profile)
 
         let inputs = AccuracyInputs(
-            csv: loadAccuracyCSV(profile: profile),
             computersCount: loadComputersCount(dataDir: dataDir),
             eaRows: loadNewestEARows(dataDir: dataDir),
             coverageDrift: dataDir.map { EAParseHealthService.coverageDriftOutcome(dataDir: $0) }
         )
         return evaluateAccuracy(config: config, inputs: inputs)
-    }
-
-    /// Read + parse the newest csv-inbox CSV and stamp its age. Nil when absent or
-    /// unreadable (its dependent checks then skip).
-    private static func loadAccuracyCSV(profile: String) -> AccuracyCSV? {
-        guard let url = CLIBridge.newestCSV(in: profile),
-              let data = try? InventoryCSV.read(url),
-              let (columns, rows) = try? CSVParser.parse(data) else { return nil }
-        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-            .contentModificationDate ?? Date()
-        let ageDays = Calendar(identifier: .gregorian)
-            .dateComponents([.day], from: modified, to: Date()).day ?? 0
-        return AccuracyCSV(
-            columns: columns, rows: rows,
-            ageDays: max(0, ageDays), fileName: url.lastPathComponent
-        )
     }
 
     /// Device count from the newest `computers` snapshot (a bare JSON array). Nil
@@ -1088,7 +707,6 @@ extension ConfigDoctorService {
     static func evaluateAccuracy(config: ReportConfig, inputs: AccuracyInputs) -> [DoctorRow] {
         var rows: [DoctorRow] = []
         rows += reconciliationRows(config: config, inputs: inputs)
-        rows += staleCSVRows(config: config, inputs: inputs)
         rows += parseHealthRows(config: config, inputs: inputs)
         rows += coverageDriftRows(inputs: inputs)
         rows += crossCheckRows(config: config, inputs: inputs)
@@ -1104,10 +722,6 @@ extension ConfigDoctorService {
         inputs: AccuracyInputs
     ) -> [DoctorRow] {
         var sources: [CountSource] = []
-        if let csv = inputs.csv, let serial = mappedSerialColumn(config) {
-            let deduped = distinctSerials(rows: csv.rows, column: serial)
-            if deduped > 0 { sources.append(CountSource(label: "CSV export", count: deduped)) }
-        }
         if let computers = inputs.computersCount, computers > 0 {
             sources.append(CountSource(label: "computers snapshot", count: computers))
         }
@@ -1152,64 +766,33 @@ extension ConfigDoctorService {
         return nil
     }
 
-    private static func mappedSerialColumn(_ config: ReportConfig) -> String? {
-        nonEmpty(config.columns?.columnName(for: .serialNumber))
-    }
-
-    /// Distinct non-empty values in `column` across `rows` (case-insensitive).
-    private static func distinctSerials(rows: [CSVRow], column: String) -> Int {
-        var seen: Set<String> = []
-        for row in rows {
-            let value = (row[column] ?? "").trimmingCharacters(in: .whitespaces)
-            if !value.isEmpty { seen.insert(value.lowercased()) }
-        }
-        return seen.count
-    }
-
-    // MARK: Check 1b — stale CSV age
-
-    private static func staleCSVRows(config: ReportConfig, inputs: AccuracyInputs) -> [DoctorRow] {
-        guard let csv = inputs.csv else { return [] }
-        let staleDays = config.thresholds?.resolvedStaleDays ?? 30
-        guard csv.ageDays > staleDays else { return [] }
-        return [DoctorRow(
-            id: "accuracy.csv_age", severity: .warn,
-            title: "CSV export is stale",
-            detail: "'\(csv.fileName)' is \(csv.ageDays) days old "
-                + "(stale after \(staleDays)).",
-            hint: "Delete or replace the stale export in csv-inbox."
-        )]
-    }
-
     // MARK: Check 2 — per-column parse health
 
     private static func parseHealthRows(config: ReportConfig, inputs: AccuracyInputs) -> [DoctorRow] {
         // Each health carries its assessed type (nil = int-count) for hint wording.
         var healths: [(health: EAParseHealthService.ColumnHealth, type: CustomEAConfig.EAType?)] = []
 
-        // custom_eas assessed against the CSV column.
-        if let csv = inputs.csv {
+        if let eaRows = inputs.eaRows {
+            func values(of column: String) -> [String] {
+                eaRows.filter { $0.eaName?.caseInsensitiveCompare(column) == .orderedSame }
+                    .map { $0.value?.stringValue ?? "" }
+            }
+            // custom_eas assessed against their collected values.
             for ea in config.customEas ?? [] {
                 let column = ea.column.trimmingCharacters(in: .whitespaces)
-                guard !column.isEmpty, csv.columns.contains(column) else { continue }
-                let values = csv.rows.map { $0[column] ?? "" }
+                let found = values(of: column)
+                guard !column.isEmpty, !found.isEmpty else { continue }
                 healths.append((EAParseHealthService.assess(
-                    column: column, values: values, type: ea.type
+                    column: column, values: found, type: ea.type
                 ), ea.type))
             }
-        }
-
-        // compliance baselines assessed against the ea-results failure-count column.
-        if let eaRows = inputs.eaRows {
+            // compliance baselines assessed against the ea-results failure-count column.
             for baseline in config.compliance?.resolvedBaselines ?? [] {
                 let column = baseline.failuresCountColumn.trimmingCharacters(in: .whitespaces)
-                guard !column.isEmpty else { continue }
-                let values = eaRows
-                    .filter { $0.eaName?.caseInsensitiveCompare(column) == .orderedSame }
-                    .map { $0.value?.stringValue ?? "" }
-                guard !values.isEmpty else { continue }
+                let found = values(of: column)
+                guard !column.isEmpty, !found.isEmpty else { continue }
                 healths.append((EAParseHealthService.assessIntCount(
-                    column: column, values: values, maxValid: baseline.ruleCount
+                    column: column, values: found, maxValid: baseline.ruleCount
                 ), nil))
             }
         }
@@ -1849,13 +1432,13 @@ extension ConfigDoctorService {
                 severity: .suggest,
                 title: "Settings here are defaults",
                 detail: "\(moved), so it starts with a scaffold config and no history. "
-                    + "Column mappings, custom extension attributes and thresholds are at "
-                    + "their defaults rather than anything you set previously.",
+                    + "Custom extension attributes and thresholds are at their defaults "
+                    + "rather than anything you set previously.",
                 hint: inputs.rootIsCustom
                     ? "If you moved here from another folder, copy its config.yaml and "
                         + "snapshots/ across — changing the workspace location does not "
                         + "move existing data."
-                    : "Run Config › Scaffold from a CSV export to map your columns."
+                    : "Set up custom extension attributes and thresholds in Config."
             ))
         }
 
@@ -1889,9 +1472,7 @@ extension ConfigDoctorService {
         )
     }
 
-    /// Scaffold-fresh configs have no operator-authored content. Column mappings
-    /// are excluded on purpose — the scaffold writes those itself, so their
-    /// presence proves nothing about whether anyone configured this workspace.
+    /// Scaffold-fresh configs have no operator-authored content.
     private static func isCustomised(_ config: ReportConfig?) -> Bool {
         guard let config else { return false }
         if !(config.customEas ?? []).isEmpty { return true }

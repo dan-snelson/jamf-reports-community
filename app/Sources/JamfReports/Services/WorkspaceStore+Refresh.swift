@@ -725,24 +725,3 @@ extension WorkspaceStore {
         return true
     }
 }
-
-// MARK: - Data-driven tab set
-
-extension Tab {
-    /// True when switching to this tab should trigger a `.refresh`-tier data refresh.
-    ///
-    /// Configuration and log surfaces are excluded: refreshing when the user
-    /// navigates to Schedules or Runs would be noisy and misleading.
-    var isDataDriven: Bool {
-        switch self {
-        case .overview, .fleet, .devices, .deviceLookup, .trends, .audit, .reports,
-             .securityPosture, .compliancePosture, .complianceBenchmarks,
-             .patch, .updates, .ddmBlueprints,
-             .policyProfile, .extensionAttributes,
-             .outreach, .protectDashboard, .mobileFleet, .groupInventory:
-            return true
-        case .schedules, .runs, .config, .customize, .sources, .backups, .settings, .onboarding:
-            return false
-        }
-    }
-}

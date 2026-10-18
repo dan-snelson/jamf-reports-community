@@ -650,9 +650,6 @@ struct ReportEngine: Sendable {
         /// The summaries directory could not be created.
         case directoryUnavailable
 
-        /// Whether today's summary is on disk when the call returns.
-        var summaryIsOnDisk: Bool { self == .wrote || self == .keptExisting }
-
         /// The reason a caller should put behind the `[partial]` marker, or nil
         /// when there is nothing to say — either the summary is on disk, or the
         /// marker has already been emitted by the writer itself.

@@ -38,13 +38,6 @@ struct PolicyHealthService: Sendable {
 
         // MARK: - Computed aggregates
 
-        var findingsBySeverity: [String: Int] {
-            let counts = Dictionary(findings.map {
-                (key: $0.severity.lowercased(), value: 1)
-            }, uniquingKeysWith: +)
-            return counts
-        }
-
         /// True when a profile-status snapshot decoded — distinguishes "no
         /// data collected" (empty state) from "zero failures" (healthy state).
         var hasProfileData: Bool {

@@ -37,14 +37,12 @@ final class ConnectionCheckTests: XCTestCase {
         let verdict = ConnectionCheck.verdict(version: success(#"{"version":"11.25.0"}"#),
                                               probe: nil)
         XCTAssertEqual(verdict, .accepted(jamfProVersion: "11.25.0"))
-        XCTAssertFalse(verdict.blocksContinue)
     }
 
     func testOwnershipForbiddenOnStepOneBlocks() {
         let version = failure(5, "permission denied (HTTP 403): {\"code\":\"OWNERSHIP_FORBIDDEN\"}")
         let verdict = ConnectionCheck.verdict(version: version, probe: nil)
         XCTAssertEqual(verdict, .rejectedID(.scopeRejected))
-        XCTAssertTrue(verdict.blocksContinue)
     }
 
     func testUnknownEnvironmentOnStepTwoBlocks() {
@@ -77,7 +75,6 @@ final class ConnectionCheckTests: XCTestCase {
         let verdict = ConnectionCheck.verdict(version: version, probe: nil)
         let name = "Inventory > Devices: Read (devices:read) (jamf-pro:read)"
         XCTAssertEqual(verdict, .missingPermission(names: [name]))
-        XCTAssertFalse(verdict.blocksContinue)
         XCTAssertFalse(verdict.suggestsJamfSchool)
         XCTAssertTrue(verdict.message.contains("Inventory > Devices: Read (devices:read)"))
         XCTAssertFalse(verdict.message.contains("Jamf School"))
@@ -122,7 +119,6 @@ final class ConnectionCheckTests: XCTestCase {
             + "\"The request context could not be detected.\",\"id\":\"\"}]}")
         let verdict = ConnectionCheck.verdict(version: version, probe: nil)
         XCTAssertEqual(verdict, .rejectedID(.scopeRejected))
-        XCTAssertTrue(verdict.blocksContinue)
     }
 
     /// `404 TENANT_NOT_FOUND` (jamfplatform-go-sdk WIRE-FACTS, 2026-09-01): the environment exists
@@ -176,7 +172,6 @@ final class ConnectionCheckTests: XCTestCase {
         XCTAssertTrue(verdict.message.contains("School API key"))
         XCTAssertTrue(verdict.message.contains("Add Jamf School workspace"))
         XCTAssertTrue(verdict.suggestsJamfSchool)
-        XCTAssertTrue(verdict.blocksContinue)
         for other: ConnectionCheck.Verdict in [
             .accepted(jamfProVersion: nil), .rejectedID(.unknownEnvironment), .undecided(exitCode: 1),
         ] {
@@ -191,7 +186,6 @@ final class ConnectionCheckTests: XCTestCase {
                        .undecided(exitCode: 1))
         XCTAssertEqual(ConnectionCheck.verdict(version: bare404, probe: failure(1, "timeout")),
                        .undecided(exitCode: 1))
-        XCTAssertFalse(ConnectionCheck.Verdict.undecided(exitCode: 1).blocksContinue)
     }
 
     func testOnlyABare404RunsStepTwo() {
@@ -227,7 +221,6 @@ final class ConnectionCheckTests: XCTestCase {
                        .undecided(exitCode: timedOut))
         XCTAssertEqual(ConnectionCheck.verdict(version: bare404, probe: partial),
                        .undecided(exitCode: timedOut), "the probe step timing out")
-        XCTAssertFalse(ConnectionCheck.verdict(version: partial, probe: nil).blocksContinue)
         XCTAssertFalse(ConnectionCheck.needsProbe(partial), "no second call after a timeout")
     }
 

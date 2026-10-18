@@ -37,9 +37,6 @@ extension CLIBridge {
     /// A collect is running inside `holdingTickLock`.
     static var collectRunning: Bool { holdPurpose == .collect }
 
-    /// A jamf-cli install or update is running inside `holdingTickLock`.
-    static var toolUpdateRunning: Bool { holdPurpose == .toolUpdate }
-
     /// That hold has the lock file, which it does not when the file cannot be written.
     private(set) static var holdsTickLock = false
 

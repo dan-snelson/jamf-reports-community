@@ -155,7 +155,8 @@ final class DemoDataOperationsTests: XCTestCase {
     func testDemoPolicyFindingsMatchTheSummaryTiles() {
         let snapshot = DemoData.policyHealth
         let summary = snapshot.summary
-        let bySeverity = snapshot.findingsBySeverity
+        let bySeverity = Dictionary(grouping: snapshot.findings) { $0.severity.lowercased() }
+            .mapValues(\.count)
         let checks = ["no_scope": "No targets in scope", "no_category": "Uncategorised"]
 
         XCTAssertEqual(summary?.configFindings, snapshot.findings.count)

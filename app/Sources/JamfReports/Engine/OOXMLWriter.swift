@@ -95,54 +95,6 @@ enum CellFormat: String, Sendable, CaseIterable {
     case pctRed
     case date
     case int
-
-    /// Return the numeric-format string for this format, if any.
-    var numFmt: String? {
-        switch self {
-        case .pct, .pctGreen, .pctYellow, .pctRed: return "0.0%"
-        case .date: return "yyyy-mm-dd"
-        case .int: return "0"
-        default: return nil
-        }
-    }
-
-    var isBold: Bool { self == .title || self == .header }
-    var isItalic: Bool { self == .subtitle }
-
-    var bgColorHex: String? {
-        switch self {
-        case .green, .pctGreen:  return "C6EFCE"
-        case .yellow, .pctYellow: return "FFEB9C"
-        case .red, .pctRed:      return "FFC7CE"
-        default:                  return nil
-        }
-    }
-
-    var fontColorHex: String? {
-        switch self {
-        case .header:   return "FFFFFF"
-        case .subtitle: return "595959"
-        default:        return nil
-        }
-    }
-
-    var hasBorder: Bool {
-        switch self {
-        case .title, .subtitle: return false
-        default:                return true
-        }
-    }
-
-    var fontSize: Int? {
-        switch self {
-        case .title:    return 14
-        case .subtitle: return 10
-        default:        return nil
-        }
-    }
-
-    // Index in the workbook formats list — populated at write time.
-    var formatIndex: Int { CellFormat.allCases.firstIndex(of: self) ?? 0 }
 }
 
 // MARK: - Column width / row freeze

@@ -461,8 +461,6 @@ final class CollectHonestyTests: XCTestCase {
             .emitSummaryJSON(summariesDir: summariesDir, onLine: collector.append)
 
         XCTAssertEqual(outcome, .writeFailed)
-        XCTAssertFalse(outcome.summaryIsOnDisk,
-                       "the emitter must not claim a summary it could not write")
         XCTAssertNil(outcome.partialReason,
                      "the writer already emitted the marker — the caller must not double-report")
         let marker = collector.texts.filter {
@@ -498,7 +496,6 @@ final class CollectHonestyTests: XCTestCase {
         // still on disk, which is the question the outcome answers.
         let second = engine.emitSummaryJSON(summariesDir: summariesDir)
         XCTAssertEqual(second, .keptExisting)
-        XCTAssertTrue(second.summaryIsOnDisk)
         XCTAssertNil(second.partialReason, "a kept summary is not a partial run")
     }
 

@@ -255,7 +255,7 @@ final class WorkspaceStore {
     private var _loadedDoc: YAMLCodec.YAMLDocument?
     // config.yaml as configState was read from it; a save refuses once the file differs.
     private var _loadedStamp: ConfigFileStamp?
-    // Snapshot of state at last load/save — used by revert().
+    // Snapshot of state at last load/save.
     private var _savedState: ConfigState?
 
     /// True when configState has been edited since the last save or load.
@@ -921,14 +921,6 @@ final class WorkspaceStore {
         securityPolicyIssues = []
         rebuildColumnMappings()
         rebuildCustomEAs()
-    }
-
-    /// Discard in-memory edits and restore to the state at the last load/save.
-    func revert() {
-        configState = _savedState ?? .defaultState
-        rebuildColumnMappings()
-        rebuildCustomEAs()
-        configError = nil
     }
 
     /// Takes the column mappings a re-scaffold just wrote to config.yaml into the working

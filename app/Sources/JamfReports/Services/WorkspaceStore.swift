@@ -1351,7 +1351,7 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .overview:          "Overview"
         case .fleet:             "Fleet Overview"
-        case .devices:           "Devices"
+        case .devices:           "Computers"
         case .deviceLookup:      "Device Lookup"
         case .trends:            "Trends"
         case .audit:             "Health Audit"

@@ -51,7 +51,7 @@ struct OutreachView: View {
         let missing = snapshot.binaryMissingCount
         guard missing > 0 else { return bucketed }
         return bucketed + " \(missing) more \(missing == 1 ? "has" : "have") no Jamf binary "
-            + "and \(missing == 1 ? "is" : "are") listed on Devices under Binary missing."
+            + "and \(missing == 1 ? "is" : "are") listed on Computers under Binary missing."
     }
 
     /// The stale rule the tiers follow: the configured window over the dates `stale_basis` lists.
@@ -102,7 +102,7 @@ struct OutreachView: View {
         Card(padding: 24) {
             EmptyStateView(
                 systemImage: "envelope",
-                title: "No device inventory yet",
+                title: "No computer inventory yet",
                 message: "Collect data for this screen — use the Collect now banner when shown, or run a scheduled collect — and it will populate."
             )
         }
@@ -200,7 +200,7 @@ struct OutreachView: View {
     private var devicesTable: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Devices", trailing: "\(selectedTier.label) tier")
+                SectionHeader(title: "Computers", trailing: "\(selectedTier.label) tier")
                 if let devices = snapshot.devicesByTier[selectedTier], !devices.isEmpty {
                     Table(devices) {
                         TableColumn("Device") { device in
@@ -317,7 +317,7 @@ struct OutreachView: View {
             )
             let csv = StaleDeviceService.outreachCSV(snapshot)
             try csv.write(to: fileURL, atomically: true, encoding: .utf8)
-            let exported = "Exported \(snapshot.totalDevices) devices to \(filename)"
+            let exported = "Exported \(snapshot.totalDevices) computers to \(filename)"
             if let note = SharedConfigPin.outputFolderNote(
                 profile: workspace.profile, folder: outputDir) {
                 workspace.toast = Toast(message: exported + ". " + note, style: .warning)

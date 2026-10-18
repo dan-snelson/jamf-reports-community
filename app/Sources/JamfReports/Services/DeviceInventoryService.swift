@@ -233,7 +233,7 @@ fileprivate extension DeviceInventoryService {
             config.jamfCLIDataDir.appendingPathComponent($0, isDirectory: true)
         } + [root.appendingPathComponent("csv-inbox", isDirectory: true)]
         return folders.filter(isLink).map {
-            "Ignoring \(displayPath($0, root: root)) — it is a symbolic link, and Devices reads "
+            "Ignoring \(displayPath($0, root: root)) — it is a symbolic link, and Computers reads "
                 + "only real folders, since another Mac on a shared folder could plant a link. "
                 + "Replace it with the folder itself."
         }

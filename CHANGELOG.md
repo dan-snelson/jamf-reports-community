@@ -7,6 +7,11 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+### Changed
+
+- The Devices screen is now **Computers**, matching Jamf Pro's naming. Mobile Fleet keeps
+  mobile devices. Your saved sidebar choices and export file names are unchanged.
+
 ## [2.10.1] - 2026-10-17
 
 2.10.1 tells you when a new stable release is out, without ever installing one. It fixes Jamf

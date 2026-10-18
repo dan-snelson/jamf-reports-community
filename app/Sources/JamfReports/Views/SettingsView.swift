@@ -1201,7 +1201,7 @@ struct SettingsView: View {
                     }
                     .help("Restore every hidden tab to the sidebar.")
                 }
-                Text("Hide dashboards you don't use. Core tabs (Overview, Devices, Sources, Settings) cannot be hidden.")
+                Text("Hide dashboards you don't use. Core tabs (Overview, Computers, Sources, Settings) cannot be hidden.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                 ForEach(SettingsView.toggleableGroups, id: \.label) { group in

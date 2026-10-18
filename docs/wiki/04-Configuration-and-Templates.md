@@ -114,7 +114,7 @@ date (at least one stays on).
 - A CSV has the inventory date only when its "Last Inventory Update" column is mapped as
   `columns.last_inventory`. Without it, `inventory` does not apply to CSV rows, and Config Doctor
   says so.
-- The one rule counts the daily summary's stale figure, the Overview, Devices, Offline Outreach
+- The one rule counts the daily summary's stale figure, the Overview, Computers, Offline Outreach
   (its tiers bucket by stale age), the workbook (Active Devices, Compliance Posture, Device
   Compliance, Check-in Health, Patch Summary Dashboard, Executive Summary), the CSV sheets, the HTML
   report and the Security Score's `checked_in` factor, whose name says which dates it counts. The
@@ -125,7 +125,7 @@ its Last Check-in is more than `contact_gap_days` before that Last Contact is on
 the Jamf binary does not: broken, removed or blocked. Likewise a Mac whose check-in keeps up but
 whose Last Inventory Update lags it. The lag is measured from Last Contact, not from today, and a
 Mac silent on every channel is stale, not a gap. A Mac with no Last Contact is left out. The Health
-Audit lists both kinds with their Macs and a recommendation, Devices has a **Contact gap** filter
+Audit lists both kinds with their Macs and a recommendation, Computers has a **Contact gap** filter
 and shows the three dates in the detail panel, the Check-in Health sheet lists the Macs with all
 three dates, and the HTML report names both under Needs attention. The daily summary records no
 contact-gap count, so there is no Trends series or alert key for it.

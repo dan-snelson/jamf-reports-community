@@ -23,7 +23,7 @@ final class TabVisibilityTests: XCTestCase {
         // Core tabs stay visible despite their slugs being in raw storage.
         XCTAssertTrue(v.isVisible(.overview), "Overview is a core tab — must stay visible")
         XCTAssertTrue(v.isVisible(.settings), "Settings is a core tab — must stay visible")
-        XCTAssertTrue(v.isVisible(.devices),  "Devices is a core tab — must stay visible")
+        XCTAssertTrue(v.isVisible(.devices),  "Computers is a core tab — must stay visible")
         XCTAssertTrue(v.isVisible(.sources),  "Sources is a core tab — must stay visible")
         XCTAssertTrue(v.isVisible(.onboarding), "Onboarding is core — must stay visible")
 
@@ -103,5 +103,13 @@ final class TabVisibilityTests: XCTestCase {
     func testEmptyStringParsesToAllVisible() {
         let v = TabVisibility.parse("")
         for tab in Tab.allCases { XCTAssertTrue(v.isVisible(tab)) }
+    }
+
+    // MARK: - Computers label
+
+    func testDevicesTabIsLabelledComputersWithPersistedRawValueUnchanged() {
+        XCTAssertEqual(Tab.devices.label, "Computers")
+        // The raw value is persisted in hiddenTabs and used by deep links.
+        XCTAssertEqual(Tab.devices.rawValue, "devices")
     }
 }

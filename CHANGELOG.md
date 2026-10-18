@@ -7,6 +7,20 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+### Security
+
+- A link another Mac plants on a shared folder at `Generated Reports` or at the default
+  `archive` folder no longer redirects where reports and archived runs are written. The app
+  refuses the link, logs one warning naming the folder and writes nothing through it. (#284)
+- A log copied or exported from Run History, the Logging export and the failure alert sent to
+  Teams or Slack now lose the Jamf server address even when it is an on-premises host written
+  without `https://` (for example `jss.example.org:8443`). The address is read from the
+  profile's entry in jamf-cli's config file and is never logged. (#284)
+- Run logs, per-run summaries, schedule status files, the retention marker, the cached device
+  record and the cached audit snapshots are read with a size limit and refuse a link or a named
+  pipe at the file's name. Before, a pipe planted there could freeze the screen or a scheduled
+  run that read it. (#284)
+
 ## [2.10.1] - 2026-10-17
 
 2.10.1 tells you when a new stable release is out, without ever installing one. It fixes Jamf

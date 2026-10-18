@@ -67,8 +67,8 @@ final class UXPolishQ4Tests: XCTestCase {
 
     func testAllScheduleRunModesHaveTexts() {
         let modes = Schedule.RunMode.allCases
-        // v2.2.0 added .backup (scheduled configuration backups).
-        XCTAssertEqual(modes.count, 5, "Expected 5 run modes")
+        // v2.2.0 added .backup (scheduled configuration backups); 2.11 retired csv-assisted.
+        XCTAssertEqual(modes.count, 4, "Expected 4 run modes")
 
         let titles = modes.map(\.displayTitle)
         let descriptions = modes.map(\.displayDescription)
@@ -118,26 +118,6 @@ final class UXPolishQ4Tests: XCTestCase {
         XCTAssertTrue(
             mode.displayDescription.contains("collect"),
             "jamf-cli-full should mention collect"
-        )
-        // PR-21: make the no-CSV invariant explicit so users don't conflate
-        // jamf-cli-full with csv-assisted.
-        XCTAssertTrue(
-            mode.displayDescription.contains("No CSV"),
-            "jamf-cli-full must clarify the no-CSV invariant"
-        )
-    }
-
-    func testCSVAssistedModeDescription() {
-        let mode = Schedule.RunMode.csvAssisted
-        // PR-21: csv-assisted is strict — fails without a CSV.
-        XCTAssertEqual(mode.displayTitle, "Refresh + Generate (CSV required)")
-        XCTAssertTrue(
-            mode.displayDescription.contains("csv-inbox"),
-            "csv-assisted should mention csv-inbox"
-        )
-        XCTAssertTrue(
-            mode.displayDescription.contains("fails if no CSV"),
-            "csv-assisted must clarify the hard-fail-on-missing-CSV contract"
         )
     }
 

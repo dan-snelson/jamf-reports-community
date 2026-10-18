@@ -86,6 +86,55 @@ final class OutputDirResolutionTests: XCTestCase {
         }
     }
 
+    /// A refused `archive_dir` skips rotation with one warning; it does not move reports into a
+    /// folder next to the output the path rules never confined.
+    func testARefusedArchiveDirSkipsRotationWithOneWarning() async throws {
+        try await withWorkspace { workspace, _ in
+            let reports = workspace.appendingPathComponent("Generated Reports")
+            try FileManager.default.createDirectory(at: reports, withIntermediateDirectories: true)
+            let old = ["2020-01-01", "2020-01-02"].map {
+                reports.appendingPathComponent("report_\(profile)_\($0)_000000.xlsx")
+            }
+            for file in old { try Data("x".utf8).write(to: file) }
+            let lines = Lines()
+            let configURL = workspace.appendingPathComponent("config.yaml")
+            try ("output:\n  archive_dir: \"/etc/jrc-archive\"\n  keep_latest_runs: 1\n")
+                .write(to: configURL, atomically: true, encoding: .utf8)
+            let engine = ReportEngine(
+                config: try ConfigLoader.load(from: configURL),
+                dataDir: workspace.appendingPathComponent("jamf-cli-data"))
+            try await engine.generate(
+                outputURL: try engine.resolveOutputURL(stem: "report", profile: profile),
+                template: ComplianceTemplate(), locateJamfCLI: { nil },
+                onLine: { lines.add($0.text) })
+            XCTAssertTrue(old.allSatisfy { FileManager.default.fileExists(atPath: $0.path) },
+                          "nothing was rotated")
+            XCTAssertFalse(FileManager.default.fileExists(
+                atPath: reports.appendingPathComponent("archive").path))
+            XCTAssertEqual(lines.all.filter { $0.hasPrefix("[warn] could not resolve archive_dir") }
+                .count, 1, "\(lines.all)")
+        }
+    }
+
+    /// With `Generated Reports` a link out of the workspace there is no folder to write to: the
+    /// run fails naming the profile instead of writing relative to the working directory.
+    func testNoUsableReportFolderFailsInsteadOfWritingToTheWorkingDirectory() async throws {
+        try await withWorkspace { workspace, published in
+            try FileManager.default.createDirectory(at: published, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(
+                at: workspace.appendingPathComponent("Generated Reports"),
+                withDestinationURL: published)
+            let engine = ReportEngine(config: ReportConfig(), dataDir: workspace)
+            XCTAssertThrowsError(try engine.resolveOutputURL(stem: "report", profile: profile)) {
+                guard case ReportEngineError.reportFolderUnavailable(let named) = $0 else {
+                    return XCTFail("\($0)")
+                }
+                XCTAssertEqual(named, profile)
+                XCTAssertTrue($0.localizedDescription.contains("Generated Reports"))
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func generate(
@@ -95,9 +144,9 @@ final class OutputDirResolutionTests: XCTestCase {
         try yaml.write(to: configURL, atomically: true, encoding: .utf8)
         let engine = ReportEngine(config: try ConfigLoader.load(from: configURL),
                                   dataDir: workspace.appendingPathComponent("jamf-cli-data"))
-        let url = engine.resolveOutputURL(stem: "report", profile: profile,
+        let url = try engine.resolveOutputURL(stem: "report", profile: profile,
                                           onLine: { lines.add($0.text) })
-        try await engine.generate(csvURL: nil, outputURL: url, template: ComplianceTemplate(),
+        try await engine.generate(outputURL: url, template: ComplianceTemplate(),
                                   locateJamfCLI: { nil })
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
         return (url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path,
@@ -155,6 +204,23 @@ final class GUIReportFolderTests: XCTestCase {
             XCTAssertFalse(FileManager.default.fileExists(atPath: published.path))
             XCTAssertEqual(lines.filter { $0.hasPrefix("[warn] output.output_dir") }.count, 1,
                            "\(lines)")
+        }
+    }
+
+    /// The HTML and PDF paths fail the same way as the workbook when no report folder resolves,
+    /// not by writing to the temporary folder.
+    func testNoUsableReportFolderFailsTheGUIFormatsInsteadOfUsingTheTempFolder() async throws {
+        try await withPublishWorkspace { workspace, published in
+            try FileManager.default.createDirectory(at: published, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(
+                at: workspace.appendingPathComponent("Generated Reports"),
+                withDestinationURL: published)
+            let lines = LineBox()
+            let result = await CLIBridge().generateAll(
+                types: [.html], outputDir: nil,
+                profile: workspace.lastPathComponent, onLine: { lines.add($0.text) })
+            XCTAssertEqual(result.failed.map(\.type), [.html], "\(lines.all)")
+            XCTAssertEqual(try htmlFiles(in: published).count, 0)
         }
     }
 

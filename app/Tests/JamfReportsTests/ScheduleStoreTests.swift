@@ -123,6 +123,25 @@ final class ScheduleStoreTests: XCTestCase {
         XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.int16Value, 0o600)
     }
 
+    /// A stored `csv-assisted` schedule keeps collecting as jamf-cli-full, and says so on its run.
+    func testARetiredCSVAssistedRecordRunsAsJamfCLIFull() throws {
+        let json = """
+        [{"label":"com.github.tonyyo11.jamf-reports-community.alpha.weekly","name":"weekly",
+          "profile":"alpha","mode":"csv-assisted","schedule":"Mon 07:00"},
+         {"label":"com.github.tonyyo11.jamf-reports-community.alpha.daily","name":"daily",
+          "profile":"alpha","mode":"jamf-cli-full","schedule":"Mon 07:00"}]
+        """
+        let url = try tempDir().appendingPathComponent("schedules.json")
+        try Data(json.utf8).write(to: url)
+        let schedules = ScheduleStore(url: url).load().map { $0.toSchedule() }
+        XCTAssertEqual(schedules.map(\.mode), [.jamfCLIFull, .jamfCLIFull])
+        XCTAssertEqual(schedules.map(\.retiredCSVAssisted), [true, false])
+        XCTAssertNil(Schedule.RunMode(rawValue: "csv-assisted"))
+        XCTAssertEqual(Schedule.RunMode(stored: "csv-assisted"), .jamfCLIFull)
+        XCTAssertEqual(Schedule.RunMode(stored: "backup"), .backup)
+        XCTAssertNil(Schedule.RunMode(stored: "nope"))
+    }
+
     func testDecodeIsLenientToUnknownAndMissingKeys() throws {
         let json = """
         [{"label":"com.github.tonyyo11.jamf-reports-community.alpha.x","name":"x",

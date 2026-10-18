@@ -1,14 +1,14 @@
 import Foundation
 
-/// One Mac's value of a custom EA, from a CSV column or from `ea-results`.
+/// One Mac's value of a custom EA, from `ea-results`.
 struct EAEntry: Sendable {
     let device: String
     let serial: String
     let value: String
 }
 
-/// The typed tab (boolean, percentage, version, text, date) of one `custom_eas` entry. Both
-/// sources feed it `EAEntry`s, so a CSV and an `ea-results` workbook read the same.
+/// The typed tab (boolean, percentage, version, text, date) of one `custom_eas` entry. Fed
+/// `EAEntry`s from `ea-results`.
 struct EASheetWriter: Sendable {
     let config: ReportConfig
     let workbook: Workbook
@@ -203,15 +203,12 @@ struct EASheetWriter: Sendable {
 struct EASheets: Sendable {
     let config: ReportConfig
     let workbook: Workbook
-    let profile: String?
     private let tabs: [(ea: CustomEAConfig, entries: [EAEntry])]
     private let warnings: [(ea: CustomEAConfig, reason: String)]
 
-    /// Nil when this source has nothing to say: no custom EAs, or no collected data. A CSV
-    /// workbook with no collected values keeps its own CSV tabs.
+    /// Nil when this source has nothing to say: no custom EAs, or no collected data.
     static func load(
-        config: ReportConfig, workbook: Workbook, dataDir: URL, profile: String?,
-        csvPresent: Bool
+        config: ReportConfig, workbook: Workbook, dataDir: URL
     ) -> EASheets? {
         guard let eas = config.customEas, !eas.isEmpty else { return nil }
         let rows = snapshot("ea-results", in: dataDir)
@@ -219,7 +216,7 @@ struct EASheets: Sendable {
         let names = snapshot("computer-extension-attributes", in: dataDir)
             .flatMap { try? JSONDecoder().decode([ExtensionAttribute].self, from: $0) }
             .flatMap { $0.isEmpty ? nil : Set($0.map { key($0.name) }) }
-        guard !rows.isEmpty || (!csvPresent && names != nil) else { return nil }
+        guard !rows.isEmpty || names != nil else { return nil }
         // Only the date tab has a Serial column, and the rows carry no serial of their own.
         let serials = eas.contains { $0.type == .date }
             ? snapshot("computers", in: dataDir).map(serialsByName) ?? [:] : [:]
@@ -242,11 +239,11 @@ struct EASheets: Sendable {
                 : "Not defined in Jamf Pro"
             warnings.append((ea, reason))
         }
-        return EASheets(config: config, workbook: workbook, profile: profile,
+        return EASheets(config: config, workbook: workbook,
                         tabs: tabs, warnings: warnings)
     }
 
-    /// Tab names and writers, in the order the CSV path used: one per EA, then EA Warnings.
+    /// Tab names and writers: one per EA, then EA Warnings.
     var sheetPlan: [(name: String, write: () -> Void)] {
         var plan = tabs.map { tab in
             (name: tab.ea.name, write: { writer.write(tab.ea, entries: tab.entries) })
@@ -259,12 +256,6 @@ struct EASheets: Sendable {
     func writeAll(sheets: SheetsConfig) -> [String] {
         let kept = sheets.applyTo(sheetPlan)
         kept.forEach { $0.write() }
-        if let logo = CSVDashboard.loadLogoData(from: config, profile: profile) {
-            for name in kept.map(\.name) {
-                workbook.sheet(named: name)?.insertImage(
-                    row: 0, col: 0, data: logo, filename: "logo.png", xScale: 1.0, yScale: 1.0)
-            }
-        }
         return kept.map(\.name)
     }
 

@@ -207,7 +207,7 @@ enum ScheduledRunSignals {
     /// just wrote and post ONE attention card if any rule trips (2.6 "trust trio"
     /// #1). Gated on `alerts.isEnabled` AND a usable `notify:` webhook — alerts
     /// reuse the notify webhook and add no URL of their own. Only call after a
-    /// run that COLLECTED (snapshot-only, full, csv-assisted); jamf-cli-only
+    /// run that COLLECTED (snapshot-only, full); jamf-cli-only
     /// generates from cache and produces no fresh summary.
     ///
     /// Best-effort: a summary-load or send failure logs a warning and never

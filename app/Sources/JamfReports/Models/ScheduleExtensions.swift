@@ -35,8 +35,6 @@ extension Schedule {
             modeSummary = "builds a workbook from cached data"
         case .jamfCLIFull:
             modeSummary = "collects snapshots and builds a workbook"
-        case .csvAssisted:
-            modeSummary = "collects snapshots and builds a workbook (CSV required)"
         case .backup:
             modeSummary = "backs up Jamf Pro configuration objects"
         }

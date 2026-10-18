@@ -60,8 +60,6 @@ struct ReportConfig: Decodable, Sendable {
     /// mirroring the Python script's `DEFAULT_CONFIG` deep-merge.
     func withDefaults() -> ReportConfig {
         var r = self
-        if r.columns == nil { r.columns = ColumnConfig() }
-        if r.mobileColumns == nil { r.mobileColumns = MobileColumnConfig() }
         if r.securityAgents == nil { r.securityAgents = [] }
         if r.jamfCli == nil { r.jamfCli = JamfCLIConfig() }
         if r.compliance == nil { r.compliance = ComplianceConfig() }
@@ -78,8 +76,8 @@ struct ReportConfig: Decodable, Sendable {
 
 // MARK: - columns
 
-/// Maps logical field names → actual CSV column header strings.
-/// Key names must match `DEFAULT_CONFIG["columns"]` exactly.
+/// Retired in 2.11: no report reads these. Kept, with `ColumnField`, until the Config screen,
+/// `ConfigService` and `ConfigSchema` stop writing and listing `columns`.
 struct ColumnConfig: Decodable, Sendable {
     var computerName: String?
     var serialNumber: String?
@@ -189,18 +187,7 @@ struct ColumnConfig: Decodable, Sendable {
 
 /// Logical column field identifiers (the `columns` keys in `config.example.yaml`).
 ///
-/// This enum is a hub — adding a new case requires edits in five places:
-///
-/// 1. **This enum** — add the new `case`.
-/// 2. **`ColumnConfig.columnName(for:)`** (same file) — add a `case` branch that returns
-///    the corresponding `ColumnConfig` property.
-/// 3. **`ColumnConfig.CodingKeys`** (same file) — add a `CodingKeys` entry if the raw
-///    YAML key name differs from the Swift property name (snake_case vs camelCase).
-/// 4. **`CSVDashboard.mappedExtraInventoryFields()`** — add the field if it should appear
-///    as an optional column in the Device Inventory sheet.
-/// 5. **`CustomizeView.swift`** — add the field if it should appear in the column-picker UI.
-///
-/// Also document it in `config.example.yaml`. See CLAUDE.md "Config-shape change checklist".
+/// Retired in 2.11 with `ColumnConfig`.
 enum ColumnField: String, CaseIterable, Sendable {
     case computerName, serialNumber, operatingSystem, lastCheckin
     case department, manager, email
@@ -824,6 +811,7 @@ struct ChartsConfig: Decodable, Sendable {
     var savePng: Bool?
     var embedInXlsx: Bool?
     var historicalCsvDir: String?   // key is `historical_csv_dir`
+    /// Retired in 2.11: no reader. Goes with the key's `ConfigSchema` retired entry.
     var archiveCurrentCsv: Bool?    // key is `archive_current_csv`
     var osAdoption: OSAdoptionConfig?
     var complianceTrend: ComplianceTrendConfig?

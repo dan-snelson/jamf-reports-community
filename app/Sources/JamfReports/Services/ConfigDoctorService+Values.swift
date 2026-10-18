@@ -36,13 +36,8 @@ extension ConfigDoctorService {
         return rows
     }
 
-    /// The tabs `CSVDashboard.sheetPlan` and `EASheets` can write besides one per custom EA; the
-    /// Jamf-cli tabs are `SheetID`.
-    static let csvSheetNames = [
-        "Device Inventory", "Stale Devices", "Security Controls", "Security Agents",
-        "Compliance", "Mobile Device Inventory", "Mobile Stale Devices", "Fleet Drift",
-        "EA Warnings",
-    ]
+    /// The tab `EASheets` can write besides one per custom EA; the Jamf-cli tabs are `SheetID`.
+    static let eaWarningsSheetNames = ["EA Warnings"]
 
     /// The tabs `SchoolDashboard.sheetPlan` can write, the only tabs of a Jamf School workbook.
     static let schoolSheetNames = [
@@ -182,7 +177,7 @@ extension ConfigDoctorService {
         let lists = [("only", sheets.only), ("skip", sheets.skip), ("order", sheets.order)]
         let tabs = ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool
             ? schoolSheetNames
-            : SheetID.allCases.map(\.rawValue) + csvSheetNames + [ReportEngine.chartsSheetName]
+            : SheetID.allCases.map(\.rawValue) + eaWarningsSheetNames + [ReportEngine.chartsSheetName]
                 + (config.customEas ?? []).map(\.name)
         let known = Set(tabs.map { $0.lowercased() })
         return lists.compactMap { key, names in

@@ -168,7 +168,7 @@ extension CLIBridge {
                     )
                 },
                 generateHTML: {
-                    let outURL = self.reportFileURL(
+                    let outURL = try self.reportFileURL(
                         profile: profile, outputDir: outputDir, type: .html, onLine: onLine)
                     return try await self.generateHTML(
                         profile: profile, outFile: outURL.path, template: template,
@@ -176,7 +176,7 @@ extension CLIBridge {
                     )
                 },
                 generatePDF: {
-                    let outURL = self.reportFileURL(
+                    let outURL = try self.reportFileURL(
                         profile: profile, outputDir: outputDir, type: .pdf, onLine: onLine)
                     return try await self.generatePDF(
                         profile: profile, outFile: outURL.path, template: template, onLine: onLine
@@ -327,10 +327,10 @@ extension CLIBridge {
     private func reportFileURL(
         profile: String, outputDir: URL?, type: GenerateOutputType,
         onLine: @Sendable @escaping (LogLine) -> Void
-    ) -> URL {
-        let dir = outputDir
-            ?? WorkspacePaths.reportsDir(for: profile, onLine: onLine)
-            ?? FileManager.default.temporaryDirectory
+    ) throws -> URL {
+        guard let dir = outputDir ?? WorkspacePaths.reportsDir(for: profile, onLine: onLine) else {
+            throw ReportEngineError.reportFolderUnavailable(profile)
+        }
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {

@@ -7,13 +7,13 @@ import CryptoKit
 /// Top-level orchestrator replacing the Python `cmd_generate`, `cmd_collect`,
 /// `cmd_html`, `cmd_inventory_csv`, and school command functions.
 ///
-/// Coordinates `CoreDashboard` (jamf-cli JSON sheets), `CSVDashboard` (CSV sheets),
-/// chart rendering, and OOXML writing. Writes the final `.xlsx` atomically.
+/// Coordinates `CoreDashboard` (jamf-cli JSON sheets), `EASheets` (custom EA tabs from collected
+/// results), chart rendering, and OOXML writing. Writes the final `.xlsx` atomically.
 ///
 /// Usage:
 /// ```swift
 /// let engine = ReportEngine(config: config, dataDir: workspaceDataURL)
-/// try await engine.generate(csvURL: csvURL, outputURL: reportURL)
+/// try await engine.generate(outputURL: reportURL)
 /// ```
 struct ReportEngine: Sendable {
 
@@ -24,8 +24,6 @@ struct ReportEngine: Sendable {
     /// pinned logo and HTML history file look the profile's workspace up by it; the profile in
     /// config.yaml is not used for that, since a peer on a shared workspace can edit it.
     var profile: String? = nil
-    /// The most bytes of a CSV export `generate` reads; a larger file fails the run. A test seam.
-    var csvByteLimit = InventoryCSV.maxBytes
 
     /// The trend-chart tab, the one tab no sheet plan writes.
     static let chartsSheetName = "Charts"
@@ -35,8 +33,6 @@ struct ReportEngine: Sendable {
     /// Generate an `.xlsx` report and write it atomically to `outputURL`.
     ///
     /// - Parameters:
-    ///   - csvURL: Optional path to a Jamf Pro CSV export.
-    ///             When `nil`, only jamf-cli sheets are generated.
     ///   - outputURL: Destination path for the `.xlsx` file.
     ///                Parent directory is created if absent.
     ///   - template: The `ReportTemplate` that controls which sheets are included and
@@ -48,14 +44,13 @@ struct ReportEngine: Sendable {
     ///   - locateJamfCLI: Finds the jamf-cli whose version the Cover sheet records; tests
     ///                    pass `{ nil }` so no jamf-cli runs.
     ///   - onLine: Optional streaming log callback. Post-generate side-effect warnings
-    ///             (archive rotation, CSV snapshot, summary JSON) are routed here when
+    ///             (archive rotation, summary JSON) are routed here when
     ///             provided, so callers with a live log view (e.g. GenerateSheet) see them.
     /// - Returns: A list of `SheetFailure` entries for sheets that encountered unexpected
     ///            errors. An empty list means all sheets that had data were written cleanly.
     ///            Sheets that threw `SheetSkippable` (absent cached data) are not included.
     @discardableResult
     func generate(
-        csvURL: URL?,
         outputURL: URL,
         template: any ReportTemplate = FullInstanceTemplate(),
         aiNarrative: String? = nil,
@@ -92,17 +87,11 @@ struct ReportEngine: Sendable {
         for sheetID in template.includedSheets {
             AppLogger.report.debug("sheet \(sheetID.rawValue, privacy: .public)")
         }
-        // The CSV and the EA results are read first so `sheets.only` is judged against every
-        // tab this workbook can have. Collected EA results win over the CSV's EA columns.
-        let eaSheets = EASheets.load(config: config, workbook: workbook, dataDir: dataDir,
-                                     profile: profile, csvPresent: csvURL != nil)
-        let csv = try csvURL.map {
-            try csvDashboard(at: $0, workbook: workbook, profile: profile,
-                             skippingCustomEAs: eaSheets != nil)
-        }
+        // The EA results are read first so `sheets.only` is judged against every tab this
+        // workbook can have.
+        let eaSheets = EASheets.load(config: config, workbook: workbook, dataDir: dataDir)
         let sheets = Self.sheetSettings(
             config, tabs: template.includedSheets.map(\.rawValue)
-                + (csv?.sheetPlan.map(\.name) ?? [])
                 + (eaSheets?.sheetPlan.map(\.name) ?? [])
                 + (config.charts?.isEnabled == true ? [Self.chartsSheetName] : []),
             onLine: onLine)
@@ -116,9 +105,6 @@ struct ReportEngine: Sendable {
             onLine?(.init(timestamp: Date(), level: .warn, text: msg))
         }
 
-        // CSVDashboard sheets — Swift CSV writers are non-throwing, so there is no
-        // failure list here.
-        _ = csv?.writeAll(sheets: sheets)
         let eaWritten = eaSheets?.writeAll(sheets: sheets) ?? []
 
         // Chart sheet — render PNG charts from trend summaries and embed in workbook.
@@ -137,8 +123,8 @@ struct ReportEngine: Sendable {
             renderChartSheet(workbook: workbook, summariesDir: summariesDir,
                              pngOutputDir: pngDir, profile: profile)
         }
-        // Nothing to write: no jamf-cli sheet had data, no CSV, and no Charts tab that stays.
-        if writtenCore.isEmpty, csv == nil, eaWritten.isEmpty,
+        // Nothing to write: no jamf-cli sheet had data, no EA tab, and no Charts tab that stays.
+        if writtenCore.isEmpty, eaWritten.isEmpty,
            workbook.sheet(named: Self.chartsSheetName) == nil
             || !sheets.keeps(Self.chartsSheetName) {
             throw ReportEngineError.noCachedData(dataDir)
@@ -146,9 +132,13 @@ struct ReportEngine: Sendable {
 
         // The tabs of every writer above, the Charts tab included, as one list.
         workbook.arrange(by: sheets)
+        if let logo = ReportLogo.load(from: config, profile: profile) {
+            workbook.firstSheet?.insertImage(
+                row: 0, col: 0, data: logo, filename: "logo.png", xScale: 1.0, yScale: 1.0)
+        }
         try workbook.write(to: outputURL)
 
-        finishWorkbook(at: outputURL, csvURL: csvURL, templateID: template.identifier,
+        finishWorkbook(at: outputURL, templateID: template.identifier,
                        profile: profile, provenance: prov, onLine: onLine)
 
         return coreFailures
@@ -183,19 +173,6 @@ struct ReportEngine: Sendable {
         }
     }
 
-    private func csvDashboard(
-        at csvURL: URL, workbook: Workbook, profile: String, skippingCustomEAs: Bool
-    ) throws -> CSVDashboard {
-        let csvData = try InventoryCSV.read(csvURL, limit: csvByteLimit)
-        var csvConfig = config
-        if skippingCustomEAs { csvConfig.customEas = nil }
-        guard let csv = CSVDashboard(config: csvConfig, csvData: csvData, workbook: workbook,
-                                     currentCSVURL: csvURL, profile: profile) else {
-            throw ReportEngineError.csvParseFailed(csvURL)
-        }
-        return csv
-    }
-
     /// `config.sheets` for a workbook that can hold `tabs`. An `only` list that names none of
     /// them is ignored, with one `[warn]` line, so a typo can never leave a workbook empty.
     static func sheetSettings(
@@ -215,10 +192,10 @@ struct ReportEngine: Sendable {
         return SheetsConfig(only: nil, skip: settings.skip, order: settings.order)
     }
 
-    /// What follows a written workbook: the manifest, the sha256 sidecar, the CSV snapshot,
-    /// run rotation and the trend summary.
+    /// What follows a written workbook: the manifest, the sha256 sidecar, run rotation and the
+    /// trend summary.
     private func finishWorkbook(
-        at outputURL: URL, csvURL: URL?, templateID: String, profile: String,
+        at outputURL: URL, templateID: String, profile: String,
         provenance prov: Provenance, onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
     ) {
         // Write a SHA-256 manifest alongside the artifact for federal compliance.
@@ -231,26 +208,20 @@ struct ReportEngine: Sendable {
             onLine?(Self.sha256LogLine(hash: hash, artifact: outputURL))
         }
 
-        // Archive CSV snapshot only after a successful write — avoids archiving when generate fails.
-        if let csvURL,
-           config.charts?.archiveCurrentCsv == true,
-           let historicalDir = resolvedHistoricalDir(profile: profile, onLine: onLine) {
-            archiveCurrentCSV(csvURL: csvURL, historicalDir: historicalDir, onLine: onLine)
-        }
-
         // Post-write: archive old runs, emit trend summary.
         let outputDir = outputURL.deletingLastPathComponent()
         let stem = stemFromURL(outputURL)
         if config.output?.isArchiveEnabled == true {
-            let archiveDir = resolvedArchiveDir(profile: profile, outputDir: outputDir, onLine: onLine)
-            let keep = config.output?.resolvedKeepLatestRuns ?? 10
-            archiveOldRuns(
-                outputDir: outputDir,
-                archiveDir: archiveDir,
-                stem: stem,
-                keep: keep,
-                onLine: onLine
-            )
+            if let archiveDir = resolvedArchiveDir(profile: profile, onLine: onLine) {
+                let keep = config.output?.resolvedKeepLatestRuns ?? 10
+                archiveOldRuns(
+                    outputDir: outputDir,
+                    archiveDir: archiveDir,
+                    stem: stem,
+                    keep: keep,
+                    onLine: onLine
+                )
+            }
         }
 
         if let summariesDir = resolvedSummariesDir(profile: profile, onLine: onLine) {
@@ -399,61 +370,6 @@ struct ReportEngine: Sendable {
         }
     }
 
-    // MARK: - CSV archival (mirrors Python _archive_csv_snapshot)
-
-    /// Copy `csvURL` into `historicalDir` with a timestamp suffix.
-    ///
-    /// Written as `computers_YYYY-MM-DD_HHmmss.csv`. Failures are logged but do
-    /// not abort the generate run.
-    ///
-    /// - Parameter onLine: When provided, warnings are emitted here in addition to
-    ///   `print` so live log views display side-effect failures.
-    func archiveCurrentCSV(
-        csvURL: URL,
-        historicalDir: URL,
-        onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
-    ) {
-        let fm = FileManager.default
-        // Read through the same bounded, link-refusing open as the report, so a link planted at
-        // the CSV's name is never copied and the archive cannot hold more than the report read.
-        let data: Data
-        do {
-            data = try InventoryCSV.read(csvURL, limit: csvByteLimit)
-        } catch {
-            let msg = "[warn] Could not archive CSV snapshot: \(error.localizedDescription)"
-            AppLogger.report.warning("\(msg, privacy: .private)")
-            print(msg)
-            onLine?(.init(timestamp: Date(), level: .warn, text: msg))
-            return
-        }
-        do {
-            try fm.createDirectory(at: historicalDir, withIntermediateDirectories: true)
-        } catch {
-            let msg = "[warn] Could not create historical dir: \(error)"
-            AppLogger.report.warning("\(msg, privacy: .private)")
-            print(msg)
-            onLine?(.init(timestamp: Date(), level: .warn, text: msg))
-            return
-        }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HHmmss"
-        let ts = formatter.string(from: Date())
-        let dest = historicalDir.appendingPathComponent("computers_\(ts).csv")
-        do {
-            try data.write(to: dest, options: .withoutOverwriting)
-            // Keep the export's own date: Fleet Drift picks the prior snapshot by modification time.
-            if let modified = (try? csvURL.resourceValues(forKeys: [.contentModificationDateKey]))?
-                .contentModificationDate {
-                try? fm.setAttributes([.modificationDate: modified], ofItemAtPath: dest.path)
-            }
-        } catch {
-            let msg = "[warn] Could not archive CSV snapshot: \(error)"
-            AppLogger.report.warning("\(msg, privacy: .private)")
-            print(msg)
-            onLine?(.init(timestamp: Date(), level: .warn, text: msg))
-        }
-    }
-
     // MARK: - Summary JSON emission (mirrors Python _build_summary_from_bridge)
 
     /// Write `summary_YYYY-MM-DD.json` to `summariesDir` from cached jamf-cli snapshots.
@@ -524,11 +440,11 @@ struct ReportEngine: Sendable {
 
         guard let summary = buildSummaryFromCLI(date: today, provenance: provenance, liveKinds: liveKinds) else {
             // buildSummaryFromCLI returns nil when no cached jamf-cli snapshots
-            // are available to summarize (fresh workspace, failed/skipped collect,
-            // CSV-only generate run). Surface this so operators understand why
+            // are available to summarize (fresh workspace, failed/skipped collect).
+            // Surface this so operators understand why
             // the trend chart and StaleDataBanner won't refresh on this run.
             let msg = "[warn] summary JSON not written: no jamf-cli snapshots available to summarize " +
-                      "(run `collect` first, or this is expected for CSV-only generation)"
+                      "(run `collect` first)"
             AppLogger.collect.warning("\(msg, privacy: .public)")
             print(msg)
             onLine?(.init(timestamp: Date(), level: .warn, text: msg))
@@ -642,7 +558,7 @@ struct ReportEngine: Sendable {
     /// What one `emitSummaryJSON` call did.
     ///
     /// The reason lives here rather than at the emit site because `generate`
-    /// calls `emitSummaryJSON` on its CSV-only path, where having no jamf-cli
+    /// calls `emitSummaryJSON` after any workbook, where having no jamf-cli
     /// snapshots is normal and must not mark the run partial. Only the collect
     /// path turns these into a `[partial]` line.
     enum SummaryEmitOutcome: Equatable, Sendable {
@@ -1460,7 +1376,7 @@ struct ReportEngine: Sendable {
     /// config-supplied absolute paths are subject to the same containment check
     /// as all other workspace-relative paths. Returns nil and logs when the
     /// profile is invalid or the path escapes the workspace — both are non-fatal
-    /// because CSV archival is a best-effort post-write side effect.
+    /// because the summary is a best-effort post-write side effect.
     private func resolvedHistoricalDir(
         profile: String,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
@@ -1469,7 +1385,7 @@ struct ReportEngine: Sendable {
             return try WorkspacePaths.historicalDir(for: profile)
         } catch {
             let msg = "[warn] could not resolve historical_csv_dir for '\(profile)': " +
-                      "\(error.localizedDescription) — CSV archival skipped"
+                      "\(error.localizedDescription) — summary skipped"
             AppLogger.report.warning("\(msg, privacy: .public)")
             onLine?(.init(timestamp: Date(), level: .warn, text: msg))
             return nil
@@ -1488,22 +1404,20 @@ struct ReportEngine: Sendable {
 
     /// Routes through `WorkspacePaths.archiveDir(for:)` so that config-supplied
     /// absolute archive paths are subject to the workspace containment check.
-    /// Falls back to `<outputDir>/archive` on failure and logs a warning — archive
-    /// rotation is a non-fatal post-write side effect.
+    /// Nil, with one `[warn]`, when the folder is refused: rotation is skipped rather than
+    /// moving reports into a folder the path rules did not confine.
     private func resolvedArchiveDir(
         profile: String,
-        outputDir: URL,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
-    ) -> URL {
+    ) -> URL? {
         do {
             return try WorkspacePaths.archiveDir(for: profile)
         } catch {
-            let fallback = outputDir.appendingPathComponent("archive", isDirectory: true)
             let msg = "[warn] could not resolve archive_dir for '\(profile)': " +
-                      "\(error.localizedDescription) — using \(fallback.lastPathComponent)"
+                      "\(error.localizedDescription) — run rotation skipped"
             AppLogger.report.warning("\(msg, privacy: .public)")
             onLine?(.init(timestamp: Date(), level: .warn, text: msg))
-            return fallback
+            return nil
         }
     }
 
@@ -2463,7 +2377,7 @@ struct ReportEngine: Sendable {
         // `isCollectDead` deliberately forgives a bare usage error, so the run
         // reaches here having fetched nothing and would otherwise report a clean
         // "Trends updated". The marker belongs here rather than inside
-        // `emitSummaryJSON` because `generate` calls that on its CSV-only path,
+        // `emitSummaryJSON` because `generate` calls that after any workbook,
         // where having no jamf-cli snapshots is the normal, correct state.
         if let unwritten {
             let msg = "\(Self.summaryNotWrittenMarker) \(unwritten) — Trends did not advance"
@@ -3618,8 +3532,8 @@ struct ReportEngine: Sendable {
     func resolveOutputURL(
         stem: String, profile: String? = nil,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
-    ) -> URL {
-        let outDir = outputDirectory(profile: profile, onLine: onLine)
+    ) throws -> URL {
+        let outDir = try outputDirectory(profile: profile, onLine: onLine)
 
         // Include the profile in the filename so reports remain attributable
         // to their tenant once moved out of the workspace folder.
@@ -3650,12 +3564,15 @@ struct ReportEngine: Sendable {
     }
 
     /// The report folder from `WorkspacePaths.reportsDir`, so every report writer agrees on it.
-    /// With no workspace to resolve against, the value is used as typed (relative to the
-    /// working directory), as before.
+    /// With no profile, the value is used as typed (relative to the working directory), as
+    /// before; a profile whose folder cannot be resolved throws.
     private func outputDirectory(
         profile: String?, onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
-    ) -> URL {
-        if let profile, let dir = WorkspacePaths.reportsDir(for: profile, onLine: onLine) {
+    ) throws -> URL {
+        if let profile {
+            guard let dir = WorkspacePaths.reportsDir(for: profile, onLine: onLine) else {
+                throw ReportEngineError.reportFolderUnavailable(profile)
+            }
             return dir
         }
         let rawDir = config.output?.resolvedOutputDir ?? WorkspacePaths.generatedReportsDirName
@@ -3686,7 +3603,6 @@ struct ReportEngine: Sendable {
         let attrs: [FileAttributeKey: Any] = [.posixPermissions: NSNumber(value: Int16(0o700))]
         let paths = [
             workspace,
-            workspace.appendingPathComponent("csv-inbox", isDirectory: true),
             workspace.appendingPathComponent("jamf-cli-data", isDirectory: true),
             workspace.appendingPathComponent("Generated Reports", isDirectory: true),
             workspace.appendingPathComponent("automation", isDirectory: true),
@@ -4294,7 +4210,9 @@ struct ReportEngine: Sendable {
 
 enum ReportEngineError: Error, LocalizedError {
     case noCachedData(URL)
-    case csvParseFailed(URL)
+    /// No report folder for `profile`: its workspace is missing, or `Generated Reports` in it is a
+    /// link or otherwise refused.
+    case reportFolderUnavailable(String)
     case jamfCLINotFound
     case invalidProfile(String)
     /// config.yaml's `jamf_cli.profile` names a profile other than the one the run is for.
@@ -4336,9 +4254,11 @@ enum ReportEngineError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noCachedData(let dir):
-            return "No cached jamf-cli data found in \(dir.path). Run 'collect' first, or provide a --csv export."
-        case .csvParseFailed(let url):
-            return "Failed to parse CSV at \(url.path). Ensure the file is UTF-8 and has a header row."
+            return "No cached jamf-cli data found in \(dir.path). Run 'collect' first."
+        case .reportFolderUnavailable(let profile):
+            return "No usable report folder for profile '\(ConfigSchema.displayText(profile))': "
+                + "output.output_dir was refused and \(WorkspacePaths.generatedReportsDirName) in "
+                + "the workspace is missing or is a link. Nothing was written."
         case .jamfCLINotFound:
             return "jamf-cli not found on PATH. Install it via Homebrew or from GitHub."
         case .invalidProfile(let p):

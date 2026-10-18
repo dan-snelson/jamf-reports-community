@@ -136,28 +136,6 @@ final class StaleBasisConfigTests: XCTestCase {
         XCTAssertEqual(try doctorRows("thresholds:\n  stale_device_days: 30\n"), [])
     }
 
-    func testDoctorSaysInventoryHasNoDateOnACSVWithoutTheColumn() throws {
-        let withInventory = try config("thresholds:\n  stale_basis: [check_in, inventory]\n")
-        let rows = ConfigDoctorService.csvInventoryColumnRows(
-            config: withInventory, csvHeaders: ["Computer Name"], csvFamily: .computers)
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows.first?.severity, .warn)
-        XCTAssertTrue(rows.first?.detail.contains("columns.last_inventory is not mapped") == true)
-
-        let mapped = try config(
-            "thresholds:\n  stale_basis: [inventory]\n"
-                + "columns:\n  last_inventory: Last Inventory Update\n")
-        XCTAssertTrue(ConfigDoctorService.csvInventoryColumnRows(
-            config: mapped, csvHeaders: ["x"], csvFamily: .computers).isEmpty)
-        XCTAssertTrue(ConfigDoctorService.csvInventoryColumnRows(
-            config: withInventory, csvHeaders: nil, csvFamily: nil).isEmpty, "no CSV, no row")
-        XCTAssertTrue(ConfigDoctorService.csvInventoryColumnRows(
-            config: withInventory, csvHeaders: ["x"], csvFamily: .mobile).isEmpty)
-        XCTAssertTrue(ConfigDoctorService.csvInventoryColumnRows(
-            config: try config("thresholds:\n  stale_device_days: 30\n"),
-            csvHeaders: ["x"], csvFamily: .computers).isEmpty, "the default basis needs none")
-    }
-
     // MARK: - Schema and columns
 
     func testTheNewKeysAreKnownToTheSchema() throws {

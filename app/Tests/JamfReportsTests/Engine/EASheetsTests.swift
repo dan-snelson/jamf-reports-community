@@ -39,15 +39,12 @@ final class EASheetsTests: XCTestCase {
         })
     }
 
-    private func write(
-        _ eas: [CustomEAConfig], csvPresent: Bool = false
-    ) throws -> (Workbook, [String]) {
+    private func write(_ eas: [CustomEAConfig]) throws -> (Workbook, [String]) {
         var config = ReportConfig()
         config.customEas = eas
         let workbook = Workbook()
         let sheets = try XCTUnwrap(EASheets.load(
-            config: config, workbook: workbook, dataDir: dataDir, profile: nil,
-            csvPresent: csvPresent))
+            config: config, workbook: workbook, dataDir: dataDir))
         return (workbook, sheets.writeAll(sheets: SheetsConfig()))
     }
 
@@ -189,42 +186,20 @@ final class EASheetsTests: XCTestCase {
 
     // MARK: - Which source speaks
 
-    func testNothingCollectedMeansNoTabsSoACSVKeepsItsOwn() throws {
+    func testNothingCollectedMeansNoTabs() throws {
         var config = ReportConfig()
         config.customEas = [CustomEAConfig(name: "One", column: "One", type: .text)]
-        XCTAssertNil(EASheets.load(config: config, workbook: Workbook(), dataDir: dataDir,
-                                   profile: nil, csvPresent: true))
-        XCTAssertNil(EASheets.load(config: config, workbook: Workbook(), dataDir: dataDir,
-                                   profile: nil, csvPresent: false),
-                     "with no EA data at all there is nothing to say either")
+        XCTAssertNil(EASheets.load(config: config, workbook: Workbook(), dataDir: dataDir),
+                     "with no EA data at all there is nothing to say")
     }
 
-    func testDefinitionsAloneWarnWhenThereIsNoCSV() throws {
+    func testDefinitionsAloneWarn() throws {
         try snapshot("computer-extension-attributes", [["id": "1", "name": "One"]])
         let (_, written) = try write([CustomEAConfig(name: "One", column: "One", type: .text)])
         XCTAssertEqual(written, ["EA Warnings"])
     }
 
     // MARK: - generate
-
-    func testACSVDoesNotWriteAnEATabTheResultsAlreadyWrote() async throws {
-        try results([("Mac-1", "FV", "Encrypted"), ("Mac-2", "FV", "Encrypted")])
-        let csv = dataDir.appendingPathComponent("export.csv")
-        try Data("Computer Name,Serial Number,FV\nMac-1,S1,No\nMac-2,S2,No\n".utf8).write(to: csv)
-        let config = try ConfigLoader.loadFromString("""
-        columns:
-          computer_name: Computer Name
-          serial_number: Serial Number
-        custom_eas:
-          - {name: FileVault, column: FV, type: boolean, true_value: Encrypted}
-        """)
-        let out = dataDir.appendingPathComponent("out/report.xlsx")
-        try await ReportEngine(config: config, dataDir: dataDir)
-            .generate(csvURL: csv, outputURL: out, locateJamfCLI: { nil })
-        let tabs = try SheetsSettingsTests.tabs(of: out)
-        XCTAssertEqual(tabs.filter { $0.hasPrefix("FileVault") }, ["FileVault"], "\(tabs)")
-        XCTAssertTrue(tabs.contains("Device Inventory"), "the CSV's other tabs stay")
-    }
 
     func testSheetsOnlyCanSelectAnEATab() async throws {
         try results([("Mac-1", "FV", "Encrypted")])
@@ -241,7 +216,7 @@ final class EASheetsTests: XCTestCase {
     private func generate(_ config: ReportConfig) async throws -> [String] {
         let out = dataDir.appendingPathComponent("out-\(UUID().uuidString)/report.xlsx")
         try await ReportEngine(config: config, dataDir: dataDir)
-            .generate(csvURL: nil, outputURL: out, locateJamfCLI: { nil })
+            .generate(outputURL: out, locateJamfCLI: { nil })
         return try SheetsSettingsTests.tabs(of: out)
     }
 }

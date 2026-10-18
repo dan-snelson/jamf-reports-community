@@ -215,12 +215,13 @@ private func scheduledRunSingle(
     tiers: Set<CollectionTier>?,
     verbose: Bool,
     label: String?,
-    honesty: CollectHonestyWatcher
+    honesty: CollectHonestyWatcher,
+    retiredCSVAssisted: Bool
 ) async -> Int32 {
     await SharedConfigPin.announcingOnce {
         await scheduledRunSingleBody(
             profile: profile, mode: mode, tiers: tiers, verbose: verbose,
-            label: label, honesty: honesty)
+            label: label, honesty: honesty, retiredCSVAssisted: retiredCSVAssisted)
     }
 }
 
@@ -231,7 +232,8 @@ private func scheduledRunSingleBody(
     tiers: Set<CollectionTier>?,
     verbose: Bool,
     label: String?,
-    honesty: CollectHonestyWatcher
+    honesty: CollectHonestyWatcher,
+    retiredCSVAssisted: Bool
 ) async -> Int32 {
     guard ProfileService.isValid(profile) else {
         fputs("[error] Invalid profile '\(profile)'\n", stderr)
@@ -266,6 +268,12 @@ private func scheduledRunSingleBody(
         honesty.observe(line.text)
         recorder?.record(line.text)
         if let echo = scheduledRunEcho(line, verbose: verbose) { print(echo) }
+    }
+
+    if retiredCSVAssisted {
+        onLine(.init(timestamp: Date(), level: .info, text:
+            "[info] schedule \(runLabel): csv-assisted mode was retired in 2.11; "
+            + "ran as jamf-cli-full"))
     }
 
     // Shared workspace: a config.yaml value another Mac changed since this one pinned it is
@@ -382,31 +390,9 @@ private func scheduledRunSingleBody(
         }
     }
 
-    // PR-21: csv-assisted hard-fails when csv-inbox/ is empty. Resolve up
-    // front so we don't run an expensive collect just to fail at generate.
-    let resolvedCSV: URL?
-    if mode == .csvAssisted {
-        let picked = CLIBridge.newestCSV(in: profile) { warning in
-            print(warning)
-            recorder?.record(warning)
-        }
-        guard let csv = picked else {
-            let message = "[error] csv-assisted requires a CSV in csv-inbox/ — none found for '\(profile)'"
-            fputs(message + "\n", stderr)
-            recorder?.record(message)
-            recorder?.finish(exitCode: 1)
-            return 1
-        }
-        resolvedCSV = csv
-    } else if mode == .jamfCLIFull {
-        resolvedCSV = nil  // jamf-cli-full is the no-CSV path
-    } else {
-        resolvedCSV = nil
-    }
-
     do {
         // jamf-cli-only generates from cache only — no collect, no fresh API calls.
-        // The other three modes all need fresh snapshots.
+        // The other modes all need fresh snapshots.
         if mode != .jamfCLIOnly {
             // PR-23 T-20: the schedule's plist pins the tier set via
             // --tiers. When present, it wins — it's the operator's choice
@@ -502,26 +488,17 @@ private func scheduledRunSingleBody(
         defer { if holdsGenerateClaim { SharedWorkspace.release(profile: profile) } }
 
         let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
-        let outputURL = engine.resolveOutputURL(stem: "report", profile: profile, onLine: onLine)
+        let outputURL = try engine.resolveOutputURL(
+            stem: "report", profile: profile, onLine: onLine)
         // onLine only carries CLIBridge.LogLine progress during generate; per-sheet
         // [fail] lines are raw `print` calls in SheetRegistry and bypass both onLine
         // and the recorder — they reach the console/launchd log only, not Run History.
         let template = FullInstanceTemplate()
         let failures = try await engine.generate(
-            csvURL: resolvedCSV,
             outputURL: outputURL,
             template: template,
             onLine: onLine
         )
-        if let csv = resolvedCSV {
-            do {
-                try CSVInboxService.markConsumed(csv, profile: profile)
-            } catch {
-                let warning = "[warn] \(error.localizedDescription)"
-                print(warning)
-                recorder?.record(warning)
-            }
-        }
         if !failures.isEmpty {
             let partialMsg = partialRunMarker(sheetFailures: failures.count)
             recorder?.record(partialMsg)
@@ -577,14 +554,13 @@ private func scheduledRun(profile: String) async -> Int32 {
     let verbose = args.contains("--verbose")
     let allProfiles = args.contains("--all-profiles")
     // Legacy plists (pre-PR-20) omit --mode; fall back to jamf-cli-only so the
-    // existing behavior (collect + generate, no CSV) is preserved verbatim.
-    let mode: Schedule.RunMode = {
+    // existing behavior is preserved verbatim. The retired csv-assisted reads as jamf-cli-full.
+    let modeArg: String? = {
         guard let idx = args.firstIndex(of: "--mode"), idx + 1 < args.count,
-              isFlagValue(args[idx + 1]) else {
-            return .jamfCLIOnly
-        }
-        return Schedule.RunMode(rawValue: args[idx + 1]) ?? .jamfCLIOnly
+              isFlagValue(args[idx + 1]) else { return nil }
+        return args[idx + 1]
     }()
+    let mode = modeArg.flatMap(Schedule.RunMode.init(stored:)) ?? .jamfCLIOnly
 
     // PR-23 T-20: --tiers <csv> pins the collect tier set. Absent (pre-PR-23
     // plists) → nil, and scheduledRunSingle falls back to the mode default.
@@ -632,7 +608,8 @@ private func scheduledRun(profile: String) async -> Int32 {
         launchAgentLabel: label,
         multiTarget: allProfiles ? MultiTarget(scope: .all, sequential: true) : nil,
         tiers: tiers,
-        excludedProfiles: allProfiles ? Array(ProfileService.parseExclusions(excludeArg)) : nil
+        excludedProfiles: allProfiles ? Array(ProfileService.parseExclusions(excludeArg)) : nil,
+        retiredCSVAssisted: modeArg == Schedule.RunMode.retiredCSVAssistedRaw
     )
     // The external scheduler sees the exit code alone — retries are the tick's. Under the
     // tick lock like the tick's own runs; a run it turns away is queued, not failed.
@@ -660,7 +637,8 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
         let honesty = CollectHonestyWatcher()
         let code = await scheduledRunSingle(
             profile: schedule.profile, mode: schedule.mode, tiers: schedule.tiers,
-            verbose: verbose, label: label, honesty: honesty)
+            verbose: verbose, label: label, honesty: honesty,
+            retiredCSVAssisted: schedule.retiredCSVAssisted)
         return ScheduleRunOutcome(
             exitCode: code, incomplete: honesty.incomplete,
             retryCouldHelp: honesty.retryCouldHelp(profile: schedule.profile))
@@ -692,12 +670,13 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
         let honesty = CollectHonestyWatcher()
         let code = await scheduledRunSingle(
             profile: p.name, mode: schedule.mode, tiers: schedule.tiers,
-            verbose: verbose, label: label, honesty: honesty)
+            verbose: verbose, label: label, honesty: honesty,
+            retiredCSVAssisted: schedule.retiredCSVAssisted)
         if code != 0 { anyFailed = true }
         if honesty.incomplete { anyIncomplete = true }
         if honesty.retryCouldHelp(profile: p.name) { anyRetryable = true }
     }
-    if [.jamfCLIOnly, .jamfCLIFull, .csvAssisted].contains(schedule.mode) {
+    if [.jamfCLIOnly, .jamfCLIFull].contains(schedule.mode) {
         emitConsolidatedReports()
     }
     return ScheduleRunOutcome(
@@ -744,8 +723,7 @@ func runCheck(profile: String) -> Int32 {
         }
 
         // The checks above only prove the file parses. Everything an operator
-        // actually gets wrong — column mappings that no longer match their CSV,
-        // baselines pointing at absent EAs, malformed alert rules, a workspace
+        // actually gets wrong — baselines pointing at absent EAs, malformed alert rules, a workspace
         // on a shared folder with no coordination — lives in the Config Doctor,
         // which the GUI has surfaced since 2.3.0 while `check` did not. Same
         // report, same rules, one implementation.

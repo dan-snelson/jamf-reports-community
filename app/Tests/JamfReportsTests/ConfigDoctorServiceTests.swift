@@ -14,20 +14,18 @@ final class ConfigDoctorServiceTests: XCTestCase {
         rows.first { $0.id == id }
     }
 
-    /// A clean computer config whose mapped columns exactly match `cleanHeaders`.
+    /// One collected ea-results row per value of `column`.
+    private func eaValues(_ column: String, _ values: [String]) -> [EAResultRow] {
+        values.enumerated().map {
+            EAResultRow(device: "d\($0.offset)", eaName: column, stringValue: $0.element)
+        }
+    }
+
+    /// A clean config: nothing to flag.
     private let cleanYAML = """
-    columns:
-      computer_name: "Computer Name"
-      serial_number: "Serial Number"
-      operating_system: "Operating System Version"
-      last_checkin: "Last Check-in"
     compliance:
       enabled: false
     """
-
-    private let cleanHeaders = [
-        "Computer Name", "Serial Number", "Operating System Version", "Last Check-in",
-    ]
 
     // MARK: - Parse
 
@@ -35,8 +33,6 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let rows = ConfigDoctorService.evaluate(
             config: nil,
             parseError: "compliance.bands[0]: missing 'label'",
-            csvHeaders: nil,
-            csvFamily: nil,
             eaCoverageNames: []
         )
         XCTAssertEqual(rows.count, 1)
@@ -51,58 +47,10 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let config = try makeConfig(cleanYAML)
         let rows = ConfigDoctorService.evaluate(
             config: config,
-            parseError: nil,
-            csvHeaders: cleanHeaders,
-            csvFamily: .computers,
-            eaCoverageNames: []
+            parseError: nil, eaCoverageNames: []
         )
         XCTAssertFalse(rows.contains { $0.severity == .fail }, "clean config must not fail")
-        // With a CSV present, the CSV-presence check supersedes the bare required
-        // check, so there is one pass row per column (no contradictory duplicate).
-        XCTAssertEqual(row(rows, id: "columns.computer_name")?.severity, .pass)
-        XCTAssertNil(row(rows, id: "required.columns.computer_name"),
-                     "required rows are skipped when a CSV is present")
-    }
-
-    // MARK: - Missing column
-
-    func testConfiguredColumnMissingFromHeadersFails() throws {
-        let config = try makeConfig(cleanYAML)
-        // Drop the serial header so the mapped 'Serial Number' is not present.
-        let headers = ["Computer Name", "Operating System Version", "Last Check-in"]
-        let rows = ConfigDoctorService.evaluate(
-            config: config,
-            parseError: nil,
-            csvHeaders: headers,
-            csvFamily: .computers,
-            eaCoverageNames: []
-        )
-        let serial = row(rows, id: "columns.serial_number")
-        XCTAssertEqual(serial?.severity, .fail)
-        XCTAssertTrue(serial?.detail.contains("Serial Number") ?? false)
-    }
-
-    // MARK: - Duplicate mapping
-
-    func testDuplicateColumnMappingWarns() throws {
-        let yaml = """
-        columns:
-          computer_name: "Asset"
-          serial_number: "Asset"
-          operating_system: "OS"
-          last_checkin: "Checkin"
-        """
-        let config = try makeConfig(yaml)
-        let rows = ConfigDoctorService.evaluate(
-            config: config,
-            parseError: nil,
-            csvHeaders: nil,
-            csvFamily: nil,
-            eaCoverageNames: []
-        )
-        let dup = rows.first { $0.id.hasPrefix("columns.duplicate.") }
-        XCTAssertNotNil(dup, "two fields mapped to 'Asset' must warn")
-        XCTAssertEqual(dup?.severity, .warn)
+        XCTAssertFalse(rows.contains { $0.severity == .warn }, "clean config must not warn")
     }
 
     // MARK: - Compliance enabled but empty columns
@@ -117,10 +65,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
             config: config,
-            parseError: nil,
-            csvHeaders: nil,
-            csvFamily: nil,
-            eaCoverageNames: []
+            parseError: nil, eaCoverageNames: []
         )
         XCTAssertEqual(row(rows, id: "compliance.columns")?.severity, .warn)
     }
@@ -137,10 +82,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
             config: config,
-            parseError: nil,
-            csvHeaders: nil,
-            csvFamily: nil,
-            eaCoverageNames: ["Some Other EA"]
+            parseError: nil, eaCoverageNames: ["Some Other EA"]
         )
         let baseline = rows.first { $0.id.hasPrefix("compliance.baseline.") }
         XCTAssertEqual(baseline?.severity, .warn)
@@ -156,10 +98,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
             config: config,
-            parseError: nil,
-            csvHeaders: nil,
-            csvFamily: nil,
-            eaCoverageNames: []
+            parseError: nil, eaCoverageNames: []
         )
         let baseline = rows.first { $0.id.hasPrefix("compliance.baseline.") }
         XCTAssertNil(baseline, "no EA coverage means the baseline check is skipped")
@@ -175,80 +114,10 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
             config: config,
-            parseError: nil,
-            csvHeaders: nil,
-            csvFamily: nil,
-            eaCoverageNames: ["failed mscp count"]  // case-insensitive match
+            parseError: nil, eaCoverageNames: ["failed mscp count"]  // case-insensitive match
         )
         let baseline = rows.first { $0.id.hasPrefix("compliance.baseline.") }
         XCTAssertEqual(baseline?.severity, .pass)
-    }
-
-    // MARK: - Suggest
-
-    func testBetterScoringHeaderProducesSuggestRow() throws {
-        // 'serial_number' is mapped to a weak substring match while the CSV also
-        // contains the canonical 'Serial Number' header (an exact hint match).
-        let yaml = """
-        columns:
-          computer_name: "Computer Name"
-          serial_number: "Device Serial"
-          operating_system: "Operating System Version"
-          last_checkin: "Last Check-in"
-        """
-        let config = try makeConfig(yaml)
-        let headers = [
-            "Computer Name", "Device Serial", "Serial Number",
-            "Operating System Version", "Last Check-in",
-        ]
-        let rows = ConfigDoctorService.evaluate(
-            config: config,
-            parseError: nil,
-            csvHeaders: headers,
-            csvFamily: .computers,
-            eaCoverageNames: []
-        )
-        let serial = row(rows, id: "columns.serial_number")
-        XCTAssertEqual(serial?.severity, .suggest,
-                       "a stronger header should yield a suggest, not a plain pass")
-        XCTAssertTrue(serial?.detail.contains("Serial Number") ?? false)
-    }
-
-    // MARK: - Mobile required columns gated on mobile_columns
-
-    func testComputerOnlyConfigEmitsNoMobileRequiredRows() throws {
-        let config = try makeConfig(cleanYAML)  // no mobile_columns block
-        let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
-        )
-        XCTAssertFalse(rows.contains { $0.id.hasPrefix("required.mobile_columns") },
-                       "a computer-only config must not warn on every mobile field")
-    }
-
-    func testMobileConfigEmitsMobileRequiredRows() throws {
-        let yaml = """
-        mobile_columns:
-          device_name: "Display Name"
-        """
-        let config = try makeConfig(yaml)
-        let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
-        )
-        XCTAssertEqual(row(rows, id: "required.mobile_columns.device_name")?.severity, .pass)
-        XCTAssertEqual(row(rows, id: "required.mobile_columns.serial_number")?.severity, .warn)
-    }
-
-    // MARK: - CSV family unknown
-
-    func testUnknownCSVFamilyWarns() throws {
-        let config = try makeConfig(cleanYAML)
-        let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: ["Foo", "Bar"],
-            csvFamily: nil, eaCoverageNames: []
-        )
-        XCTAssertEqual(row(rows, id: "csv.family")?.severity, .warn)
     }
 
     // MARK: - custom_eas
@@ -262,25 +131,9 @@ final class ConfigDoctorServiceTests: XCTestCase {
         """
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
+            config: config, parseError: nil, eaCoverageNames: []
         )
         XCTAssertEqual(row(rows, id: "custom_ea.FileVault.true_value")?.severity, .warn)
-    }
-
-    func testCustomEAColumnMissingFromCSVFails() throws {
-        let yaml = """
-        custom_eas:
-          - name: "FileVault"
-            column: "FileVault 2 Status"
-            type: text
-        """
-        let config = try makeConfig(yaml)
-        let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: ["Computer Name"],
-            csvFamily: .computers, eaCoverageNames: []
-        )
-        XCTAssertEqual(row(rows, id: "custom_ea.FileVault.column")?.severity, .fail)
     }
 
     // MARK: - custom_eas against the collected results
@@ -300,8 +153,8 @@ final class ConfigDoctorServiceTests: XCTestCase {
     /// matched case-insensitively.
     func testCustomEAWithCollectedValuesPasses() throws {
         let rows = ConfigDoctorService.evaluate(
-            config: try makeConfig(collectedEAYAML), parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: ["filevault 2 status"],
+            config: try makeConfig(collectedEAYAML), parseError: nil,
+            eaCoverageNames: ["filevault 2 status"],
             eaDefinitionNames: ["FileVault 2 Status", "Battery Health"]
         )
         XCTAssertEqual(row(rows, id: "custom_ea.FileVault.ea_results")?.severity, .pass)
@@ -312,37 +165,14 @@ final class ConfigDoctorServiceTests: XCTestCase {
 
     func testCustomEANotDefinedInJamfProWarnsAndSaysSo() throws {
         let rows = ConfigDoctorService.evaluate(
-            config: try makeConfig(collectedEAYAML), parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: ["FileVault 2 Status"],
+            config: try makeConfig(collectedEAYAML), parseError: nil,
+            eaCoverageNames: ["FileVault 2 Status"],
             eaDefinitionNames: ["FileVault 2 Status", "Other"]
         )
         let battery = try XCTUnwrap(row(rows, id: "custom_ea.Battery.ea_results"))
         XCTAssertEqual(battery.severity, .warn)
         XCTAssertTrue(battery.detail.contains("not an extension attribute defined"),
                       "got: \(battery.detail)")
-    }
-
-    /// With collected results the CSV's EA columns no longer decide the sheet, so a column the
-    /// CSV lacks is not a failure.
-    func testCollectedResultsReplaceTheCSVColumnCheckForCustomEAs() throws {
-        let rows = ConfigDoctorService.evaluate(
-            config: try makeConfig(collectedEAYAML), parseError: nil,
-            csvHeaders: ["Computer Name"], csvFamily: .computers,
-            eaCoverageNames: ["FileVault 2 Status", "Battery Health"]
-        )
-        XCTAssertNil(row(rows, id: "custom_ea.FileVault.column"), "got: \(rows.map(\.id))")
-        XCTAssertEqual(row(rows, id: "custom_ea.Battery.ea_results")?.severity, .pass)
-    }
-
-    /// Nothing collected: the CSV check covers the EA instead.
-    func testCSVColumnCheckStaysWhenNothingIsCollected() throws {
-        let rows = ConfigDoctorService.evaluate(
-            config: try makeConfig(collectedEAYAML), parseError: nil,
-            csvHeaders: ["Computer Name", "FileVault 2 Status", "Battery Health"],
-            csvFamily: .computers, eaCoverageNames: []
-        )
-        XCTAssertFalse(rows.contains { $0.id.hasSuffix(".ea_results") }, "got: \(rows.map(\.id))")
-        XCTAssertEqual(row(rows, id: "custom_ea.FileVault.column")?.severity, .pass)
     }
 
     /// An EA with no column configured has nothing to look for.
@@ -354,8 +184,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
             type: text
         """
         let rows = ConfigDoctorService.evaluate(
-            config: try makeConfig(yaml), parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
+            config: try makeConfig(yaml), parseError: nil, eaCoverageNames: []
         )
         XCTAssertNil(row(rows, id: "custom_ea.Unmapped.ea_results"))
     }
@@ -368,8 +197,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         ]
         for coverage in coverages {
             let rows = ConfigDoctorService.evaluate(
-                config: try makeConfig(collectedEAYAML), parseError: nil, csvHeaders: nil,
-                csvFamily: nil, eaCoverageNames: coverage
+                config: try makeConfig(collectedEAYAML), parseError: nil, eaCoverageNames: coverage
             )
             let mine = rows.filter { $0.id.hasSuffix(".ea_results") }
             XCTAssertEqual(mine.count, 2, "one row per mapped EA; coverage: \(coverage)")
@@ -386,32 +214,14 @@ final class ConfigDoctorServiceTests: XCTestCase {
         """
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
+            config: config, parseError: nil, eaCoverageNames: []
         )
         XCTAssertNil(row(rows, id: "platform.benchmarks"))
     }
 
     // MARK: - security_agents
 
-    func testSecurityAgentEmptyConnectedValueEmitsSingleWarnWithCSV() throws {
-        let yaml = """
-        security_agents:
-          - name: "CrowdStrike"
-            column: "CrowdStrike Status"
-            connected_value: ""
-        """
-        let config = try makeConfig(yaml)
-        let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: ["CrowdStrike Status"],
-            csvFamily: .computers, eaCoverageNames: []
-        )
-        let connected = rows.filter { $0.id.contains("connected_value") }
-        XCTAssertEqual(connected.count, 1, "CSV + structural must not both emit")
-        XCTAssertEqual(connected.first?.severity, .warn)
-    }
-
-    func testSecurityAgentEmptyColumnWarnsViaStructuralWhenNoCSV() throws {
+    func testSecurityAgentEmptyColumnWarnsViaStructuralRows() throws {
         let yaml = """
         security_agents:
           - name: "CrowdStrike"
@@ -420,8 +230,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         """
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
+            config: config, parseError: nil, eaCoverageNames: []
         )
         XCTAssertEqual(
             row(rows, id: "security_agent.CrowdStrike.column.structural")?.severity, .warn
@@ -430,107 +239,37 @@ final class ConfigDoctorServiceTests: XCTestCase {
 
     // MARK: - Accuracy: cross-source reconciliation (check 1)
 
-    private let reconcileYAML = """
-    columns:
-      serial_number: "Serial Number"
-    """
-
-    private func csvRows(serials: [String]) -> [CSVRow] {
-        serials.map { ["Serial Number": $0] }
+    /// `count` devices in ea-results, one row each.
+    private func eaDevices(_ count: Int) -> [EAResultRow] {
+        (1...count).map { EAResultRow(device: "d\($0)", eaName: "X", value: 1) }
     }
 
     func testReconciliationWithinToleranceEmitsOK() throws {
-        let config = try makeConfig(reconcileYAML)
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: ["Serial Number"],
-            rows: csvRows(serials: (1...100).map { "S\($0)" }),
-            ageDays: 0, fileName: "export.csv"
-        )
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: 105, eaRows: nil, coverageDrift: nil
+            computersCount: 105, eaRows: eaDevices(100), coverageDrift: nil
         )
-        let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
+        let rows = ConfigDoctorService.evaluateAccuracy(config: ReportConfig(), inputs: inputs)
         XCTAssertEqual(row(rows, id: "accuracy.reconciliation")?.severity, .pass)
     }
 
     func testReconciliationDivergenceWarnsNamingBothSources() throws {
-        let config = try makeConfig(reconcileYAML)
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: ["Serial Number"],
-            rows: csvRows(serials: (1...100).map { "S\($0)" }),
-            ageDays: 0, fileName: "export.csv"
-        )
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: 130, eaRows: nil, coverageDrift: nil
+            computersCount: 130, eaRows: eaDevices(100), coverageDrift: nil
         )
-        let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
+        let rows = ConfigDoctorService.evaluateAccuracy(config: ReportConfig(), inputs: inputs)
         let recon = row(rows, id: "accuracy.reconciliation")
         XCTAssertEqual(recon?.severity, .warn)
         XCTAssertTrue(recon?.detail.contains("100") ?? false)
         XCTAssertTrue(recon?.detail.contains("130") ?? false)
     }
 
-    func testReconciliationDedupesSerials() throws {
-        let config = try makeConfig(reconcileYAML)
-        // 200 rows but only 100 distinct serials (case-insensitive dupes).
-        let dupes = (1...100).map { "S\($0)" } + (1...100).map { "s\($0)" }
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: ["Serial Number"], rows: csvRows(serials: dupes),
-            ageDays: 0, fileName: "export.csv"
-        )
-        let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: 100, eaRows: nil, coverageDrift: nil
-        )
-        let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
-        // 100 deduped vs 100 snapshot → within tolerance despite 200 raw rows.
-        XCTAssertEqual(row(rows, id: "accuracy.reconciliation")?.severity, .pass)
-    }
-
     func testReconciliationSkippedWithFewerThanTwoSources() throws {
-        let config = try makeConfig(reconcileYAML)
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: 100, eaRows: nil, coverageDrift: nil
+            computersCount: 100, eaRows: nil, coverageDrift: nil
         )
-        let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
+        let rows = ConfigDoctorService.evaluateAccuracy(config: ReportConfig(), inputs: inputs)
         XCTAssertNil(row(rows, id: "accuracy.reconciliation"),
                      "one source is not enough to reconcile")
-    }
-
-    // MARK: - Accuracy: stale CSV age (check 1b)
-
-    func testStaleCSVAgeWarns() throws {
-        let yaml = """
-        thresholds:
-          stale_device_days: 30
-        """
-        let config = try makeConfig(yaml)
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: ["Serial Number"], rows: [], ageDays: 63, fileName: "old.csv"
-        )
-        let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: nil, eaRows: nil, coverageDrift: nil
-        )
-        let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
-        let age = row(rows, id: "accuracy.csv_age")
-        XCTAssertEqual(age?.severity, .warn)
-        XCTAssertTrue(age?.detail.contains("old.csv") ?? false)
-        XCTAssertTrue(age?.detail.contains("63") ?? false)
-    }
-
-    func testFreshCSVEmitsNoAgeRow() throws {
-        let yaml = """
-        thresholds:
-          stale_device_days: 30
-        """
-        let config = try makeConfig(yaml)
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: [], rows: [], ageDays: 5, fileName: "fresh.csv"
-        )
-        let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: nil, eaRows: nil, coverageDrift: nil
-        )
-        let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
-        XCTAssertNil(row(rows, id: "accuracy.csv_age"))
     }
 
     // MARK: - Accuracy: per-column parse health (check 2)
@@ -546,13 +285,9 @@ final class ConfigDoctorServiceTests: XCTestCase {
         // 8 of 10 non-empty values are non-numeric junk → 20% parse rate.
         let good = ["50", "75"]
         let bad = Array(repeating: "ERR", count: 8)
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: ["Battery Health"],
-            rows: (good + bad).map { ["Battery Health": $0] },
-            ageDays: 0, fileName: "x.csv"
-        )
+        let eaRows = eaValues("Battery Health", good + bad)
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: nil, eaRows: nil, coverageDrift: nil
+            computersCount: nil, eaRows: eaRows, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         let warn = row(rows, id: "accuracy.parse_health.Battery Health")
@@ -575,13 +310,9 @@ final class ConfigDoctorServiceTests: XCTestCase {
         // 0–100 clamp, so the worst skeleton is all-9s → the counts hint fires.
         let good = ["10", "20"]
         let counts = ["420", "381", "512", "277", "633", "199", "808", "144"]
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: ["STIG Failures"],
-            rows: (good + counts).map { ["STIG Failures": $0] },
-            ageDays: 0, fileName: "x.csv"
-        )
+        let eaRows = eaValues("STIG Failures", good + counts)
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: nil, eaRows: nil, coverageDrift: nil
+            computersCount: nil, eaRows: eaRows, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         let warn = row(rows, id: "accuracy.parse_health.STIG Failures")
@@ -600,13 +331,9 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let config = try makeConfig(yaml)
         let good = ["15.4", "14.7"]
         let bad = Array(repeating: "n/a", count: 8)
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: ["OS Version"],
-            rows: (good + bad).map { ["OS Version": $0] },
-            ageDays: 0, fileName: "x.csv"
-        )
+        let eaRows = eaValues("OS Version", good + bad)
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: nil, eaRows: nil, coverageDrift: nil
+            computersCount: nil, eaRows: eaRows, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         let warn = row(rows, id: "accuracy.parse_health.OS Version")
@@ -626,16 +353,10 @@ final class ConfigDoctorServiceTests: XCTestCase {
             type: text
         """
         let config = try makeConfig(yaml)
-        let csv = ConfigDoctorService.AccuracyCSV(
-            columns: ["OS Version", "State"],
-            rows: [
-                ["OS Version": "15.4", "State": "Managed"],
-                ["OS Version": "14.7.1", "State": "Managed"],
-            ],
-            ageDays: 0, fileName: "x.csv"
-        )
+        let eaRows = eaValues("OS Version", ["15.4", "14.7.1"])
+            + eaValues("State", ["Managed", "Managed"])
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: csv, computersCount: nil, eaRows: nil, coverageDrift: nil
+            computersCount: nil, eaRows: eaRows, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         let ok = row(rows, id: "accuracy.parse_health.ok")
@@ -660,7 +381,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
             EAResultRow(device: "d\($0)", eaName: "STIG Count", stringValue: "N/A")
         }
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: eaRows, coverageDrift: nil
+            computersCount: nil, eaRows: eaRows, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         XCTAssertEqual(row(rows, id: "accuracy.parse_health.STIG Count")?.severity, .warn)
@@ -677,7 +398,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
             )
         }
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: nil, coverageDrift: .computed(drops)
+            computersCount: nil, eaRows: nil, coverageDrift: .computed(drops)
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         let driftWarns = rows.filter {
@@ -695,7 +416,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
             EAParseHealthService.CoverageDrift(eaName: "EA1", previousPct: 90, currentPct: 89)
         ]
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: nil, coverageDrift: .computed(stable)
+            computersCount: nil, eaRows: nil, coverageDrift: .computed(stable)
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         XCTAssertEqual(row(rows, id: "accuracy.coverage_drift.ok")?.severity, .pass)
@@ -704,7 +425,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
     func testCoverageDriftSkippedWhenNoDriftData() throws {
         let config = try makeConfig(cleanYAML)
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: nil, coverageDrift: nil
+            computersCount: nil, eaRows: nil, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         XCTAssertFalse(rows.contains { $0.id.hasPrefix("accuracy.coverage_drift") },
@@ -716,7 +437,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
     func testCoverageDriftInsufficientDataRendersDistinctSuggestRow() throws {
         let config = try makeConfig(cleanYAML)
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: nil,
+            computersCount: nil, eaRows: nil,
             coverageDrift: .insufficientData(reason: "Fewer than two ea-results snapshots")
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
@@ -734,7 +455,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let salvageReason = "The most recent snapshot(s) were salvaged from truncated files — "
             + "coverage change can't be verified"
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: nil,
+            computersCount: nil, eaRows: nil,
             coverageDrift: .insufficientData(reason: salvageReason)
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
@@ -748,7 +469,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
     func testCoverageDriftComputedEmptyStillEmitsOK() throws {
         let config = try makeConfig(cleanYAML)
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: nil, coverageDrift: .computed([])
+            computersCount: nil, eaRows: nil, coverageDrift: .computed([])
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         XCTAssertEqual(row(rows, id: "accuracy.coverage_drift.ok")?.severity, .pass)
@@ -774,7 +495,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
             eaRows.append(EAResultRow(device: "d\(i)", eaName: "STIG List", stringValue: list))
         }
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: eaRows, coverageDrift: nil
+            computersCount: nil, eaRows: eaRows, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         let cc = row(rows, id: "accuracy.cross_check.STIG")
@@ -798,7 +519,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
             EAResultRow(device: "d2", eaName: "STIG List", stringValue: ""),
         ]
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: eaRows, coverageDrift: nil
+            computersCount: nil, eaRows: eaRows, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         XCTAssertEqual(row(rows, id: "accuracy.cross_check.STIG")?.severity, .pass)
@@ -814,7 +535,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         let config = try makeConfig(yaml)
         let eaRows = [EAResultRow(device: "d1", eaName: "STIG Count", value: 0)]
         let inputs = ConfigDoctorService.AccuracyInputs(
-            csv: nil, computersCount: nil, eaRows: eaRows, coverageDrift: nil
+            computersCount: nil, eaRows: eaRows, coverageDrift: nil
         )
         let rows = ConfigDoctorService.evaluateAccuracy(config: config, inputs: inputs)
         XCTAssertFalse(rows.contains { $0.id.hasPrefix("accuracy.cross_check") },
@@ -834,8 +555,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         """
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
+            config: config, parseError: nil, eaCoverageNames: []
         )
         let rule = row(rows, id: "alerts.rule.0")
         XCTAssertEqual(rule?.severity, .fail)
@@ -854,8 +574,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         """
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
+            config: config, parseError: nil, eaCoverageNames: []
         )
         XCTAssertEqual(row(rows, id: "alerts.notify_missing")?.severity, .warn)
         XCTAssertNil(row(rows, id: "alerts.armed"), "not armed without a usable webhook")
@@ -875,8 +594,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
         """
         let config = try makeConfig(yaml)
         let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
+            config: config, parseError: nil, eaCoverageNames: []
         )
         let armed = row(rows, id: "alerts.armed")
         XCTAssertEqual(armed?.severity, .pass)
@@ -887,8 +605,7 @@ final class ConfigDoctorServiceTests: XCTestCase {
     func testNoAlertsBlockEmitsNoAlertsRows() throws {
         let config = try makeConfig(cleanYAML)
         let rows = ConfigDoctorService.evaluate(
-            config: config, parseError: nil, csvHeaders: cleanHeaders,
-            csvFamily: .computers, eaCoverageNames: []
+            config: config, parseError: nil, eaCoverageNames: []
         )
         XCTAssertFalse(rows.contains { $0.id.hasPrefix("alerts.") },
                        "a workspace that never opted into alerts gets no alerts rows")
@@ -1153,70 +870,23 @@ final class ConfigDoctorServiceTests: XCTestCase {
                        [], "FileVault is ignored, so the rule is not in use")
     }
 
-    // MARK: CSV hardware columns
+    // MARK: csv-inbox
 
-    private let hardwareRule = "security_policy:\n  filevault_off_hardware_encrypted: warning\n"
-    private let jamfHeaders = ["Computer Name", "Model", "Model Identifier", "Architecture Type"]
+    func testACSVInboxWithFilesGetsOneSuggestionRowAndNothingStronger() throws {
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-inbox-\(UUID().uuidString)", isDirectory: true)
+        let inbox = workspace.appendingPathComponent("csv-inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        XCTAssertEqual(ConfigDoctorService.csvInboxRows(workspace: workspace), [], "empty folder")
+        try Data("a".utf8).write(to: inbox.appendingPathComponent("export.csv"))
 
-    private func csvHardwareRows(
-        _ yaml: String, headers: [String]? = nil, family: CSVFamily? = .computers
-    ) throws -> [DoctorRow] {
-        ConfigDoctorService.csvHardwareColumnRows(
-            config: try makeConfig(yaml), csvHeaders: headers ?? jamfHeaders, csvFamily: family)
-    }
-
-    /// `columns.model` is the marketing name, so mapping it does not satisfy the rule.
-    func testTheHardwareRuleOnACSVNamesTheUnmappedModelIdentifier() throws {
-        let rows = try csvHardwareRows(hardwareRule
-            + "columns:\n  model: Model\n  architecture: Architecture Type\n")
-        XCTAssertEqual(rows.count, 1)
-        let row = try XCTUnwrap(rows.first)
-        XCTAssertEqual(row.severity, .warn)
-        XCTAssertEqual(row.id, "security_policy.csv_hardware_columns")
-        XCTAssertEqual(row.title, "security_policy.filevault_off_hardware_encrypted")
-        XCTAssertEqual(row.detail, "columns.model_identifier is not mapped, so a CSV report "
-            + "cannot tell which Macs are hardware-encrypted. FileVault off counts at the "
-            + "FileVault level for them.")
-        XCTAssertEqual(row.hint, "Map it in Config, or re-run scaffold, to the export's "
-            + "'Model Identifier' column.")
-    }
-
-    func testTheHardwareRuleOnACSVNamesEveryUnmappedHardwareColumn() throws {
-        let rows = try csvHardwareRows(hardwareRule + "columns:\n  computer_name: Computer Name\n")
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertTrue(rows[0].detail.hasPrefix(
-            "columns.model_identifier and columns.architecture are not mapped"))
-        XCTAssertTrue(rows[0].hint?.contains("'Model Identifier' and 'Architecture Type'") ?? false)
-        XCTAssertEqual(try csvHardwareRows(hardwareRule).count, 1, "no columns block at all")
-    }
-
-    func testNoCSVHardwareRowWhenBothColumnsAreMappedOrTheRuleIsNotInUse() throws {
-        let mapped = "columns:\n  model_identifier: Model Identifier\n"
-            + "  architecture: Architecture Type\n"
-        XCTAssertEqual(try csvHardwareRows(hardwareRule + mapped), [], "both mapped")
-        XCTAssertEqual(try csvHardwareRows("columns:\n  model: Model\n"), [], "no rule")
-        XCTAssertEqual(try csvHardwareRows(
-            "security_policy:\n  controls:\n    filevault: ignore\n"
-                + "  filevault_off_hardware_encrypted: warning\n"), [], "FileVault is ignored")
-    }
-
-    func testNoCSVHardwareRowWithoutAComputerCSV() throws {
-        XCTAssertEqual(ConfigDoctorService.csvHardwareColumnRows(
-            config: try makeConfig(hardwareRule), csvHeaders: nil, csvFamily: nil), [],
-            "no CSV: the computers snapshot decides, and its own row covers that")
-        XCTAssertEqual(try csvHardwareRows(hardwareRule, family: .mobile), [], "mobile export")
-    }
-
-    /// `run` passes the newest CSV's headers and family through.
-    func testRunReportsTheUnmappedHardwareColumnsOfTheWorkspaceCSV() throws {
-        let yaml = hardwareRule + "columns:\n  computer_name: Computer Name\n"
-        try withWorkspace(yaml) { profile, workspace in
-            try (jamfHeaders.joined(separator: ",") + "\nMac-1,Model,Mac1,arm64\n")
-                .write(to: workspace.appendingPathComponent("export.csv"),
-                       atomically: true, encoding: .utf8)
-            let ids = ConfigDoctorService.run(profile: profile).rows.map(\.id)
-            XCTAssertEqual(ids.filter { $0 == "security_policy.csv_hardware_columns" }.count, 1)
-        }
+        let rows = ConfigDoctorService.csvInboxRows(workspace: workspace)
+        XCTAssertEqual(rows.map(\.severity), [.suggest])
+        XCTAssertEqual(rows.first?.detail, "csv-inbox is no longer read since 2.11; you can delete it.")
+        XCTAssertEqual(ConfigDoctorService.csvInboxRows(workspace: nil), [])
+        XCTAssertEqual(ConfigDoctorService.csvInboxRows(
+            workspace: workspace.appendingPathComponent("elsewhere")), [], "no csv-inbox")
     }
 
     // MARK: Security policy rows read from a workspace

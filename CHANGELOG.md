@@ -42,24 +42,12 @@ versions in this repository map to git tags.
 - A Mac's risk rating now counts it as stale by your stale settings (`stale_device_days` and
   `stale_basis`) instead of a fixed 30 days, so Computers, the Priority filter and the risk pill
   agree with the stale counts elsewhere.
-
-### Removed
-
-- The boot-drive risk factor ("Boot Drive >95% Full") is gone: only a CSV export supplied the
-  boot-drive figure, and jamf-cli data has none. (#281)
-
-### Removed
-
-- The **Columns** tab on Config, the column-mapping step in setup, the **CSV Inbox** card on
-  Data Sources and the Re-scaffold and Run check buttons are gone. Reports no longer need
-  column names mapped to a CSV: Extension Attributes and security agents are adopted from the
-  data jamf-cli collected (**Adopt EAs**), and a CSV export can still be imported once from
-  the same sheet or with `jamf-reports scaffold --csv`, which now writes only
-  `custom_eas`. New workspaces no longer get a `csv-inbox` folder; files already in one are
-  left alone.
-- `columns`, `mobile_columns` and `charts.archive_current_csv` are retired settings. Config
-  Doctor lists them as no longer read, and the next Config save removes `columns` and
-  `mobile_columns` from `config.yaml` after keeping a dated copy of the file.
+- **Fleet Drift** now compares the collected inventory from two different days, so it no longer
+  needs a CSV export. It lists Macs that joined or left, macOS changes, and Macs that became or
+  stopped being stale under your stale settings. The "Compliance Changed" section is gone from this
+  sheet, since collected inventory carries no per-Mac compliance count.
+- `branding.logo_path` now puts the logo on the first tab of the workbook. It used to sit on the
+  CSV-based tabs only.
 
 ### Fixed
 
@@ -88,6 +76,28 @@ versions in this repository map to git tags.
   Unknown or a dash instead of 0 or -1 days, and a Jamf School device with an unreadable
   check-in is no longer listed as stale on the Stale Devices tab.
 
+### Removed
+
+- The boot-drive risk factor ("Boot Drive >95% Full") is gone: only a CSV export supplied the
+  boot-drive figure, and jamf-cli data has none. (#281)
+- The **Columns** tab on Config, the column-mapping step in setup, the **CSV Inbox** card on
+  Data Sources and the Re-scaffold and Run check buttons are gone. Reports no longer need
+  column names mapped to a CSV: Extension Attributes and security agents are adopted from the
+  data jamf-cli collected (**Adopt EAs**), and a CSV export can still be imported once from
+  the same sheet or with `jamf-reports scaffold --csv`, which now writes only
+  `custom_eas`. New workspaces no longer get a `csv-inbox` folder; files already in one are
+  left alone.
+- `columns`, `mobile_columns` and `charts.archive_current_csv` are retired settings. Config
+  Doctor lists them as no longer read, and the next Config save removes `columns` and
+  `mobile_columns` from `config.yaml` after keeping a dated copy of the file.
+- The **CSV Assisted** schedule mode is retired. A schedule that used it runs as
+  **Refresh + Generate** (`jamf-cli-full`) from now on, and Run History notes that on each run.
+  `jamf-reports schedules add --mode csv-assisted` is refused and names `jamf-cli-full`.
+- Workbooks no longer have tabs built from a CSV export. Custom EA tabs and EA Warnings come
+  from the collected extension attribute results, and `charts.archive_current_csv` has no effect.
+- `csv-inbox/` is no longer read by reports. Config Doctor suggests deleting the folder when it
+  holds files.
+
 ### Security
 
 - A link another Mac plants on a shared folder at `Generated Reports` or at the default
@@ -103,6 +113,10 @@ versions in this repository map to git tags.
   run that read it. (#284)
 - Shared logs and diagnostic bundles now mask phone numbers, in free text and under phone
   keys. (#283)
+- A report run now stops with an error that names the profile when its report folder cannot be
+  used, instead of writing to the working directory or the temporary folder. A refused
+  `archive_dir` skips archiving old runs, with one warning, instead of moving them into a folder
+  beside the reports. (#284)
 
 ## [2.10.1] - 2026-10-17
 

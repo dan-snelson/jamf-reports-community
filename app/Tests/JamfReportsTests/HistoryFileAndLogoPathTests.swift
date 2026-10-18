@@ -137,7 +137,7 @@ final class HistoryFileAndLogoPathTests: XCTestCase {
 
     private func load(_ typed: String, shared: Bool = false) throws -> (Data?, [String]) {
         let lines = Lines()
-        let data = CSVDashboard.loadLogoData(
+        let data = ReportLogo.load(
             from: try logoConfig(typed, shared: shared), profile: profile,
             warn: { lines.add($0) })
         return (data, lines.all)
@@ -179,9 +179,9 @@ final class HistoryFileAndLogoPathTests: XCTestCase {
     func testALogoOverTwoMegabytesIsRefusedAndOneAtTheLimitLoads() throws {
         let png = away.appendingPathComponent("logo.png")
         var big = pngBytes
-        big.append(Data(repeating: 0, count: CSVDashboard.maxLogoBytes - pngBytes.count))
+        big.append(Data(repeating: 0, count: ReportLogo.maxLogoBytes - pngBytes.count))
         try big.write(to: png)
-        XCTAssertEqual(try load(png.path).0?.count, CSVDashboard.maxLogoBytes)
+        XCTAssertEqual(try load(png.path).0?.count, ReportLogo.maxLogoBytes)
         big.append(0)
         try big.write(to: png)
         let (data, warnings) = try load(png.path)
@@ -201,7 +201,7 @@ final class HistoryFileAndLogoPathTests: XCTestCase {
         var config = try logoConfig("placeholder.png")
         config.branding?.logoPath = "missing\u{07}\u{1B}[31mname.png"
         let lines = Lines()
-        XCTAssertNil(CSVDashboard.loadLogoData(
+        XCTAssertNil(ReportLogo.load(
             from: config, profile: profile, warn: { lines.add($0) }))
         let warnings = lines.all
         XCTAssertEqual(warnings.count, 1)
@@ -256,7 +256,7 @@ final class HistoryFileAndLogoPathTests: XCTestCase {
           history_file: peer.json
         """)
         let decoyConfig = try config()
-        XCTAssertNil(CSVDashboard.loadLogoData(
+        XCTAssertNil(ReportLogo.load(
             from: decoyConfig, profile: profile, warn: { _ in }), "the pin holds the logo back")
 
         var report = HtmlReport(config: decoyConfig,

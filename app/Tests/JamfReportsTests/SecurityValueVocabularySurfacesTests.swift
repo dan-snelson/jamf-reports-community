@@ -4,7 +4,7 @@ import XCTest
 
 /// An organization's own on and off words (`security_policy.on_values` / `off_values`) reach
 /// every surface that reads a device's value for a control: the Devices gap count and risk,
-/// the CSV workbook's Security Controls sheet, Compliance Posture and the Device Security
+/// Compliance Posture and the Device Security
 /// State sheet. Without the words the same Macs read as not measured.
 final class SecurityValueVocabularySurfacesTests: XCTestCase {
 
@@ -50,32 +50,6 @@ final class SecurityValueVocabularySurfacesTests: XCTestCase {
         return rows.map { DeviceInventoryService.recordFromCSV($0, source: "fleet.csv") }
     }
 
-    /// The Security Controls sheet's Firewall row: compliant, non-compliant, unknown.
-    private func firewallRow(_ policy: SecurityControlPolicy) throws -> [String] {
-        var columns = ColumnConfig()
-        columns.computerName = "Computer Name"
-        columns.lastCheckin = "Last Check-in"
-        columns.filevault = "FileVault Status"
-        columns.sip = "System Integrity Protection"
-        columns.firewall = "Firewall"
-        columns.gatekeeper = "Gatekeeper"
-        var config = ReportConfig()
-        config.columns = columns
-        config.securityPolicy = policy
-        var thresholds = ThresholdsConfig()
-        thresholds.staleDeviceDays = 36500
-        config.thresholds = thresholds
-        let workbook = Workbook()
-        let dashboard = try XCTUnwrap(
-            CSVDashboard(config: config, csvData: Data(Self.csv.utf8), workbook: workbook))
-        dashboard.writeSecurityControls()
-        let cells = try XCTUnwrap(workbook.sheet(named: "Security Controls")).dedupedCells
-        let label = try XCTUnwrap(cells.first { $0.col == 0 && Self.text($0.value) == "Firewall" })
-        return (1...3).map { col in
-            cells.first { $0.row == label.row && $0.col == col }.map { Self.text($0.value) } ?? "?"
-        }
-    }
-
     private static func text(_ value: CellValue) -> String {
         switch value {
         case .string(let s): s
@@ -86,7 +60,7 @@ final class SecurityValueVocabularySurfacesTests: XCTestCase {
         }
     }
 
-    func testTheOrganizationsFirewallWordsCountOnDevicesAndTheCSVWorkbook() throws {
+    func testTheOrganizationsFirewallWordsCountOnDevices() throws {
         let policy = vocabulary(for: .firewall)
         let records = try csvRecords()
         XCTAssertEqual(records.map(\.firewall), ["Pass", "Fail", "Non-Compliant", "Compliant"])
@@ -100,20 +74,17 @@ final class SecurityValueVocabularySurfacesTests: XCTestCase {
             devices: records, patchTitles: [], sourceFiles: [], warnings: [],
             generatedAt: "", generatedDate: nil, isDemo: false, securityPolicy: policy)
         XCTAssertEqual(snapshot.securityGapCount, 2)
-        XCTAssertEqual(try firewallRow(policy), ["2", "2", "0"])
     }
 
     func testWithoutTheWordsTheSameMacsReadAsNotMeasured() throws {
         let records = try csvRecords()
         XCTAssertEqual(records.map { $0.securityGapCount(policy: .default) }, [0, 0, 0, 0])
-        XCTAssertEqual(try firewallRow(.default), ["0", "0", "4"])
     }
 
     /// The words belong to the control they are listed under.
     func testTheFirewallWordsDoNotReadAnotherControl() throws {
         let policy = vocabulary(for: .sip)
         XCTAssertEqual(try csvRecords().map { $0.securityGapCount(policy: policy) }, [0, 0, 0, 0])
-        XCTAssertEqual(try firewallRow(policy), ["0", "0", "4"])
     }
 
     // MARK: - A jamf-cli fleet with an organization's Gatekeeper column

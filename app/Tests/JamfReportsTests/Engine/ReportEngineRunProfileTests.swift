@@ -59,7 +59,7 @@ final class ReportEngineRunProfileTests: XCTestCase {
         let out = workspace("shared").appendingPathComponent("Generated Reports/r.xlsx")
 
         do {
-            try await engine.generate(csvURL: nil, outputURL: out, locateJamfCLI: { nil },
+            try await engine.generate(outputURL: out, locateJamfCLI: { nil },
                                       onLine: lines.add)
             XCTFail("a mismatched jamf_cli.profile must be refused")
         } catch let error as ReportEngineError {
@@ -81,7 +81,7 @@ final class ReportEngineRunProfileTests: XCTestCase {
         for named in [nil, "shared"] {
             let engine = try engine(namedProfile: named)
             let out = workspace("shared").appendingPathComponent("Generated Reports/r.xlsx")
-            try await engine.generate(csvURL: nil, outputURL: out, locateJamfCLI: { nil })
+            try await engine.generate(outputURL: out, locateJamfCLI: { nil })
             XCTAssertTrue(FileManager.default.fileExists(atPath: out.path), "\(named ?? "blank")")
             XCTAssertEqual(everything(under: workspace("victim")), [])
         }
@@ -91,16 +91,5 @@ final class ReportEngineRunProfileTests: XCTestCase {
         XCTAssertEqual(try engine(namedProfile: nil).runProfile(onLine: nil), "shared")
         XCTAssertEqual(try engine(namedProfile: "shared").runProfile(onLine: nil), "shared")
         XCTAssertThrowsError(try engine(namedProfile: "victim").runProfile(onLine: nil))
-    }
-
-    func testFleetDriftReadsTheRunsHistoricalFolderNotTheNamedProfilesOne() throws {
-        let config = try engine(namedProfile: "victim").config
-        let shared = try WorkspacePaths.historicalDir(for: "shared")
-        let victim = try WorkspacePaths.historicalDir(for: "victim")
-
-        XCTAssertEqual(CSVDashboard.priorSnapshotDir(config: config, profile: "shared"), shared)
-        XCTAssertNotEqual(shared, victim)
-        XCTAssertNil(CSVDashboard.priorSnapshotDir(config: config, profile: nil))
-        XCTAssertNil(CSVDashboard.priorSnapshotDir(config: config, profile: ""))
     }
 }

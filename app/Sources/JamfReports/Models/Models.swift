@@ -130,18 +130,25 @@ struct Schedule: Identifiable, Sendable {
         case snapshotOnly  = "snapshot-only"
         case jamfCLIOnly   = "jamf-cli-only"
         case jamfCLIFull   = "jamf-cli-full"
-        case csvAssisted   = "csv-assisted"
         /// v2.2.0: scheduled `jamf-cli pro backup` — exports configuration
         /// objects into the workspace's backups/ folder. No collect, no report.
         case backup        = "backup"
         var id: String { rawValue }
+
+        /// The mode 2.11 retired. Anything that reads a stored or typed mode goes through
+        /// `init?(stored:)`, so such a schedule keeps collecting as `jamf-cli-full`; a fall to
+        /// the `jamf-cli-only` default would stop it collecting without a word.
+        static let retiredCSVAssistedRaw = "csv-assisted"
+
+        init?(stored raw: String) {
+            self.init(rawValue: raw == Self.retiredCSVAssistedRaw ? Self.jamfCLIFull.rawValue : raw)
+        }
 
         var displayTitle: String {
             switch self {
             case .snapshotOnly: "Refresh data only"
             case .jamfCLIOnly: "Generate from cached data"
             case .jamfCLIFull: "Refresh + Generate"
-            case .csvAssisted: "Refresh + Generate (CSV required)"
             case .backup: "Configuration Backup"
             }
         }
@@ -153,9 +160,7 @@ struct Schedule: Identifiable, Sendable {
             case .jamfCLIOnly:
                 "Generates a workbook from the latest cached jamf-cli data. Does NOT collect fresh data first. Use this for a fast re-render after a recent collect — for example, after editing config.yaml or templates."
             case .jamfCLIFull:
-                "Runs collect to refresh jamf-cli data, then generates a workbook. No CSV input. Use this for a self-contained scheduled run that does not depend on a CSV export."
-            case .csvAssisted:
-                "Runs collect, then combines the newest CSV in csv-inbox/ with cached jamf-cli data. The run fails if no CSV is available — use this when CSV data is required (e.g. for custom inventory columns jamf-cli can't reach)."
+                "Runs collect to refresh jamf-cli data, then generates a workbook. Use this for a self-contained scheduled run."
             case .backup:
                 "Runs jamf-cli pro backup to export Jamf Pro configuration objects (policies, profiles, scripts, groups) into the workspace's backups folder. Keeps the last 10 scheduled backups. No data collection, no report."
             }
@@ -175,7 +180,7 @@ struct Schedule: Identifiable, Sendable {
             switch self {
             case .snapshotOnly:
                 return [.refresh]
-            case .jamfCLIOnly, .jamfCLIFull, .csvAssisted:
+            case .jamfCLIOnly, .jamfCLIFull:
                 return Set(CollectionTier.allCases)
             case .backup:
                 return []
@@ -198,7 +203,7 @@ struct Schedule: Identifiable, Sendable {
         /// on its next scheduled fire.
         var runsAtLoad: Bool {
             switch self {
-            case .snapshotOnly, .jamfCLIFull, .csvAssisted: true
+            case .snapshotOnly, .jamfCLIFull: true
             case .jamfCLIOnly, .backup: false
             }
         }
@@ -243,6 +248,9 @@ struct Schedule: Identifiable, Sendable {
     /// → none excluded (run-time discovery picks up every profile). Ignored
     /// for single-profile schedules.
     var excludedProfiles: [String]? = nil
+    /// The schedule was stored or typed as the retired `csv-assisted`; its run logs that it ran
+    /// as `jamf-cli-full`.
+    var retiredCSVAssisted = false
 
     var isMulti: Bool { multiTarget != nil }
     var profileDisplayLabel: String { multiTarget?.displayLabel ?? profile }

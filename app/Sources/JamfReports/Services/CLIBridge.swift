@@ -565,6 +565,8 @@ final class CLIBridge {
     }
 
     /// Fluent helper for the most common CLI flows the GUI surfaces.
+    /// `csvPath` is ignored since 2.11 (the CSV engine is gone); it goes when the last caller
+    /// that still passes it (onboarding) does.
     /// `aiNarrative` (F3) is set only by GUI-generate call sites; every other
     /// caller leaves the nil default. `htmlWithWorkbook: false` is for the one caller that
     /// writes the HTML report itself in the same run (`generateAll`), so it is written once.
@@ -594,8 +596,7 @@ final class CLIBridge {
             throw CLIBridgeError.workspaceMissing(profile: profile)
         }
         let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
-        let csvURL = csvPath.map { URL(fileURLWithPath: $0) }
-        let defaultURL = engine.resolveOutputURL(
+        let defaultURL = try engine.resolveOutputURL(
             stem: ExportNaming.reportKind(for: .xlsx, schoolMode: false), profile: profile,
             onLine: outputDir == nil ? onLine : nil)
         let outputURL = outputDir.map { $0.appendingPathComponent(defaultURL.lastPathComponent) } ?? defaultURL
@@ -618,7 +619,7 @@ final class CLIBridge {
         }
         do {
             let failures = try await engine.generate(
-                csvURL: csvURL, outputURL: outputURL, template: template,
+                outputURL: outputURL, template: template,
                 aiNarrative: aiNarrative, onLine: onLine
             )
             if failures.isEmpty {
@@ -730,7 +731,7 @@ final class CLIBridge {
             throw CLIBridgeError.workspaceMissing(profile: profile)
         }
         let engine = ReportEngine(config: config, dataDir: dataDir)
-        let outputURL = engine.resolveOutputURL(
+        let outputURL = try engine.resolveOutputURL(
             stem: ExportNaming.reportKind(for: .xlsx, schoolMode: true), profile: profile,
             onLine: onLine)
         let fm = FileManager.default
@@ -1487,7 +1488,7 @@ final class CLIBridge {
             outputURL = URL(fileURLWithPath: path)
         } else {
             let engine = ReportEngine(config: config, dataDir: dataDir)
-            outputURL = engine.resolveOutputURL(stem: "report", profile: profile, onLine: onLine)
+            outputURL = try engine.resolveOutputURL(stem: "report", profile: profile, onLine: onLine)
                 .deletingPathExtension().appendingPathExtension("html")
         }
         let fm = FileManager.default
@@ -1631,7 +1632,7 @@ final class CLIBridge {
             outputURL = URL(fileURLWithPath: path)
         } else {
             let engine = ReportEngine(config: config, dataDir: workspace)
-            outputURL = engine.resolveOutputURL(
+            outputURL = try engine.resolveOutputURL(
                 stem: ExportNaming.reportKind(for: .csv, schoolMode: false), profile: profile,
                 onLine: onLine)
                 .deletingPathExtension().appendingPathExtension("csv")
@@ -2115,6 +2116,7 @@ final class CLIBridge {
         return (fileCount, sizeBytes)
     }
 
+    /// `csvPath` is ignored since 2.11; it goes with the Config screen's last caller.
     func check(profile: String, csvPath: String?, onLine: @Sendable @escaping (LogLine) -> Void) async throws -> Int32 {
         guard ProfileService.isValid(profile) else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] invalid profile name: \(profile)"))
@@ -2156,45 +2158,6 @@ final class CLIBridge {
             let dataDirLevel: LogLevel = resolvedDataDir != nil ? .ok : .warn
             onLine(.init(timestamp: Date(), level: dataDirLevel,
                          text: "[\(dataDirLevel == .ok ? "ok" : "warn")] cached snapshots in data_dir: \(snapshotCount)"))
-
-            // CSV column validation — only runs when a CSV path is provided.
-            if let csvPath, !csvPath.isEmpty {
-                let csvURL = URL(fileURLWithPath: csvPath)
-                if FileManager.default.fileExists(atPath: csvURL.path) {
-                    do {
-                        let text = try InventoryCSV.readText(csvURL, followLinks: true)
-                        let firstLine = text.split(separator: "\n", maxSplits: 1).first ?? ""
-                        let headers = Set(firstLine.split(separator: ",").map {
-                            String($0).trimmingCharacters(in: .init(charactersIn: "\" \t\r"))
-                        })
-                        let allColumns: [(name: String, value: String)] = [
-                            ("computer_name", config.columns?.computerName ?? ""),
-                            ("serial_number", config.columns?.serialNumber ?? ""),
-                            ("operating_system", config.columns?.operatingSystem ?? ""),
-                            ("last_checkin", config.columns?.lastCheckin ?? ""),
-                            ("department", config.columns?.department ?? ""),
-                            ("email", config.columns?.email ?? ""),
-                        ]
-                        let configuredColumns = allColumns.filter { !$0.value.isEmpty }
-                        var anyMissing = false
-                        for col in configuredColumns where !headers.contains(col.value) {
-                            onLine(.init(timestamp: Date(), level: .warn,
-                                         text: "[warn] column '\(col.value)' (config: \(col.name)) not found in CSV"))
-                            anyMissing = true
-                        }
-                        if !anyMissing {
-                            onLine(.init(timestamp: Date(), level: .ok,
-                                         text: "[ok] all configured columns found in CSV"))
-                        }
-                    } catch {
-                        onLine(.init(timestamp: Date(), level: .warn,
-                                     text: "[warn] could not read CSV '\(csvPath)': \(error.localizedDescription)"))
-                    }
-                } else {
-                    onLine(.init(timestamp: Date(), level: .warn,
-                                 text: "[warn] CSV file not found: \(csvPath)"))
-                }
-            }
 
             return 0
         } catch {

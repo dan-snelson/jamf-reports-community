@@ -172,26 +172,6 @@ final class EngineCorrectnessTests: XCTestCase {
             "Bare 'false' must decode as boolean false")
     }
 
-    // MARK: - P10-B-06: CSV archival only after successful workbook write
-
-    func testCSVNotArchivedWhenWorkbookWriteFails() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-        let csvURL = tempDir.appendingPathComponent("test.csv")
-        let historicalDir = tempDir.appendingPathComponent("snapshots")
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        try "device_name,serial\nMac1,ABC123".write(to: csvURL, atomically: true, encoding: .utf8)
-
-        // Simulate: call archiveCurrentCSV only after a successful write.
-        // Here we verify that if we skip the archive call (as the fixed code does when write
-        // throws), the snapshot directory remains empty.
-        let snapshotsBefore = (try? FileManager.default.contentsOfDirectory(atPath: historicalDir.path)) ?? []
-        XCTAssertTrue(snapshotsBefore.isEmpty,
-            "No snapshots should exist before a successful write")
-    }
-
     // MARK: - Sanitized accent color helpers
 
     func testSanitizedAccentColorAcceptsValidHex() {

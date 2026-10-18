@@ -125,6 +125,24 @@ final class LaunchAgentServiceTests: XCTestCase {
         XCTAssertEqual(parsed.tiers, [.refresh, .scan])
     }
 
+    /// An imported plist written for the retired csv-assisted mode keeps collecting: it is read
+    /// as jamf-cli-full, never the jamf-cli-only default that stops collecting.
+    func testParseReadsTheRetiredCSVAssistedModeAsJamfCLIFull() throws {
+        let plistURL = try writePlist([
+            "Label": "\(prefix).dummy.weekly-csv",
+            "ProgramArguments": [
+                "/Applications/JamfReports.app/Contents/MacOS/JamfReports",
+                "--scheduled-run", "--profile", "dummy", "--mode", "csv-assisted",
+            ],
+            "StartCalendarInterval": ["Hour": 6, "Minute": 0],
+            "Disabled": false,
+        ])
+
+        let parsed = try XCTUnwrap(LaunchAgentService.parse(plistURL))
+        XCTAssertEqual(parsed.mode, .jamfCLIFull)
+        XCTAssertTrue(parsed.retiredCSVAssisted)
+    }
+
     func testParseNativePlistWithoutTiersFlagYieldsNil() throws {
         // Pre-PR-23 plists omit --tiers; parse must yield nil so main.swift
         // applies the all-tiers default.

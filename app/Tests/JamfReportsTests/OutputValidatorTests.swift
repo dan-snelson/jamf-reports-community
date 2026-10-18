@@ -80,23 +80,20 @@ final class OutputValidatorTests: XCTestCase {
     /// `testProgrammaticXLSXPassesValidation` builds an XLSX by hand via
     /// `buildXLSXWithCell`. That exercises the validator but never the
     /// production OOXML writer. This round-trips the real path: a `Workbook`
-    /// populated by `CSVDashboard`, serialized through `Workbook.write(to:)`,
+    /// populated by a sheet writer, serialized through `Workbook.write(to:)`,
     /// then run through the same `XLSXValidator` — so a regression in the
     /// production writer surfaces as a validation failure.
     func testProductionWorkbookWriterPassesValidation() throws {
-        var config = ReportConfig()
-        var cols = ColumnConfig()
-        cols.computerName = "Computer Name"
-        cols.serialNumber = "Serial Number"
-        config.columns = cols
-        let csv = Data("Computer Name,Serial Number\nMac-001,ABC123\nMac-002,DEF456\n".utf8)
-
         let workbook = Workbook()
-        let dashboard = try XCTUnwrap(
-            CSVDashboard(config: config, csvData: csv, workbook: workbook)
-        )
-        let written = dashboard.writeAll()
-        XCTAssertFalse(written.isEmpty, "CSVDashboard must write at least one sheet")
+        let ws = workbook.addSheet("Devices")
+        var row = ws.writeSheetHeader(title: "Devices", subtitle: "Validator round-trip", ncols: 2)
+        ws.write("Computer Name", row: row, col: 0, format: .header)
+        ws.write("Serial Number", row: row, col: 1, format: .header)
+        for (name, serial) in [("Mac-001", "ABC123"), ("Mac-002", "DEF456")] {
+            row += 1
+            ws.write(name, row: row, col: 0, format: .cell)
+            ws.write(serial, row: row, col: 1, format: .cell)
+        }
 
         let tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

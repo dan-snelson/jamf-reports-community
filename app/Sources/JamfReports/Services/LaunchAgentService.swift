@@ -212,6 +212,7 @@ enum LaunchAgentService {
         let enabled = !((plist["Disabled"] as? Bool) ?? false)
         let cadence = describeCadence(plist["StartCalendarInterval"])
         let mode = runMode(from: args) ?? .jamfCLIOnly
+        let retired = modeArgument(in: args) == Schedule.RunMode.retiredCSVAssistedRaw
         let statusURL = labelParts.isMulti
             ? multiStatusFileURL(from: args, label: label)
             : statusFileURL(from: args, profile: labelParts.profile, label: label)
@@ -240,7 +241,8 @@ enum LaunchAgentService {
             launchAgentLabel: label,
             multiTarget: labelParts.isMulti ? (multiTarget(from: args) ?? MultiTarget(scope: .all)) : nil,
             tiers: tiers(from: args),
-            excludedProfiles: excludedProfiles(from: args)
+            excludedProfiles: excludedProfiles(from: args),
+            retiredCSVAssisted: retired
         )
     }
 
@@ -467,9 +469,13 @@ enum LaunchAgentService {
         return MultiTarget(scope: scope, sequential: sequential)
     }
 
-    private static func runMode(from args: [String]) -> Schedule.RunMode? {
+    private static func modeArgument(in args: [String]) -> String? {
         guard let idx = args.firstIndex(of: "--mode"), idx + 1 < args.count else { return nil }
-        return Schedule.RunMode(rawValue: args[idx + 1])
+        return args[idx + 1]
+    }
+
+    private static func runMode(from args: [String]) -> Schedule.RunMode? {
+        modeArgument(in: args).flatMap(Schedule.RunMode.init(stored:))
     }
 
     /// Parse `--tiers <csv>` into a `CollectionTier` set (PR-23 T-19).
@@ -666,7 +672,6 @@ enum LaunchAgentService {
             case .snapshotOnly: return "Snapshot"
             case .jamfCLIOnly: return "Jamf CLI Report"
             case .jamfCLIFull: return "Full Automation"
-            case .csvAssisted: return "CSV Assisted"
             case .backup: return "Configuration Backup"
             }
         }

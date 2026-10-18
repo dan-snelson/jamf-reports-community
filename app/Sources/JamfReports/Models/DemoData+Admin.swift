@@ -142,13 +142,6 @@ extension DemoData {
             lines.append(summaryWritten(run.start))
             lines.append(contentsOf: collectLines(protectKinds, profile: profile))
             lines.append("[ok] scheduled snapshot complete for '\(profile)' — Trends updated")
-        case .csvAssisted:
-            // The morning's snapshot already collected the refresh tier.
-            lines.append(contentsOf: collectLines(inventoryKinds, profile: profile))
-            lines.append(contentsOf: collectLines(scanKinds, profile: profile))
-            lines.append("[info] summary_\(stamp(run.start, "yyyy-MM-dd")).json already "
-                + "exists — leaving existing file in place")
-            lines.append(reportWritten(run))
         case .jamfCLIFull:
             lines.append(contentsOf: collectLines(refreshKinds, profile: profile))
             lines.append(contentsOf: feedLines(profile: profile))
@@ -264,7 +257,7 @@ extension DemoData {
         guard let name = cacheNames.first else { return nil }
         let modes: Set<Schedule.RunMode>
         if inventoryCaches.contains(name) {
-            modes = [.csvAssisted, .jamfCLIFull]
+            modes = [.jamfCLIFull]
         } else if name == "protect-overview" {
             modes = [.snapshotOnly]
         } else {

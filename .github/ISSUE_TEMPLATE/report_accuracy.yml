@@ -84,7 +84,6 @@ body:
       label: Where does the workspace get its data?
       options:
         - jamf-cli only
-        - jamf-cli plus a Jamf Pro CSV export (CSV-assisted)
         - Cached snapshots only (no fresh collect)
         - Jamf School
         - Not sure

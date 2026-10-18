@@ -278,7 +278,7 @@ enum BackupMaintenance {
     /// Host id recorded for `backupDir`, or nil when unstamped.
     static func ownerHostID(of backupDir: URL) -> String? {
         let url = backupDir.appendingPathComponent(ownerStampName)
-        guard let data = try? Data(contentsOf: url), data.count <= 512,
+        guard let data = try? BoundedFile.read(url, limit: 512, followSymlinks: false),
               let id = String(data: data, encoding: .utf8) else { return nil }
         let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
@@ -307,7 +307,8 @@ enum BackupMaintenance {
 
     private static func manifestLabel(of backupDir: URL) -> String? {
         let manifestURL = backupDir.appendingPathComponent("manifest.json")
-        guard let data = try? Data(contentsOf: manifestURL),
+        guard let data = try? BoundedFile.read(
+                manifestURL, limit: BoundedFile.documentLimit, followSymlinks: false),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }

@@ -192,6 +192,21 @@ final class SnapshotFleetDriftTests: XCTestCase {
         XCTAssertEqual(try section("New Enrollments", in: dash), ["No changes"])
     }
 
+    func testALinkAtTheNewestSnapshotIsNotRead() throws {
+        let (old, new) = (at(-1), at(0))
+        let dash = try dashboard(files: [
+            (old, [mac(1, serial: "A1", taken: old)]), (new, [mac(1, serial: "A1", taken: new)]),
+        ])
+        let folder = dash.dataDir.appendingPathComponent("computers")
+        let newest = folder.appendingPathComponent(try XCTUnwrap(
+            FileManager.default.contentsOfDirectory(atPath: folder.path).sorted().last))
+        let elsewhere = folder.deletingLastPathComponent().appendingPathComponent("elsewhere.json")
+        try FileManager.default.moveItem(at: newest, to: elsewhere)
+        try FileManager.default.createSymbolicLink(at: newest, withDestinationURL: elsewhere)
+        XCTAssertThrowsError(try dash.writeFleetDrift())
+        XCTAssertNil(dash.workbook.sheet(named: "Fleet Drift")?.dedupedCells.first)
+    }
+
     func testNoEarlierDaySnapshotSkipsTheSheet() throws {
         let dash = try dashboard(files: [
             (at(0, hour: 6), [mac(1, taken: at(0, hour: 6))]),

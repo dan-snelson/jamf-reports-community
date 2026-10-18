@@ -53,6 +53,14 @@ versions in this repository map to git tags.
 
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
+- A schedule whose last success was recorded while the Mac's clock was set ahead is retried
+  after a partial run, instead of waiting until that date. (#284)
+- Importing a CSV in the Adopt EAs walkthrough no longer freezes the window while a large file
+  is read, and a file that cannot be read now says why (not UTF-8 text, too large, a link).
+  (#284)
+- The same-day retry of a scheduled run no longer repeats for a Jamf Protect or Jamf School
+  source that failed for a reason a retry cannot fix (a missing permission, a command the
+  profile's API does not serve), or for a Protect collect that could not start. (#284)
 - A scheduled run's same-day retry after a partial run now collects again instead of reporting
   "already collected today" and counting as a success.
 - A Jamf Protect or Jamf School source that fails to collect now makes the run read as Partial,
@@ -133,6 +141,12 @@ versions in this repository map to git tags.
   used, instead of writing to the working directory or the temporary folder. A refused
   `archive_dir` skips archiving old runs, with one warning, instead of moving them into a folder
   beside the reports. (#284)
+- Cached snapshots used by reports and the daily summary, Fleet Drift, Adopt EAs, group
+  inventory and backup manifests are read with a size limit and refuse a link or a named pipe at
+  the file's name. Before, a pipe planted in a shared folder could freeze a report, a scheduled
+  run or the backup prune. (#284)
+- A backup manifest with an out-of-range Jamf Protect object count no longer crashes the Backups
+  screen. A count that is not a whole number from 0 to 2,147,483,647 is ignored. (#284)
 
 ## [2.10.1] - 2026-10-17
 

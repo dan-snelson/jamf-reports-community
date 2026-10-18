@@ -353,6 +353,20 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertEqual(BackupProductResult(manifestValue: skipped.manifestValue), skipped)
     }
 
+    func test_plantedManifestCountsAreRangeCheckedNotSummedIntoATrap() throws {
+        let manifest = """
+        {"products": {"protect": {"state": "ok", "object_counts":
+         {"a": 9223372036854775807, "b": 1, "c": -4, "d": 2.5, "e": 3, "f": "7",
+          "g": 2147483648, "h": 2147483647}}}}
+        """
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(manifest.utf8)) as? [String: Any])
+        let result = try XCTUnwrap(BackupProductResult.protect(inManifest: object))
+        XCTAssertEqual(result.objectCounts, ["b": 1, "e": 3, "h": Int(Int32.max)])
+        XCTAssertEqual(result.objectTotal, Int(Int32.max) + 4)
+        XCTAssertFalse(result.protectSummary.isEmpty)
+    }
+
     // MARK: - Backups screen text
 
     func test_summaryNamesWhatTheLatestBackupHolds() {

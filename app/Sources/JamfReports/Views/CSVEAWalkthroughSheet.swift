@@ -460,14 +460,36 @@ struct CSVEAWalkthroughSheet: View {
         selected = []
         agentTargets = []
         typeOverrides = [:]
-        guard let sample = try? ScaffoldService.readSample(from: url) else {
-            adoptError = "Couldn't read \(url.lastPathComponent) as a CSV export."
+        let mapped = mappedHeaders()
+        Task {
+            // The read caps at 256 MB, so it stays off the main actor.
+            let result = await Task.detached { Result { try ScaffoldService.readSample(from: url) } }
+                .value
+            finishImport(result, url: url, mapped: mapped)
+        }
+    }
+
+    /// Why a CSV could not be read, in words for the banner.
+    static func importFailureText(_ error: Error, fileName: String) -> String {
+        "Couldn't read \(fileName) as a CSV export: \(error.localizedDescription)"
+    }
+
+    private func finishImport(
+        _ result: Result<ScaffoldService.CSVSample, Error>, url: URL, mapped: Set<String>
+    ) {
+        // A newer pick replaced this one while it was reading.
+        guard importedCSVName == url.lastPathComponent else { return }
+        let sample: ScaffoldService.CSVSample
+        switch result {
+        case .success(let read): sample = read
+        case .failure(let error):
+            adoptError = Self.importFailureText(error, fileName: url.lastPathComponent)
             return
         }
         let detected = ScaffoldService.proposeEAs(
             headers: sample.headers,
             sampleRows: sample.rows,
-            mappedHeaders: mappedHeaders()
+            mappedHeaders: mapped
         )
         proposals = detected
         for ea in detected {

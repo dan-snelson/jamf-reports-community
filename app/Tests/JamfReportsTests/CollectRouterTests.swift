@@ -285,6 +285,7 @@ final class CollectRouterTests: XCTestCase {
           profile: my-protect
         """)
         let warnEmitted = RouterValueBox<Bool>(false)
+        let watcher = CollectHonestyWatcher()
 
         // Does not throw despite protectCollect throwing.
         try await CollectRouter.run(
@@ -295,6 +296,7 @@ final class CollectRouterTests: XCTestCase {
             schoolCollect: { _, _, _ in },
             protectCollect: { _, _, _ in throw NSError(domain: "test", code: 42) },
             onLine: { line in
+                watcher.observe(line.text)
                 if line.level == .warn, line.text.hasPrefix("[partial] protect collect failed") {
                     warnEmitted.set(true)
                 }
@@ -302,6 +304,9 @@ final class CollectRouterTests: XCTestCase {
         )
 
         XCTAssertTrue(warnEmitted.value, "A warning must be emitted when protect collect fails")
+        XCTAssertTrue(watcher.incomplete, "Run History still reads the run as Partial")
+        XCTAssertFalse(watcher.retryCouldHelp { _ in false },
+                       "a throw (no jamf-cli, bad profile) repeats on a same-day retry")
     }
 
     /// Nil config must degrade to Jamf Pro without crashing (regression guard).

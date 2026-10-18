@@ -7,6 +7,21 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+### Fixed
+
+- A setting in `config.yaml` written as `Don't stop # note` now reads as the text before the
+  comment, instead of keeping the comment as part of the value.
+- Saving a value that contains a line-break character other than a normal new line no longer
+  splits that setting across two lines in `config.yaml`; the character is saved as a space.
+- Saving **Config** no longer adds the report and archive folder settings to a `config.yaml`
+  that never had them, so a shared workspace does not ask you to confirm a folder you did not
+  change. A failed save no longer leaves a temporary copy of the file beside it.
+- Settings → Intelligence now keeps a dated backup copy of `config.yaml` before it removes
+  the retired `external` and `lock_on_device` settings.
+- **Check now** and the daily update check give up after 30 seconds instead of showing
+  "Checking…" for as long as GitHub keeps trickling an answer, and turning the check off with a
+  configuration profile takes effect without a relaunch.
+
 ## [2.10.1] - 2026-10-17
 
 2.10.1 tells you when a new stable release is out, without ever installing one. It fixes Jamf

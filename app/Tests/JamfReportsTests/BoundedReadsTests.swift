@@ -304,14 +304,14 @@ final class BoundedReadsTests: XCTestCase {
 
         let profile = self.profile
         let found = expectation(description: "snapshots read")
-        nonisolated(unsafe) var snapshots: [CLIBridge.CachedJSONSnapshot] = []
-        Task.detached {
-            snapshots = await CLIBridge().cachedJSONSnapshots(
+        let box = ResultBox<[CLIBridge.CachedJSONSnapshot]>()
+        Task.detached { [box] in
+            box.value = await CLIBridge().cachedJSONSnapshots(
                 profile: profile, type: "audit", limit: 10)
             found.fulfill()
         }
         await fulfillment(of: [found], timeout: deadline)
-        XCTAssertEqual(snapshots.map(\.data), [good])
+        XCTAssertEqual(box.value?.map(\.data), [good])
     }
 
     // MARK: - Device-detail cache
@@ -327,15 +327,15 @@ final class BoundedReadsTests: XCTestCase {
     private func detail(live stub: URL?) async -> CLIBridge.DeviceDetailResult? {
         let profile = self.profile
         let finished = expectation(description: "device detail")
-        nonisolated(unsafe) var result: CLIBridge.DeviceDetailResult?
-        Task.detached {
-            result = await CLIBridge().singleDeviceDetail(
+        let box = ResultBox<CLIBridge.DeviceDetailResult>()
+        Task.detached { [box] in
+            box.value = await CLIBridge().singleDeviceDetail(
                 profile: profile, deviceID: "C02TEST", cacheSubdir: "devices",
                 jamfCLIArgs: { ["pro", "device", $0] }, locateJamfCLI: { stub })
             finished.fulfill()
         }
         await fulfillment(of: [finished], timeout: deadline)
-        return result
+        return box.value
     }
 
     func testDeviceCacheIsNotReadThroughALinkAFIFOOrWhenOversize() async throws {

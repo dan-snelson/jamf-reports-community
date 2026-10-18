@@ -51,6 +51,8 @@ enum ConfigEditedKeys {
         // Written only when they differ from the default (an absent key).
         state.staleBasis = [.checkIn, .inventory]
         state.contactGapDays = "30"
+        state.outputDir = "x"
+        state.archiveDir = "x"
         state.securityAgents = [
             ConfigSecurityAgent(name: "x", column: "x", connectedValue: "x"),
         ]

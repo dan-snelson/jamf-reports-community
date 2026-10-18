@@ -34,6 +34,14 @@ versions in this repository map to git tags.
 - **Check now** and the daily update check give up after 30 seconds instead of showing
   "Checking…" for as long as GitHub keeps trickling an answer, and turning the check off with a
   configuration profile takes effect without a relaunch.
+- The HTML report no longer shows two different stale-Mac counts. The Devices heading now
+  uses the same figure as the At a glance tile and the Needs attention list, with the same
+  note about Macs that never received the Jamf binary.
+- "Patch titles under 50%" in the HTML report is now worked out from the device counts, so a
+  title at 49.6% is no longer rounded up to 50% and missed; a title with no devices is skipped.
+- Dates are read the same way in every report. A date that cannot be read now shows as
+  Unknown or a dash instead of 0 or -1 days, and a Jamf School device with an unreadable
+  check-in is no longer listed as stale on the Stale Devices tab.
 
 ### Security
 

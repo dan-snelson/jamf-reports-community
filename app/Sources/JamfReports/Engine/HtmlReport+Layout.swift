@@ -311,11 +311,16 @@ extension HtmlReport {
             }
         case .devices:
             let days = config.thresholds?.resolvedStaleDays ?? 30
-            parts.append("\(f.plural(staleComputers(inputs.computers).count, "Mac")) idle "
-                + "over \(days) days")
+            let stale = Self.staleFigure(inputs)
+            var idle = "\(f.plural(stale.count, "Mac")) idle over \(days) days"
+            if stale.includingBinaryMissing > 0 {
+                idle += " (includes \(stale.includingBinaryMissing) without the Jamf binary, "
+                    + "listed apart)"
+            }
+            parts.append(idle)
             let gaps = inputs.contactGapCounts.values.reduce(0, +)
             if gaps > 0 { parts.append("\(gaps) with a contact gap") }
-            if inputs.binaryMissingCount > 0 {
+            if inputs.binaryMissingCount > 0 && stale.includingBinaryMissing == 0 {
                 parts.append("\(inputs.binaryMissingCount) without the Jamf binary")
             }
         case .policies:

@@ -5,8 +5,8 @@ import Foundation
 /// Two capabilities, both PII-safe and side-effect-free (only `coverageDrift`
 /// touches disk):
 ///   1. `assess` / `assessIntCount` — typed parse health for a column of values,
-///      mirroring the report engine's real type-parse semantics (see the
-///      `CSVDashboard.writeEA*` handlers) with a stricter accuracy lens where noted.
+///      mirroring the report engine's real type-parse semantics (see
+///      `EASheetWriter`) with a stricter accuracy lens where noted.
 ///   2. `coverageDrift` — per-EA device-coverage delta between the two newest
 ///      decodable `ea-results` snapshot days.
 struct EAParseHealthService {
@@ -40,8 +40,7 @@ struct EAParseHealthService {
 
     /// Assess parse health for `values` under `type`.
     ///
-    /// Type semantics mirror the engine's typed EA handlers (`CSVDashboard.writeEA*`,
-    /// CSVDashboard.swift:578-739):
+    /// Type semantics mirror the engine's typed EA handlers (`EASheetWriter`):
     ///   - `.boolean` / `.text`: no parse-failure mode — `parseable == nonEmpty`.
     ///   - `.percentage`: numeric after trimming whitespace and an optional trailing
     ///     "%", constrained to `0...100`. This is a STRICTER accuracy lens than the
@@ -50,7 +49,7 @@ struct EAParseHealthService {
     ///   - `.version`: `^\d+(\.\d+)*([\w.-]*)$` — dotted-numeric-ish tokens of at most 256
     ///     bytes. The engine buckets any value as a version, so this is a STRICTER accuracy lens.
     ///   - `.date`: parses under the same formats as the engine's date-EA path
-    ///     (`DateParser`, CSVDashboard.swift:983).
+    ///     (`DateParser`).
     static func assess(
         column: String,
         values: [String],

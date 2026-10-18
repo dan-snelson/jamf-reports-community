@@ -385,6 +385,8 @@ struct ReportEngine: Sendable {
     ///   - summariesDir: Directory to write the summary file into.
     ///   - provenance: Run provenance captured by the caller; embedded in the JSON output.
     ///   - onLine: When provided, warnings are emitted here in addition to `print`.
+    ///   - day: The day the summary is dated. `collect` passes the day it started, so a run
+    ///     that crosses midnight writes the day its guard checked, not the next one.
     /// - Returns: What happened, so a caller can tell "today's point is on
     ///   disk" from "nothing was written, and here is why". Deliberately not a
     ///   bare Bool: the caller also has to know whether the `[partial]` marker
@@ -394,6 +396,7 @@ struct ReportEngine: Sendable {
         summariesDir: URL,
         provenance: Provenance? = nil,
         liveKinds: Set<String>? = nil,
+        day: Date = Date(),
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) -> SummaryEmitOutcome {
         let fm = FileManager.default
@@ -407,11 +410,12 @@ struct ReportEngine: Sendable {
             return .directoryUnavailable
         }
 
-        let today = SummaryJSONParser.dateFormatter.string(from: Date())
+        let today = SummaryJSONParser.dateFormatter.string(from: day)
         let summaryFile = summariesDir.appendingPathComponent("summary_\(today).json")
 
         if fm.fileExists(atPath: summaryFile.path),
-           let existingData = try? Data(contentsOf: summaryFile),
+           let existingData = try? BoundedFile.read(
+               summaryFile, limit: SummaryJSONParser.maxSummaryFileBytes, followSymlinks: false),
            let obj = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any],
            obj["date"] != nil, obj["totalDevices"] != nil, obj["source"] != nil {
             // Same-day summary is valid. A run that landed a source today rebuilds it from the
@@ -1102,7 +1106,8 @@ struct ReportEngine: Sendable {
                 latestVersion: familyLatest, osCounts: osCounts)
             currentCount += onLatest
         }
-        return Double(currentCount) / Double(totalDevices) * 100.0
+        // A count above the fleet (mixed sources) must not read past 100%.
+        return Double(min(currentCount, totalDevices)) / Double(totalDevices) * 100.0
     }
 
     private func pct(of count: Int?, total: Int) -> Double? {
@@ -1900,6 +1905,9 @@ struct ReportEngine: Sendable {
     static func collect(
         profile: String,
         workspacePaths: WorkspacePaths.Type,
+    /// True inside the tick's same-day retry of a run that failed or came back incomplete.
+    @TaskLocal static var isSameDayRetry = false
+
         tiers: Set<CollectionTier> = Set(CollectionTier.allCases),
         skipExpensive: Bool = false,
         force: Bool = false,
@@ -1919,6 +1927,9 @@ struct ReportEngine: Sendable {
         // Snapshot retention (v2.2.0): config-driven, OFF by default, once per
         // calendar day. Placed before the early-return guard so it runs on any
         // collect path (headless scheduled, app refresh, ad-hoc, catch-up); its
+        // The day is fixed at the start: the guard below and the summary at the end must name
+        // the same one, or a collect that crosses midnight leaves the next day looking done.
+        let collectDay = Date()
         // own marker keeps it idempotent. Best-effort — never fails the collect.
         SnapshotRetentionService.sweepIfDue(profile: profile, onLine: onLine)
 
@@ -1937,11 +1948,15 @@ struct ReportEngine: Sendable {
         // per-kind cadence check already prevents redundant work, so dropping the
         // coarse day-guard for tier subsets is safe.
         let isFullCollect = tiers == Set(CollectionTier.allCases)
-        if !force, isFullCollect, let summariesDir = try? workspacePaths.summariesDir(for: profile) {
-            let today = SummaryJSONParser.dateFormatter.string(from: Date())
+        // The tick's same-day retry skips the guard: today's summary is what the failed run wrote,
+        // and the per-kind cadence below still fetches only what has not landed.
+        if !force, !isSameDayRetry, isFullCollect,
+           let summariesDir = try? workspacePaths.summariesDir(for: profile) {
+            let today = SummaryJSONParser.dateFormatter.string(from: collectDay)
             let summaryFile = summariesDir.appendingPathComponent("summary_\(today).json")
-            if FileManager.default.fileExists(atPath: summaryFile.path),
-               let data = try? Data(contentsOf: summaryFile),
+            if let data = try? BoundedFile.read(
+                   summaryFile, limit: SummaryJSONParser.maxSummaryFileBytes,
+                   followSymlinks: false),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                obj["date"] != nil, obj["totalDevices"] != nil, obj["source"] != nil {
                 let msg = "[info] already collected today — skipping (use Refresh to force)"
@@ -2162,7 +2177,7 @@ struct ReportEngine: Sendable {
             savedKinds: savedKinds, nothingLanded: matrixLandedNothing,
             loadedConfig: loadedConfig, refreshSOFA: refreshSOFA,
             workspacePaths: workspacePaths, stateStore: stateStore,
-            patchDefinitionLimits: patchDefinitionLimits, onLine: onLine
+            patchDefinitionLimits: patchDefinitionLimits, day: collectDay, onLine: onLine
         )
 
         // Stamp this machine's activity so other Macs sharing the folder can
@@ -2296,6 +2311,7 @@ struct ReportEngine: Sendable {
     ) async {
         // SOFA OS currency: refresh all 4 platform feeds when the "sofa" kind
         // is in the requested tiers. Light network fetch — always in the Refresh tier
+        day: Date,
         // so snapshot-only and full runs both capture it.
         //
         // Both kinds below bypass the per-kind loop, so they must stamp the
@@ -2364,7 +2380,7 @@ struct ReportEngine: Sendable {
                                                 sofaRefreshed: sofaRefreshSucceeded)
             unwritten = engine.emitSummaryJSON(
                 summariesDir: summariesDir, provenance: prov,
-                liveKinds: liveKinds, onLine: onLine
+                liveKinds: liveKinds, day: day, onLine: onLine
             ).partialReason
         } else if loadedConfig == nil {
             unwritten = "no config.yaml to summarize from"

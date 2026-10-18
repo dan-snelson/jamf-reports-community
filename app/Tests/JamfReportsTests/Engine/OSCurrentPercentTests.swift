@@ -25,6 +25,14 @@ final class OSCurrentPercentTests: XCTestCase {
         )
     }
 
+    func testShareNeverExceedsOneHundred() {
+        // More Macs counted by version than the fleet total (mixed sources).
+        let result = ReportEngine.osCurrentPercent(
+            macOSRows: [macOSRow(version: "15.7.7")], osCounts: ["15.7.7": 300],
+            totalDevices: 200)
+        XCTAssertEqual(result, 100.0)
+    }
+
     // MARK: - Nil cases
 
     func testNilWhenMacOSRowsEmpty() {

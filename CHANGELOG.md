@@ -7,6 +7,13 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+### Added
+
+- Custom EA sheets and the EA Warnings sheet now come from the extension attribute values
+  Jamf Reports collects, so a workbook no longer needs a CSV export for them. The EA Warnings
+  sheet says whether an EA is missing from Jamf Pro or defined with no values, and Config
+  Doctor reports the same.
+
 ### Changed
 
 - The Devices screen is now **Computers**, matching Jamf Pro's naming. Mobile Fleet keeps

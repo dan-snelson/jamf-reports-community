@@ -92,12 +92,18 @@ struct ReportEngine: Sendable {
         for sheetID in template.includedSheets {
             AppLogger.report.debug("sheet \(sheetID.rawValue, privacy: .public)")
         }
-        // The CSV is read first so `sheets.only` is judged against every tab this
-        // workbook can have.
-        let csv = try csvURL.map { try csvDashboard(at: $0, workbook: workbook, profile: profile) }
+        // The CSV and the EA results are read first so `sheets.only` is judged against every
+        // tab this workbook can have. Collected EA results win over the CSV's EA columns.
+        let eaSheets = EASheets.load(config: config, workbook: workbook, dataDir: dataDir,
+                                     profile: profile, csvPresent: csvURL != nil)
+        let csv = try csvURL.map {
+            try csvDashboard(at: $0, workbook: workbook, profile: profile,
+                             skippingCustomEAs: eaSheets != nil)
+        }
         let sheets = Self.sheetSettings(
             config, tabs: template.includedSheets.map(\.rawValue)
                 + (csv?.sheetPlan.map(\.name) ?? [])
+                + (eaSheets?.sheetPlan.map(\.name) ?? [])
                 + (config.charts?.isEnabled == true ? [Self.chartsSheetName] : []),
             onLine: onLine)
         let (writtenCore, coreFailures, unimplementedSheets) =
@@ -113,6 +119,7 @@ struct ReportEngine: Sendable {
         // CSVDashboard sheets — Swift CSV writers are non-throwing, so there is no
         // failure list here.
         _ = csv?.writeAll(sheets: sheets)
+        let eaWritten = eaSheets?.writeAll(sheets: sheets) ?? []
 
         // Chart sheet — render PNG charts from trend summaries and embed in workbook.
         // Standalone PNGs land next to the xlsx via ExportNaming conventions.
@@ -131,7 +138,7 @@ struct ReportEngine: Sendable {
                              pngOutputDir: pngDir, profile: profile)
         }
         // Nothing to write: no jamf-cli sheet had data, no CSV, and no Charts tab that stays.
-        if writtenCore.isEmpty, csv == nil,
+        if writtenCore.isEmpty, csv == nil, eaWritten.isEmpty,
            workbook.sheet(named: Self.chartsSheetName) == nil
             || !sheets.keeps(Self.chartsSheetName) {
             throw ReportEngineError.noCachedData(dataDir)
@@ -177,10 +184,12 @@ struct ReportEngine: Sendable {
     }
 
     private func csvDashboard(
-        at csvURL: URL, workbook: Workbook, profile: String
+        at csvURL: URL, workbook: Workbook, profile: String, skippingCustomEAs: Bool
     ) throws -> CSVDashboard {
         let csvData = try InventoryCSV.read(csvURL, limit: csvByteLimit)
-        guard let csv = CSVDashboard(config: config, csvData: csvData, workbook: workbook,
+        var csvConfig = config
+        if skippingCustomEAs { csvConfig.customEas = nil }
+        guard let csv = CSVDashboard(config: csvConfig, csvData: csvData, workbook: workbook,
                                      currentCSVURL: csvURL, profile: profile) else {
             throw ReportEngineError.csvParseFailed(csvURL)
         }

@@ -23,7 +23,10 @@ enum AppUpdateCheck {
     static let retryAfterFailure: TimeInterval = 60 * 60
     /// A release document is a few KB; anything past this is not one.
     static let maxResponseBytes = 1_048_576
+    /// URLSession's timeout counts idle time only, so an answer that trickles in would hold
+    /// "Checking…" until the size cap; this bounds the whole fetch.
     static let requestTimeout: TimeInterval = 15
+    static let overallDeadline: TimeInterval = 30
 
     struct Release: Equatable, Sendable {
         /// The tag as GitHub has it (`v2.10.1`), which names the release page.
@@ -54,6 +57,7 @@ enum AppUpdateCheck {
         case unexpectedHost
         case tooLarge
         case notAStableRelease
+        case timedOut
 
         var reason: String {
             switch self {
@@ -61,6 +65,7 @@ enum AppUpdateCheck {
             case .unexpectedHost: "the answer came from a host other than api.github.com"
             case .tooLarge: "the answer was larger than a release"
             case .notAStableRelease: "the latest release is not a stable version"
+            case .timedOut: "GitHub did not finish answering in time"
             }
         }
     }
@@ -145,12 +150,30 @@ enum AppUpdateCheck {
         return try await collect(bytes, limit: maxResponseBytes)
     }
 
+    /// `fetch(request)`, abandoned (and cancelled) after `deadline` seconds.
+    static func fetch(
+        _ request: URLRequest, using fetch: @escaping Fetch, deadline: TimeInterval
+    ) async throws -> Data {
+        try await withThrowingTaskGroup(of: Data.self) { group in
+            defer { group.cancelAll() }
+            group.addTask { try await fetch(request) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(deadline))
+                throw CheckError.timedOut
+            }
+            guard let data = try await group.next() else { throw CheckError.timedOut }
+            return data
+        }
+    }
+
     /// Fetches the latest release and compares it with `current`. Never throws.
-    static func check(current: String, fetch: Fetch) async -> Outcome {
+    static func check(
+        current: String, fetch: @escaping Fetch, deadline: TimeInterval = overallDeadline
+    ) async -> Outcome {
         guard let request else { return .failed("the GitHub address could not be built") }
         do {
-            let release = try release(from: try await fetch(request))
-            return outcome(current: current, release: release)
+            let data = try await Self.fetch(request, using: fetch, deadline: deadline)
+            return outcome(current: current, release: try release(from: data))
         } catch let error as CheckError {
             return .failed(error.reason)
         } catch is DecodingError {
@@ -226,6 +249,8 @@ final class AppUpdateModel {
     /// At launch and every 30 minutes: one request a day at most (an hour after a failure),
     /// none when the switch is off.
     func checkIfDue(now: Date = Date()) async {
+        // A configuration profile can switch the check off after launch.
+        isEnabled = Self.readEnabled(defaults)
         guard isEnabled,
               AppUpdateCheck.isDue(lastCheck: lastCheck, failed: lastCheckFailed, now: now)
         else { return }
@@ -234,6 +259,7 @@ final class AppUpdateModel {
 
     /// Settings' Check now: runs even when the daily check is not due.
     func checkNow(now: Date = Date()) async {
+        isEnabled = Self.readEnabled(defaults)
         guard isEnabled, !isChecking else { return }
         isChecking = true
         defer { isChecking = false }

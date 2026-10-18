@@ -219,11 +219,14 @@ final class ConnectionCredentialsModel {
         _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: String
     ) async {
         for member in connection.members {
-            guard !member.scopeID.isEmpty else {
+            // connections.json is a plain file; its ID goes to jamf-cli as a flag value.
+            guard ConnectionEnvironments.isUsableID(member.scopeID) else {
+                let reason = member.scopeID.isEmpty
+                    ? "No ID is recorded for this profile."
+                    : "The ID recorded for this profile cannot be used."
                 rows.append(Row(
                     label: member.label, profile: member.profile,
-                    outcome: .skipped("No ID is recorded for this profile. Use Update credentials "
-                        + "on its own workspace."),
+                    outcome: .skipped(reason + " Use Update credentials on its own workspace."),
                     isNew: false))
                 continue
             }

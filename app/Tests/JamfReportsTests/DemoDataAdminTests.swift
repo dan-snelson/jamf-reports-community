@@ -138,13 +138,6 @@ final class DemoDataAdminTests: XCTestCase {
         XCTAssertNil(DemoData.cacheDate(for: ["protect-overview"], profile: "meridianedu"))
     }
 
-    func testOnlyTheCSVAssistedProfileHasAnInboxCSV() {
-        let inbox = DemoData.inboxFiles(for: DemoData.org.profile)
-        XCTAssertEqual(inbox.count, 1)
-        XCTAssertTrue(inbox.allSatisfy { $0.mtime <= DemoData.referenceDate })
-        XCTAssertTrue(DemoData.inboxFiles(for: "meridianedu").isEmpty)
-    }
-
     func testSummariesFamilyMatchesTheTrendHistory() {
         let families = DemoData.snapshotFamilies(for: DemoData.org.profile)
         XCTAssertEqual(families.map(\.name), ["summaries"])

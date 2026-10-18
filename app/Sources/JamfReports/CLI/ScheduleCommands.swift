@@ -32,7 +32,7 @@ struct Schedules: AsyncParsableCommand {
         @Flag(help: "Run for every local profile.") var allProfiles = false
         @Option(help: "Comma-separated profiles to skip (--all-profiles); %2C is ',', %25 is '%'.")
         var exclude: String?
-        @Option(help: "snapshot-only | jamf-cli-only | jamf-cli-full | csv-assisted | backup")
+        @Option(help: "snapshot-only | jamf-cli-only | jamf-cli-full | backup")
         var mode: String
         @Option(help: "Cadence: 'Daily 06:20', 'Mon 07:00', 'Weekdays 09:00', 'Day 15 06:20'.")
         var cadence: String
@@ -47,6 +47,9 @@ struct Schedules: AsyncParsableCommand {
         ) throws -> ScheduleRecord {
             guard ProfileService.isValid(profile) else {
                 throw Invalid(description: "invalid profile '\(profile)'")
+            }
+            guard mode != Schedule.RunMode.retiredCSVAssistedRaw else {
+                throw Invalid(description: "csv-assisted mode was retired in 2.11; use jamf-cli-full")
             }
             guard let runMode = Schedule.RunMode(rawValue: mode) else {
                 throw Invalid(description: "unknown mode '\(mode)'")

@@ -194,7 +194,7 @@ enum DemoData {
 
     static let scheduledRuns: [Schedule] = [
         .init(name: "Weekly Executive Report", profile: "meridian-prod", schedule: "Monday · 07:00",
-              cadence: "weekly", mode: .csvAssisted, next: "Apr 27, 07:00", last: "Apr 20, 07:02",
+              cadence: "weekly", mode: .jamfCLIFull, next: "Apr 27, 07:00", last: "Apr 20, 07:02",
               lastStatus: .ok, artifacts: ["xlsx", "html"], enabled: true),
         .init(name: "Daily Snapshot Collection", profile: "meridian-prod", schedule: "Daily · 06:00",
               cadence: "daily", mode: .snapshotOnly, next: "Apr 26, 06:00", last: "Apr 25, 06:01",

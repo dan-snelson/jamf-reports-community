@@ -38,6 +38,14 @@ final class ScheduleCommandsTests: XCTestCase {
             mode: "backup", cadence: "Mon 07:00", tiers: nil, disabled: false))
     }
 
+    func testAddRejectsTheRetiredCSVAssistedModeNamingJamfCLIFull() {
+        XCTAssertThrowsError(try Schedules.Add.record(
+            name: "x", profile: "alpha", allProfiles: false, exclude: nil,
+            mode: "csv-assisted", cadence: "Daily 06:20", tiers: nil, disabled: false)) {
+            XCTAssertTrue("\($0)".contains("jamf-cli-full"), "\($0)")
+        }
+    }
+
     /// `schedules run`, the Schedules screen, and the health-card button all
     /// branch on this exact value to say "queued" instead of reporting a run
     /// that has not happened. It is a shared contract, not an internal detail.

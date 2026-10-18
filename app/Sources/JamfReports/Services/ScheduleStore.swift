@@ -51,7 +51,7 @@ struct ScheduleRecord: Codable, Sendable, Equatable {
     }
 
     func toSchedule() -> Schedule {
-        let runMode = Schedule.RunMode(rawValue: mode) ?? .jamfCLIOnly
+        let runMode = Schedule.RunMode(stored: mode) ?? .jamfCLIOnly
         let tierSet: Set<CollectionTier>? = tiers.map {
             Set($0.compactMap(CollectionTier.init(rawValue:)))
         }
@@ -69,7 +69,8 @@ struct ScheduleRecord: Codable, Sendable, Equatable {
             launchAgentLabel: label,
             multiTarget: allProfiles ? MultiTarget(scope: .all, sequential: true) : nil,
             tiers: tierSet,
-            excludedProfiles: allProfiles ? excludedProfiles : nil
+            excludedProfiles: allProfiles ? excludedProfiles : nil,
+            retiredCSVAssisted: mode == Schedule.RunMode.retiredCSVAssistedRaw
         )
     }
 }

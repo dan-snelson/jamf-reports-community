@@ -215,12 +215,13 @@ private func scheduledRunSingle(
     tiers: Set<CollectionTier>?,
     verbose: Bool,
     label: String?,
-    honesty: CollectHonestyWatcher
+    honesty: CollectHonestyWatcher,
+    retiredCSVAssisted: Bool
 ) async -> Int32 {
     await SharedConfigPin.announcingOnce {
         await scheduledRunSingleBody(
             profile: profile, mode: mode, tiers: tiers, verbose: verbose,
-            label: label, honesty: honesty)
+            label: label, honesty: honesty, retiredCSVAssisted: retiredCSVAssisted)
     }
 }
 
@@ -231,7 +232,8 @@ private func scheduledRunSingleBody(
     tiers: Set<CollectionTier>?,
     verbose: Bool,
     label: String?,
-    honesty: CollectHonestyWatcher
+    honesty: CollectHonestyWatcher,
+    retiredCSVAssisted: Bool
 ) async -> Int32 {
     guard ProfileService.isValid(profile) else {
         fputs("[error] Invalid profile '\(profile)'\n", stderr)
@@ -266,6 +268,12 @@ private func scheduledRunSingleBody(
         honesty.observe(line.text)
         recorder?.record(line.text)
         if let echo = scheduledRunEcho(line, verbose: verbose) { print(echo) }
+    }
+
+    if retiredCSVAssisted {
+        onLine(.init(timestamp: Date(), level: .info, text:
+            "[info] schedule \(runLabel): csv-assisted mode was retired in 2.11; "
+            + "ran as jamf-cli-full"))
     }
 
     // Shared workspace: a config.yaml value another Mac changed since this one pinned it is
@@ -546,14 +554,13 @@ private func scheduledRun(profile: String) async -> Int32 {
     let verbose = args.contains("--verbose")
     let allProfiles = args.contains("--all-profiles")
     // Legacy plists (pre-PR-20) omit --mode; fall back to jamf-cli-only so the
-    // existing behavior (collect + generate, no CSV) is preserved verbatim.
-    let mode: Schedule.RunMode = {
+    // existing behavior is preserved verbatim. The retired csv-assisted reads as jamf-cli-full.
+    let modeArg: String? = {
         guard let idx = args.firstIndex(of: "--mode"), idx + 1 < args.count,
-              isFlagValue(args[idx + 1]) else {
-            return .jamfCLIOnly
-        }
-        return Schedule.RunMode(rawValue: args[idx + 1]) ?? .jamfCLIOnly
+              isFlagValue(args[idx + 1]) else { return nil }
+        return args[idx + 1]
     }()
+    let mode = modeArg.flatMap(Schedule.RunMode.init(stored:)) ?? .jamfCLIOnly
 
     // PR-23 T-20: --tiers <csv> pins the collect tier set. Absent (pre-PR-23
     // plists) → nil, and scheduledRunSingle falls back to the mode default.
@@ -601,7 +608,8 @@ private func scheduledRun(profile: String) async -> Int32 {
         launchAgentLabel: label,
         multiTarget: allProfiles ? MultiTarget(scope: .all, sequential: true) : nil,
         tiers: tiers,
-        excludedProfiles: allProfiles ? Array(ProfileService.parseExclusions(excludeArg)) : nil
+        excludedProfiles: allProfiles ? Array(ProfileService.parseExclusions(excludeArg)) : nil,
+        retiredCSVAssisted: modeArg == Schedule.RunMode.retiredCSVAssistedRaw
     )
     // The external scheduler sees the exit code alone — retries are the tick's. Under the
     // tick lock like the tick's own runs; a run it turns away is queued, not failed.
@@ -629,7 +637,8 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
         let honesty = CollectHonestyWatcher()
         let code = await scheduledRunSingle(
             profile: schedule.profile, mode: schedule.mode, tiers: schedule.tiers,
-            verbose: verbose, label: label, honesty: honesty)
+            verbose: verbose, label: label, honesty: honesty,
+            retiredCSVAssisted: schedule.retiredCSVAssisted)
         return ScheduleRunOutcome(
             exitCode: code, incomplete: honesty.incomplete,
             retryCouldHelp: honesty.retryCouldHelp(profile: schedule.profile))
@@ -661,12 +670,13 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
         let honesty = CollectHonestyWatcher()
         let code = await scheduledRunSingle(
             profile: p.name, mode: schedule.mode, tiers: schedule.tiers,
-            verbose: verbose, label: label, honesty: honesty)
+            verbose: verbose, label: label, honesty: honesty,
+            retiredCSVAssisted: schedule.retiredCSVAssisted)
         if code != 0 { anyFailed = true }
         if honesty.incomplete { anyIncomplete = true }
         if honesty.retryCouldHelp(profile: p.name) { anyRetryable = true }
     }
-    if [.jamfCLIOnly, .jamfCLIFull, .csvAssisted].contains(schedule.mode) {
+    if [.jamfCLIOnly, .jamfCLIFull].contains(schedule.mode) {
         emitConsolidatedReports()
     }
     return ScheduleRunOutcome(

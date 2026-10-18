@@ -34,8 +34,8 @@ versions in this repository map to git tags.
 - **Fleet Drift** now compares the collected inventory from two different days, so it no longer
   needs a CSV export. It lists Macs that joined or left, macOS changes, and Macs that became or
   stopped being stale under your stale settings. The "Compliance Changed" section is gone from this
-  sheet, since collected inventory carries no per-Mac compliance count. A report built from a CSV
-  still gets its CSV-based Fleet Drift when there is no earlier day of collected inventory.
+  sheet, since collected inventory carries no per-Mac compliance count. Until a second day of
+  inventory has been collected, the sheet is left out.
 - **Computers** no longer merges a CSV dropped in `csv-inbox/`; it shows what jamf-cli collected.
   The Failed Rules line in a Mac's detail panel and the failed-rules part of the Security filter
   are gone with it, since only a CSV supplied them.

@@ -782,9 +782,8 @@ output:
 # standalone PNG files alongside the xlsx. PNG filenames use the workbook stem
 # as a prefix, so each run stays grouped together.
 #
-# Trend charts read dated CSV snapshots from historical_csv_dir or --historical-csv-dir.
-# Snapshot filenames should contain YYYY-MM-DD, YYYYMMDD, YYYY-MM-DD_HHMMSS,
-# or YYYY-MM-DDTHHMMSS somewhere in the filename.
+# Trend charts are built from the daily summaries and the dated jamf-cli snapshots
+# each collect saves.
 
 charts:
 
@@ -797,18 +796,14 @@ charts:
   # Embed all generated charts into a "Charts" sheet in the workbook.
   embed_in_xlsx: true
 
-  # Optional directory of dated CSV snapshots used for trend charts.
-  # Relative paths resolve from the folder containing config.yaml.
-  # Best practice: keep one baseline computer inventory export (and optionally
-  # one baseline mobile inventory export) per cadence. If a single folder mixes
-  # equivalent exports like "Portal - Applications" and "Insights - All Devices",
-  # trend charts keep the largest same-day snapshot for that schema and ignore
-  # smaller duplicate candidates.
+  # Folder for chart history: the daily summaries Trends reads live in its
+  # summaries/ subfolder. Relative paths resolve from the folder containing
+  # config.yaml. Before 2.11 dated CSV exports were also kept here; 2.11 no
+  # longer reads or writes them.
   historical_csv_dir: "snapshots"
 
   # macOS adoption charts: device counts per OS version over time.
-  # Uses CSV snapshots when available and falls back to jamf-cli
-  # inventory-summary snapshot history for jamf-cli-only workflows.
+  # Built from the jamf-cli inventory-summary snapshot history.
   os_adoption:
     # Draw the OS adoption by major version chart on the Charts tab. A missing
     # key means true, as the Customize screen shows it; set false to leave it out.

@@ -394,7 +394,12 @@ final class CollectHonestyWatcher: @unchecked Sendable {
     /// Feed one log line. Cheap enough to call on every line of a collect.
     func observe(_ line: String) {
         if line.hasPrefix(ReportEngine.standDownMarker) {
-            lock.withLock { standDown = true }
+            // A peer's live claim may end before the same-day retry; "collected recently" won't.
+            let liveClaim = line.hasSuffix(ReportEngine.liveClaimStandDownSuffix)
+            lock.withLock {
+                standDown = true
+                if liveClaim { partial = true; unexplainedPartial = true }
+            }
             return
         }
         guard line.hasPrefix("[partial]"),
@@ -435,9 +440,9 @@ final class CollectHonestyWatcher: @unchecked Sendable {
     /// The summary write failed, so the trend chart did not advance.
     var summaryWriteFailed: Bool { lock.withLock { summaryFailed } }
 
-    /// A source or the summary did not land. A stand-down, a report's sheet failures and a
-    /// device scan that landed with gaps are not missing data a retry would fetch, and never
-    /// set it. Whether a same-day retry is worth it is `retryCouldHelp`.
+    /// A source or the summary did not land, or the run stood down for a peer's live claim. A
+    /// stand-down because a peer collected recently, a report's sheet failures and a device
+    /// scan that landed with gaps are not missing data a retry would fetch, and never set it. Whether a same-day retry is worth it is `retryCouldHelp`.
     var incomplete: Bool { lock.withLock { partial } }
 
     /// `incomplete` for the background item's same-day retry: false when the `[partial]`

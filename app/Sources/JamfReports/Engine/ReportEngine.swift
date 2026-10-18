@@ -601,6 +601,10 @@ struct ReportEngine: Sendable {
     /// was collected, so the run is not the success a bare exit 0 implies.
     static let standDownMarker = "[partial] stood down:"
 
+    /// Ends the stand-down reason for a peer's live claim. Unlike the freshness stand-down it
+    /// means this Mac collected nothing that a peer has not yet finished, so a retry can help.
+    static let liveClaimStandDownSuffix = "standing down; another machine is already working here"
+
     /// The stand-down log line for a `CoordinationOutcome.standDown` reason.
     /// The reason already carries its own level tag (`[info] …` / `[warn] …`);
     /// stripping it keeps one level marker per line so `LogLevel.from(line:)`
@@ -2933,9 +2937,7 @@ struct ReportEngine: Sendable {
             let note = "[warn] \(live.host.display) is running \(live.operation) in this "
                 + "workspace until \(Self.approximateAge(until: live.expiresAt, now: now))"
             guard force else {
-                return .standDown(
-                    note + " — standing down; another machine is already working here"
-                )
+                return .standDown(note + " — \(liveClaimStandDownSuffix)")
             }
             return .proceed(
                 CoordinationState(coordinating: true, holdsClaim: false), notes: [note]
@@ -3381,8 +3383,11 @@ struct ReportEngine: Sendable {
         let bridge = CLIBridge()
         var schoolOutcomes: [CollectOutcome] = []
         var schoolSaved: Set<String> = []
+        let stateStore = (try? workspacePaths.stateDir(for: profile)).map(StateFileStore.init(directory:))
+        let collectStart = Date()
         for (args, kind) in commands {
             onLine(.init(timestamp: Date(), level: .info,
+        var unlanded: [String] = []
                          text: "[info] collecting \(kind) for \(profile)"))
             let schoolResult: (Int32, Data)?
             do {
@@ -3396,7 +3401,11 @@ struct ReportEngine: Sendable {
                     text: "[warn] \(kind): launch failed — \(error.localizedDescription)"))
                 schoolResult = nil
             }
-            guard let (exitCode, data) = schoolResult else { continue }
+            guard let (exitCode, data) = schoolResult else {
+                unlanded.append(kind)
+                stateStore?.record(.failed(exitCode: nil), report: kind, at: collectStart)
+                continue
+            }
             schoolOutcomes.append(CollectOutcome(kind: kind, exitCode: exitCode))
             if exitCode == 0, !data.isEmpty {
                 // Cobra prints the parent help and exits 0 for an unknown
@@ -3408,15 +3417,20 @@ struct ReportEngine: Sendable {
                             + "command on this jamf-cli?) — snapshot not saved"))
                     continue
                 }
+                    unlanded.append(kind)
+                    stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
                 try saveSnapshot(data: data, kind: kind, dataDir: dataDir)
                 schoolSaved.insert(kind)
                 onLine(.init(timestamp: Date(), level: .ok,
                              text: "[ok] \(kind): \(data.count) bytes"))
+                stateStore?.record(.landed, report: kind, at: collectStart)
             } else {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] \(kind): exit \(exitCode) — skipped"))
             }
         }
+                unlanded.append(kind)
+                stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
 
         // Total-outage guard for School: commands were attempted but none succeeded.
         // Without this, a dead School tenant silently records Success on every run.
@@ -3433,6 +3447,19 @@ struct ReportEngine: Sendable {
         }
     }
 
+        reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
+    }
+
+    /// The `[partial]` line for sources a School or Protect collect did not land, so the run
+    /// reads as Partial and not as a clean success. No line when everything landed.
+    static func reportUnlanded(
+        _ kinds: [String], attempted: Int,
+        onLine: @Sendable (CLIBridge.LogLine) -> Void
+    ) {
+        guard !kinds.isEmpty else { return }
+        let msg = unlandedSourcesLine(kinds, attempted: attempted)
+        AppLogger.collect.warning("\(msg, privacy: .public)")
+        onLine(.init(timestamp: Date(), level: .warn, text: msg))
     // MARK: - Public API: protectCollect
 
     /// Run all jamf-cli protect collect commands and save JSON snapshots.
@@ -3467,6 +3494,11 @@ struct ReportEngine: Sendable {
         let bridge = CLIBridge()
         for (args, kind) in commands {
             onLine(.init(timestamp: Date(), level: .info,
+        // The state folder sits under the data folder, which is all this call is given.
+        let stateStore = (try? WorkspacePaths.confinedFolder(["state"], under: dataDir))
+            .map(StateFileStore.init(directory:))
+        let collectStart = Date()
+        var unlanded: [String] = []
                          text: "[info] collecting \(kind) for \(profile)"))
             let protectResult: (Int32, Data)?
             do {
@@ -3480,7 +3512,11 @@ struct ReportEngine: Sendable {
                     text: "[warn] \(kind): launch failed — \(error.localizedDescription)"))
                 protectResult = nil
             }
-            guard let (exitCode, data) = protectResult else { continue }
+            guard let (exitCode, data) = protectResult else {
+                unlanded.append(kind)
+                stateStore?.record(.failed(exitCode: nil), report: kind, at: collectStart)
+                continue
+            }
             if exitCode == 0, !data.isEmpty {
                 // Cobra prints the parent help and exits 0 for an unknown
                 // subcommand — saving that as a snapshot poisons the cache.
@@ -3491,16 +3527,22 @@ struct ReportEngine: Sendable {
                             + "command on this jamf-cli?) — snapshot not saved"))
                     continue
                 }
+                    unlanded.append(kind)
+                    stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
                 try saveSnapshot(data: data, kind: kind, dataDir: dataDir)
                 onLine(.init(timestamp: Date(), level: .ok,
                              text: "[ok] \(kind): \(data.count) bytes"))
+                stateStore?.record(.landed, report: kind, at: collectStart)
             } else {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] \(kind): exit \(exitCode) — skipped"))
             }
         }
+                unlanded.append(kind)
+                stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
     }
 
+        reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
     // MARK: - Public API: schoolGenerate
 
     /// Build a Jamf School Excel report from cached jamf-cli school data.

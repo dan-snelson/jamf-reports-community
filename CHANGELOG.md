@@ -55,6 +55,9 @@ versions in this repository map to git tags.
   in Run History instead of reading as a clean run.
 - A schedule whose last success was recorded while the Mac's clock was set ahead is retried
   after a partial run, instead of waiting until that date. (#284)
+- Importing a CSV in the Adopt EAs walkthrough no longer freezes the window while a large file
+  is read, and a file that cannot be read now says why (not UTF-8 text, too large, a link).
+  (#284)
 - The same-day retry of a scheduled run no longer repeats for a Jamf Protect or Jamf School
   source that failed for a reason a retry cannot fix (a missing permission, a command the
   profile's API does not serve), or for a Protect collect that could not start. (#284)

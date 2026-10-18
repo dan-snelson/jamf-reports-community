@@ -250,4 +250,25 @@ final class CSVEAAdoptionTests: XCTestCase {
         )
         try text.write(to: url, atomically: true, encoding: .utf8)
     }
+
+    @MainActor
+    func test_importFailureNamesWhyTheCSVWasNotRead() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("csvea-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let bad = dir.appendingPathComponent("export.csv")
+        try Data([0xFF, 0xFE, 0x00, 0xD8]).write(to: bad)
+        XCTAssertThrowsError(try ScaffoldService.readSample(from: bad)) { error in
+            let text = CSVEAWalkthroughSheet.importFailureText(error, fileName: "export.csv")
+            XCTAssertTrue(text.contains("export.csv"))
+            XCTAssertTrue(text.contains("not UTF-8 text"), text)
+        }
+        let folder = dir.appendingPathComponent("folder.csv")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try ScaffoldService.readSample(from: folder)) { error in
+            XCTAssertTrue(CSVEAWalkthroughSheet.importFailureText(error, fileName: "folder.csv")
+                .contains("not a regular file"))
+        }
+    }
 }

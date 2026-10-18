@@ -11,9 +11,8 @@ This page covers installing the macOS app and `jamf-cli`.
 | Xcode | 16 or later — only needed to build the app from source |
 | Architecture | Apple silicon (arm64) — the prebuilt `.pkg`/`.dmg` are arm64-only; Intel Macs build from source |
 
-`jamf-cli` is optional. The app works from a Jamf Pro CSV export
-and cached snapshots with no jamf-cli installed — jamf-cli adds live collection and the
-API-driven dashboards.
+`jamf-cli` is optional. Without it the app works only from cached snapshots — jamf-cli adds
+live collection and the API-driven dashboards.
 
 ## Install the macOS app
 
@@ -102,7 +101,7 @@ jamf-cli config validate -p <profile>
 ```
 
 A clean exit means the app and CLI can collect live data. If `jamf-cli` is missing or
-unauthenticated, both still run from CSV exports and cached snapshots — the live
+unauthenticated, both still run from cached snapshots — the live
 dashboards are simply skipped.
 
 ## Next

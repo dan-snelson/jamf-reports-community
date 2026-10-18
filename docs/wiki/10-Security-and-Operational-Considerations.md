@@ -25,11 +25,17 @@ output:
 ```
 
 Raw snapshots, run logs, backups, and `config.yaml` stay local, where their
-permissions and single-writer assumptions still hold. Run Check confirms this
+permissions and single-writer assumptions still hold. Config Doctor confirms this
 with a green **"Reports publish to …"** row.
 
 `~` is expanded; a folder the app will not use is named in the run log and
 reports go to `Generated Reports` in the workspace.
+
+A symbolic link at the default `Generated Reports` or `archive` folder, such as one another
+Mac planted on a shared folder, is refused: the app logs one warning naming the folder and
+writes nothing through the link. When the report folder cannot be used at all, the run stops
+with an error that names the profile instead of writing somewhere else, and an archive
+folder that is refused skips archiving old runs, with one warning.
 
 The Reports screen lists the folder the reports go to, and Reveal in Finder, Open and
 Quick Look work there for that profile. Nothing else outside the workspace is opened, and a
@@ -123,7 +129,7 @@ Once one Mac has its workspace in the shared folder, do this on each Mac that jo
    **Settings → Workspace location** does the same.
 6. Leave automation off. One Mac should run the schedules; see
    [Several Macs, one workspace](https://github.com/tonyyo11/jamf-reports-community/wiki/05-Scheduling-and-Automation#several-macs-one-workspace).
-7. Run **Config → Run check**. It should list the other Macs and raise no version or clock
+7. Open **Health Audit → Config**. It should list the other Macs and raise no version or clock
    warning.
 
 If first launch shows the Welcome chooser (**Connect Jamf Pro**, **Try the demo first**)
@@ -144,7 +150,7 @@ POSIX permission model at all. `.metadata_never_index` suppresses local
 Spotlight only; it does nothing server-side.
 
 This is the one thing coordination does not solve. The app asks you to confirm
-it when you choose the folder, and Run Check repeats it on every shared
+it when you choose the folder, and Config Doctor repeats it on every shared
 workspace — but the decision is yours to make and to justify. In a regulated environment, decide deliberately who the
 folder is shared with, and get it reviewed before the first collect. If the
 audience for the reports is wider than the audience for device-level inventory,
@@ -177,16 +183,16 @@ config.yaml itself.
 
 **Keep every Mac on the same app version.** Versions before 2.7.0 order
 snapshots by modification date and prune backups without checking whose they
-are. Run Check warns when it sees a peer reporting a different version.
+are. Config Doctor warns when it sees a peer reporting a different version.
 
 **Clocks matter.** Freshness compares timestamps written by different machines,
-so leave "Set date and time automatically" on everywhere. Run Check warns when a
+so leave "Set date and time automatically" on everywhere. Config Doctor warns when a
 peer's timestamps are more than five minutes ahead.
 
 **Conflict copies.** When two machines do write the same file at once, providers
 keep both as `summary_2026-08-20 2.json` or `computers_… (1).json`. The app
 ignores any file whose name is not in canonical form, so no report is ever built
-from a duplicate. Run Check lists them so you can delete them; if they keep
+from a duplicate. Config Doctor lists them so you can delete them; if they keep
 appearing, raise `min_collect_interval_hours`.
 
 **Per-machine scheduling state is never safe to sync.** The background item is
@@ -226,7 +232,7 @@ Raw mode shows the full payload as jamf-cli returned it.
 
 ### Check it
 
-**Config → Run check** reports the whole picture for the active profile: which
+**Health Audit → Config** reports the whole picture for the active profile: which
 layout is in effect, whether the workspace folder is reachable and writable,
 which other Macs write there and when each last collected, whether their clocks
 and app versions agree, any live or stale claim, and every conflict copy it can
@@ -332,8 +338,8 @@ The diagnostic bundle includes:
 
 - Redacted `config.yaml` (secrets and webhook URLs removed; exception approvers and
   descriptions replaced with placeholders)
-- Recent logs (secrets, webhook URLs, the Jamf server address and the profile's tenant and
-  environment IDs removed)
+- Recent logs (secrets, webhook URLs, phone numbers, the Jamf server address and the
+  profile's tenant and environment IDs removed)
 - Recent daily summaries (`summary_<date>.json`), with PII redacted by stable hash
   placeholders such as `device-<8hex>` and `serial-<8hex>`
 - A workspace tree listing (paths visible, but no data)
@@ -350,7 +356,10 @@ and named in the bundle's manifest.
 Run History's **Copy log** and **Export log…**, and the export in Settings › Logging, apply
 the same redaction before the text reaches the clipboard or a file: secrets, webhook URLs
 (Slack, Teams, Teams Workflows, Power Automate), the Jamf server address and the profile's
-tenant and environment IDs are removed. The log on screen is not changed.
+tenant and environment IDs are removed. The server address is removed even for an
+on-premises host written without `https://` (for example `jss.example.org:8443`); it is read
+from the profile's entry in jamf-cli's config file. Phone numbers are masked too, in free
+text and under phone-number keys. The log on screen is not changed.
 
 **IP addresses:** IPv4 addresses are redacted wherever they appear in the text, and so are
 the values of the last-reported-IP fields (`lastIpAddress`, `lastReportedIp`). That

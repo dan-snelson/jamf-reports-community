@@ -35,13 +35,14 @@ blank Mac to a first report.
 
 Screens are organized into four groups:
 
-- **Reports** — fleet Overview, multi-profile Fleet Overview, device inventory, device
+- **Reports** — fleet Overview, multi-profile Fleet Overview, Computers inventory, device
   lookup, Historical Trends, and an instance Health Audit.
 - **Posture** — a weighted Security Score, Compliance Posture banding, and stale-device
   Offline Outreach.
 - **Operations** — Patch Compliance, OS Updates, Policies & Profiles, and Extension
-  Attributes.
-- **Fleet** — iOS/iPadOS Mobile Fleet and Jamf Protect.
+  Attributes (with **Adopt EAs** to track the ones jamf-cli collected).
+- **Fleet** — iOS/iPadOS Mobile Fleet, Jamf Protect (matched to Jamf Pro computers by
+  hardware UUID or serial number), and Groups & Searches.
 
 Every non-core dashboard is toggleable, so unused screens disappear from the sidebar.
 

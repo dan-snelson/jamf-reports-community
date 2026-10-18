@@ -15,7 +15,7 @@
 #
 # Required fields per entry:
 #   name            - Display label in the report
-#   column          - Exact EA column name in your CSV
+#   column          - The EA's name as Jamf Pro shows it
 #   connected_value - The string that means "installed / running"
 #                     (case-insensitive substring match). A value that says the
 #                     agent is absent or off never matches, even when it contains
@@ -117,7 +117,7 @@ jamf_cli:
 # ---------------------------------------------------------------------------
 sheets:
   # only, skip and order apply to every report workbook: the Jamf Pro tabs,
-  # the CSV tabs (custom EA tabs included), the Charts tab, and the tabs of a
+  # the custom EA tabs, the Charts tab, and the tabs of a
   # Jamf School workbook. The period and fleet workbooks do not read them.
   # The report template picks its sheets first; these lists work on what it
   # picked, so only never adds a sheet the template left out. Names match the
@@ -144,7 +144,7 @@ sheets:
   skip: []
 
   # Tab order. The tabs named here come first, in this order, wherever they
-  # come from (a CSV tab can go ahead of the Jamf Pro tabs); every other tab
+  # come from (a custom EA tab can go ahead of the Jamf Pro tabs); every other tab
   # follows in its default order. only and skip still apply, so a skipped
   # tab stays out.
   #
@@ -164,9 +164,8 @@ branding:
   # the HTML report header.
   org_name: ""
 
-  # Path to a PNG logo file. Only the workbook built from a Jamf Pro CSV export
-  # uses it: the logo is placed at the top left of each of that workbook's
-  # sheets. A relative path resolves from the workspace folder. The file must be
+  # Path to a PNG logo file. The logo is placed at the top left of the
+  # workbook's first tab. A relative path resolves from the workspace folder. The file must be
   # a regular PNG of at most 2 MB, and not in a system or credentials folder.
   # Other image formats are skipped with a warning; the HTML report shows no
   # logo. On a shared workspace a change from another Mac is ignored until you
@@ -325,7 +324,7 @@ security_policy:
   # (an Overview card and a Trends series each); the score counts them through
   # score_factors below.
   # edr_agent: "CrowdStrike Falcon"
-  # Your own words for on and off, for an extension attribute or CSV column mapped
+  # Your own words for on and off, for an extension attribute mapped
   # to filevault, sip, firewall or gatekeeper: a list, or one string, per control.
   # Checked in order: off_values, on_values (a value in both reads off), then the
   # built-in words. A whole value must match, in any case, with - and _ read as
@@ -427,7 +426,7 @@ retention:
 # do — snapshots are written under unique timestamped names and read back in
 # filename order — you just get two collects instead of one.
 #
-# Run Check on the Config screen reports which Macs share the folder, when each
+# Config Doctor (Health Audit → Config) reports which Macs share the folder, when each
 # last collected, and whether their clocks and app versions agree.
 #
 # shared_workspace:
@@ -581,12 +580,12 @@ exceptions: []
 # =============================================================================
 # CUSTOM EA SHEETS
 # =============================================================================
-# Define extra spreadsheet tabs driven entirely by EA data from your CSV.
+# Define extra spreadsheet tabs driven entirely by the EA values jamf-cli collected.
 # Each list entry creates one sheet in the output workbook.
 #
 # Required fields for every entry:
 #   name    - Sheet tab label and section heading in the report
-#   column  - Exact EA column name in your CSV
+#   column  - The EA's name as Jamf Pro shows it
 #   type    - One of: boolean, percentage, version, text, date
 #
 # Supported EA types:
@@ -736,7 +735,7 @@ output:
   # Automatically move older generated runs out of the main output folder.
   archive_enabled: true
 
-  # Optional archive directory for older generated reports and inventory CSVs.
+  # Optional archive directory for older generated reports and their companion files.
   # Leave blank to use an "archive" folder next to the active output file.
   archive_dir: ""
 

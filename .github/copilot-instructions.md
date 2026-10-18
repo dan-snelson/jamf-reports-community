@@ -6,11 +6,11 @@ This file provides context for GitHub Copilot and other AI coding assistants wor
 
 ## Project Overview
 
-A native macOS app (`app/`) — a SwiftUI GUI (macOS 15+, Swift 6) for fleet reporting against Jamf Pro and Jamf School. It collects data from `jamf-cli` (or a Jamf Pro CSV export, or cached snapshots), generates multi-sheet Excel workbooks and self-contained HTML reports, schedules unattended runs from one bundled background item, tracks run history, and surfaces a Historical Trends screen built on archived `summary.json` snapshots.
+A native macOS app (`app/`) — a SwiftUI GUI (macOS 15+, Swift 6) for fleet reporting against Jamf Pro and Jamf School. It collects data from `jamf-cli` (or cached snapshots), generates multi-sheet Excel workbooks and self-contained HTML reports, schedules unattended runs from one bundled background item, tracks run history, and surfaces a Historical Trends screen built on archived `summary.json` snapshots.
 
-All report generation is performed by a native Swift engine (`ReportEngine`); **there is no Python in the report-generation path.** The app is config-driven: users map their CSV column names to logical field names in `config.yaml` (edited through the GUI), with no code changes needed for normal use. It is a SwiftPM project (`app/Package.swift`), not a hand-rolled `.xcodeproj`.
+All report generation is performed by a native Swift engine (`ReportEngine`); **there is no Python in the report-generation path.** The app is config-driven: users track their Extension Attributes and security agents in `config.yaml` (edited through the GUI, or adopted from collected data with Adopt EAs), with no code changes needed for normal use. It is a SwiftPM project (`app/Package.swift`), not a hand-rolled `.xcodeproj`.
 
-**Key constraint:** Must work for any organization running Jamf Pro or Jamf School without requiring hardcoded org-specific values (column names, policy names, IP addresses, etc.) in the code.
+**Key constraint:** Must work for any organization running Jamf Pro or Jamf School without requiring hardcoded org-specific values (EA names, policy names, IP addresses, etc.) in the code.
 
 ## Architecture
 
@@ -35,12 +35,12 @@ Build target: macOS Sequoia 15 or later, Swift 6 strict concurrency.
 | Service | Purpose |
 |---------|---------|
 | `WorkspaceStore` | `@Observable` per-profile state. Sidebar chip switches the active profile; every screen re-routes to that workspace's data. |
-| `ReportEngine` | Native Swift report engine. Reads cached jamf-cli JSON (and optional CSV), writes multi-sheet XLSX, self-contained HTML, and CSV. `collect` fetches/saves snapshots and emits `summary.json`; `generate` renders reports from cached snapshots. |
+| `ReportEngine` | Native Swift report engine. Reads cached jamf-cli JSON, writes multi-sheet XLSX, self-contained HTML, and CSV. `collect` fetches/saves snapshots and emits `summary.json`; `generate` renders reports from cached snapshots. |
 | `CLIBridge` / `CLIBridge+Run` | `Process`-based async wrapper for `jamf-cli` and `ReportEngine`. Streams stdout/stderr live to the Runs screen. All report generation uses the native Swift engine; no Python subprocess calls. |
 | `WorkspacePaths` | Typed, profile-validated path constants under `~/Jamf-Reports/<profile>/`. All path construction goes through here. |
 | `ProfileService` / `ProfileName` | Accept every jamf-cli profile name except an empty one, one with control characters, a leading or trailing space, or an over-long one (2.8.3). Paths and schedule labels never take the raw name; they go through `ProfileName.pathComponent` and `labelComponent`. Resolves workspace URLs, discovers local profiles. |
 | `ConfigService` | Reads and writes `config.yaml` within a profile workspace. Only rewrites managed top-level keys and re-reads the rest, so unrelated/unmanaged config is preserved verbatim. |
-| `ScaffoldService` | CSV column detection + config writing. Initial onboarding scaffold regenerates `config.yaml`; re-scaffold uses the non-destructive `mergeColumns` path so existing agents/EAs/thresholds survive. |
+| `ScaffoldService` | Writes the minimal `config.yaml` a new workspace starts from, and proposes custom EAs from a Jamf Pro CSV export read once (`jamf-reports scaffold --csv`). No column mapping is written or read (2.11). |
 | `DiagnosticBundleService` | Stages recent logs, last-N summaries, redacted config, a workspace tree, and version metadata into a zip under `~/Jamf-Reports/<profile>/diagnostics/`. Powers Settings → "Generate diagnostic bundle now". Never executes any external script. |
 | `ScheduleStore` / `TickScheduler` / `TickerRegistrar` | `ScheduleStore` holds hand-built schedules in `~/Library/Application Support/JamfReports/schedules.json`; managed schedules are derived from the Automation policy on every tick. `TickScheduler.due` decides what runs. `TickerRegistrar` wraps `SMAppService` for the one bundled background item. The app writes no plist and no longer touches `~/Library/LaunchAgents`; `LaunchAgentService` only reads a legacy plist once for import. |
 
@@ -58,8 +58,7 @@ before touching architecture.
    through `HtmlSectionFormatters.escapeHTML`. No remote `<script src>` — HTML output is
    self-contained.
 
-3. **No hardcoded column names.** All column names come from `config.yaml`. Strings like
-   `"Computer Name"` appear only in `config.example.yaml` and `config.yaml`, never in code.
+3. **No hardcoded EA names.** Extension Attribute names come from `config.yaml`, never from code.
 
 4. **No hardcoded org-specific values.** No IP addresses, URLs, usernames, department
    names, policy names, or EA names in code.
@@ -92,9 +91,6 @@ Use these exact names:
 
 | Section | Key | NOT |
 |---------|-----|--------|
-| `columns` | `operating_system` | `os_version` |
-| `columns` | `last_checkin` | `last_contact` |
-| `columns` | `email` | `assigned_user_email` |
 | `jamf_cli` | `profile` | `jamf_profile` |
 | `security_agents` | `connected_value` | `installed_value` |
 | `compliance` | `failures_count_column` | `failed_count_column` |
@@ -190,8 +186,7 @@ A `Schedule.RunMode` is honored identically by the GUI "Run now" path, the bundl
 |------|----------|
 | `snapshot-only` | `collect` only — emits `summary.json`; no workbook |
 | `jamf-cli-only` | `generate` only — from cached snapshots; no collect |
-| `jamf-cli-full` | collect + generate; no CSV |
-| `csv-assisted` | collect + generate; requires a CSV in `csv-inbox/` |
+| `jamf-cli-full` | collect + generate |
 | `backup` | `jamf-cli pro backup` only — config objects to `backups/` |
 
 ## Related Documentation

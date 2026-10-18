@@ -17,7 +17,7 @@ It collects recent logs, the last few `summary.json` snapshots, `config.yaml`, a
 workspace tree listing, and version metadata into a zip under
 `~/Library/Logs/JamfReports/diagnostics/<profile>/` (on this Mac only, never in the
 workspace, which may be a shared folder), and reveals it in Finder. Credentials are always redacted; PII
-(hostnames, serials, emails, device names) is redacted by default with stable hash
+(hostnames, serials, emails, phone numbers, device names) is redacted by default with stable hash
 placeholders.
 
 The headless equivalent is `jamf-reports diagnostic-bundle --profile <profile>` (see
@@ -80,9 +80,8 @@ misconfiguration and data-quality issues that would otherwise fail silently.
 - **EA parse health** — flags a custom EA column whose values parse below 90% against its
   configured type, and shows the most common unparseable value shape (letters and digits
   masked, never the real value).
-- **CSV/device-count reconciliation** — compares device counts across the CSV export, the
-  cached `computers` snapshot, and `ea-results`, and warns when two sources disagree by
-  more than 10%.
+- **Device-count reconciliation** — compares device counts across the cached `computers`
+  snapshot and `ea-results`, and warns when the two disagree by more than 10%.
 - **EA coverage drift** — compares each EA's device-coverage percentage between the two
   newest `ea-results` snapshot days and warns when one drops more than 15 points. When
   fewer than two comparable days have been collected, the doctor reports "EA coverage
@@ -101,8 +100,8 @@ expected:
   many daily summaries are in each. Moving the workspace does not move existing data, so
   everything looks empty because it is; the old history is still there, just not being
   read.
-- **Settings here are defaults** — this workspace is new, so column mappings, custom
-  extension attributes and thresholds are scaffold defaults rather than anything you set
+- **Settings here are defaults** — this workspace is new, so custom
+  extension attributes and thresholds are defaults rather than anything you set
   previously.
 
 Both are suggestions rather than failures, and both stay quiet once the workspace has
@@ -129,7 +128,7 @@ brew install Jamf-Concepts/tap/jamf-cli
 which jamf-cli
 ```
 
-The app falls back to CSV-only / cached-snapshot mode when jamf-cli is absent and shows a
+The app falls back to cached-snapshot mode when jamf-cli is absent and shows a
 notice.
 
 **`401 Unauthorized` / token expired.** The OAuth token jamf-cli stored has
@@ -222,21 +221,22 @@ persist, force a collection — in the app, "Run now" on a `jamf-cli-full` sched
 
 **Health Audit shows red EAs.** A Custom EA's `column:` value does not match the name
 `jamf-cli` returns (renamed in Jamf Pro, trailing whitespace, or deleted). Fix the
-`column:` value in the Config screen's Custom EAs tab, or re-scaffold from the Config
-screen.
+`column:` value in the Config screen's Custom EAs tab, or remove the EA and add it again
+with **Adopt EAs** (Extension Attributes or Data Sources), which lists the names jamf-cli
+collected. The EA Warnings sheet in the workbook says whether such an EA is missing from Jamf
+Pro or defined there with no values collected, and Config Doctor reports the same.
 
 **Data Sources shows zero devices.** Cached JSON exists but the active profile points at
 a different `data_dir`, or the profile was switched without a refresh. Confirm the
 sidebar profile chip, check `jamf_cli.data_dir` in `config.yaml`, and regenerate.
 
-**Column not found / empty CSV-sourced sheets.** A column name in `config.yaml` does not
-match the CSV. Open the Config screen, re-scaffold against your CSV export, and confirm
-each mapping resolves to the right header.
+**A custom EA sheet is empty or missing.** Custom EA sheets are built from the extension
+attribute values jamf-cli collected, not from a CSV (retired in 2.11). Run a collect, then
+check the EA Warnings sheet and the Extension Attributes screen: the EA's name must match
+the name Jamf Pro shows.
 
-**CSV line endings.** A CSV saved by Excel or on Windows ends its lines with CR LF. Before
-2.9.0 the app read such a file as one row with no data, so a csv-assisted report had empty
-CSV sheets and Computers showed no rows from the CSV. From 2.9.0, LF, CR LF and CR all read
-the same way; there is nothing to convert.
+**`csv-inbox` folder.** Reports no longer read it (2.11). Config Doctor suggests deleting the
+folder when it still holds files; files already in it are left alone.
 
 **Notarization warning on first launch.** A local build is ad-hoc signed, not
 Developer-ID notarized. Right-click the app in Finder, choose Open, and confirm — macOS

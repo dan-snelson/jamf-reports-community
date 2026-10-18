@@ -1835,23 +1835,7 @@ struct CoreDashboard: Sendable {
     }
 
     private func daysSinceDate(_ raw: String) -> Int? {
-        guard !raw.isEmpty else { return nil }
-        let fmts = [
-            ISO8601DateFormatter(),
-        ]
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        var parsed: Date?
-        for fmt in fmts {
-            if let d = fmt.date(from: raw) { parsed = d; break }
-        }
-        if parsed == nil {
-            for pattern in ["yyyy-MM-dd'T'HH:mm:ss.SSSZ", "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd"] {
-                df.dateFormat = pattern
-                if let d = df.date(from: raw) { parsed = d; break }
-            }
-        }
-        guard let date = parsed else { return nil }
+        guard let date = DateParser().parse(raw) else { return nil }
         return Calendar.current.dateComponents([.day], from: date, to: Date()).day
     }
 
@@ -3538,16 +3522,6 @@ struct CoreDashboard: Sendable {
     }
 
     // MARK: - Value coercions
-
-    private func asInt(_ value: Any?) -> Int? {
-        switch value {
-        case let n as Int: return n
-        case let d as Double: return Int(exactly: d.rounded())
-        case let s as String: return Int(s)
-        case let n as NSNumber: return n.intValue
-        default: return nil
-        }
-    }
 
     private func asBool(_ value: Any?) -> Bool? {
         switch value {

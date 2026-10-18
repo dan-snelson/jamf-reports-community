@@ -119,7 +119,7 @@ struct EASheetWriter: Sendable {
         row += 1
 
         for (ver, count) in distribution.sorted(by: { lhs, rhs in
-            Self.compareVersions(lhs.key, rhs.key) > 0
+            JamfCLIInstaller.compareVersions(lhs.key, rhs.key) == .orderedDescending
         }) {
             let isCurrent = currentVersions.contains { ver.lowercased().hasPrefix($0) }
             let fmt: CellFormat = isCurrent ? .green : currentVersions.isEmpty ? .cell : .yellow
@@ -195,17 +195,6 @@ struct EASheetWriter: Sendable {
             ws.write(status, row: row, col: 4, format: fmt)
             row += 1
         }
-    }
-
-    private static func compareVersions(_ lhs: String, _ rhs: String) -> Int {
-        let lParts = lhs.split(separator: ".").compactMap { Int($0) }
-        let rParts = rhs.split(separator: ".").compactMap { Int($0) }
-        for i in 0..<max(lParts.count, rParts.count) {
-            let l = i < lParts.count ? lParts[i] : 0
-            let r = i < rParts.count ? rParts[i] : 0
-            if l != r { return l > r ? 1 : -1 }
-        }
-        return 0
     }
 }
 

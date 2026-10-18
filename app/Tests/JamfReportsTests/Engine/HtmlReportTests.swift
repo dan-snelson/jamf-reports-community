@@ -296,36 +296,31 @@ final class HtmlReportTests: XCTestCase {
     // MARK: - Helper: asInt
 
     func testAsIntFromInt() {
-        let report = makeReport()
-        XCTAssertEqual(report.asInt(42), 42)
+        XCTAssertEqual(asInt(42), 42)
     }
 
     func testAsIntFromString() {
-        let report = makeReport()
-        XCTAssertEqual(report.asInt("99"), 99)
+        XCTAssertEqual(asInt("99"), 99)
     }
 
     func testAsIntFromNilReturnsNil() {
-        let report = makeReport()
-        XCTAssertNil(report.asInt(nil))
+        XCTAssertNil(asInt(nil))
     }
 
     /// A corrupt snapshot can carry a number no `Int` holds; `Int(d)` trapped on it.
     func testAsIntRejectsDoublesOutsideIntRange() {
-        let report = makeReport()
         let outOfRange: [Double] = [
             1e300, -1e300, .nan, .infinity, -.infinity, 9.3e18, -9.3e18,
         ]
         for value in outOfRange {
-            XCTAssertNil(report.asInt(value), "\(value) must read as nil, not trap")
+            XCTAssertNil(asInt(value), "\(value) must read as nil, not trap")
         }
     }
 
     func testAsIntRoundsFractionalDoubles() {
-        let report = makeReport()
-        XCTAssertEqual(report.asInt(3.7), 4)
-        XCTAssertEqual(report.asInt(-2.4), -2)
-        XCTAssertEqual(report.asInt(12.0), 12)
+        XCTAssertEqual(asInt(3.7), 4)
+        XCTAssertEqual(asInt(-2.4), -2)
+        XCTAssertEqual(asInt(12.0), 12)
     }
 
     /// The OS bars read counts through asInt; a corrupt one must not take the report down.
@@ -580,14 +575,23 @@ final class HtmlReportTests: XCTestCase {
         XCTAssertEqual(days, 1)
     }
 
-    func testDaysAgoFromEmptyStringReturnsNegative() {
-        let report = makeReport()
-        XCTAssertEqual(report.daysAgo(from: ""), -1)
+    func testDaysAgoFromEmptyStringIsNil() {
+        XCTAssertNil(makeReport().daysAgo(from: ""))
     }
 
-    func testDaysAgoFromUnparseable() {
+    func testDaysAgoFromUnparseableIsNil() {
+        XCTAssertNil(makeReport().daysAgo(from: "not-a-date"))
+    }
+
+    func testDaysAgoReadsTheFormatsTheOtherReadersDo() {
         let report = makeReport()
-        XCTAssertEqual(report.daysAgo(from: "not-a-date"), -1)
+        let past = Date().addingTimeInterval(-3 * 86_400 - 3_600)
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "MM/dd/yyyy HH:mm:ss"] {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = format
+            XCTAssertEqual(report.daysAgo(from: formatter.string(from: past)), 3, format)
+        }
     }
 
     // MARK: - Charts are HTML

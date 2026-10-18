@@ -119,6 +119,17 @@ extension HtmlReport {
         return count > 0 ? "includes \(count) without the Jamf binary, listed apart" : nil
     }
 
+    /// The stale count every part of the report shows, so the tile, the attention list and the
+    /// Devices group headline cannot disagree: the daily summary's, which still holds the Macs
+    /// without the binary (#274, `includingBinaryMissing` says how many, listed under their own
+    /// reason); the computers snapshot's rule count stands in when the summary has none.
+    static func staleFigure(_ inputs: Inputs) -> (count: Int, includingBinaryMissing: Int) {
+        if let count = inputs.summaries.last?.staleCount {
+            return (count, inputs.binaryMissingCount)
+        }
+        return (inputs.computers.isEmpty ? 0 : inputs.staleMacCount, 0)
+    }
+
     private func glanceTile(
         _ spec: FigureSpec, value: Double, current: DailySummary, prior: DailySummary?,
         note: String?
@@ -200,13 +211,8 @@ extension HtmlReport {
             items.append((text, attentionAnchor(id, group: group, shown: shown)))
         }
 
-        // The figure the "At a glance" tile shows, so the two cannot disagree at the top; the
-        // computers snapshot stands in when the summary has no count.
-        let stale = latest?.staleCount ?? (inputs.computers.isEmpty ? 0 : inputs.staleMacCount)
+        let (stale, missing) = Self.staleFigure(inputs)
         if stale > 0 {
-            // The summary's count still holds the Macs without the binary (#274), which the
-            // table lists under their own reason; the sentence says so.
-            let missing = latest?.staleCount != nil ? inputs.binaryMissingCount : 0
             add(.interventionList, .devices,
                 Self.staleSentence(stale, rule: rule, includingBinaryMissing: missing))
         }

@@ -654,7 +654,7 @@ final class HtmlReportLayoutTests: XCTestCase {
         XCTAssertEqual(try summary("patching"), "Patching — 12 titles behind · 3 under 50%")
         XCTAssertEqual(try summary("failures"), "Recent failures — 3 patch · 2 update failures")
         XCTAssertTrue(
-            try summary("devices").hasPrefix("Devices needing intervention — 14 Macs idle"))
+            try summary("devices").hasPrefix("Devices needing intervention — 9 Macs idle"))
         XCTAssertTrue(try summary("security").hasPrefix("Security and compliance — 12 P0 gaps"))
         XCTAssertTrue(try summary("policies").contains("2 policy findings"))
         XCTAssertTrue(try summary("policies").contains("2 profiles failing"))

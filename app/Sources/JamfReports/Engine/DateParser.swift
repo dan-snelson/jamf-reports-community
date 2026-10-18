@@ -1,7 +1,8 @@
 import Foundation
 
-/// Lightweight date parser that handles the common Jamf CSV date formats without
-/// allocating a new DateFormatter per call.
+/// The one date reader for the report engine: `DeviceInventoryService.parseDate` first (ISO 8601
+/// with or without a fraction, then the export forms), then the zone-less and slash forms that
+/// reader lacks. Nil when nothing reads; callers show "Unknown" or a dash, never 0 or -1.
 struct DateParser: Sendable {
     private static let formats = [
         "yyyy-MM-dd HH:mm:ss",
@@ -15,6 +16,7 @@ struct DateParser: Sendable {
     func parse(_ raw: String) -> Date? {
         let s = raw.trimmingCharacters(in: .whitespaces)
         guard !s.isEmpty else { return nil }
+        if let date = DeviceInventoryService.parseDate(s) { return date }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         // Jamf CSV timestamps carry no zone, so the same export yields different

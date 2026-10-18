@@ -114,6 +114,33 @@ final class CollectOncePerdayGuardTests: XCTestCase {
         await assertTheGuardLetItThrough(force: true)
     }
 
+    /// The tick's same-day retry of a partial run must not be answered "already collected":
+    /// the summary on disk is the failed run's own.
+    func testSameDayRetryProceedsPastTheGuard() async throws {
+        try writeTodaySummary()
+        await ReportEngine.$isSameDayRetry.withValue(true) {
+            await assertTheGuardLetItThrough(force: false)
+        }
+    }
+
+    /// A summary that is a link, or past the size cap, is not proof of a collect.
+    func testLinkedOrOversizedSummaryDoesNotSatisfyTheGuard() async throws {
+        let today = SummaryJSONParser.dateFormatter.string(from: Date())
+        let file = summariesDir.appendingPathComponent("summary_\(today).json")
+        let real = root.appendingPathComponent("real.json")
+        try JSONSerialization.data(withJSONObject: [
+            "date": today, "totalDevices": 100, "source": "test"]).write(to: real)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: real)
+        await assertTheGuardLetItThrough(force: false)
+
+        try FileManager.default.removeItem(at: file)
+        var big = Data("{\"date\":\"\(today)\",\"totalDevices\":1,\"source\":\"t\",\"pad\":\"".utf8)
+        big.append(Data(repeating: 0x61, count: SummaryJSONParser.maxSummaryFileBytes))
+        big.append(Data("\"}".utf8))
+        try big.write(to: file)
+        await assertTheGuardLetItThrough(force: false)
+    }
+
     /// When no today's summary exists, `collect(force: false)` must proceed
     /// past the guard (same behavior as `force: true` for a fresh workspace).
     func testProceedsWhenNoTodaySummaryExists() async throws {

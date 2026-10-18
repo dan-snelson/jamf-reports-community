@@ -385,6 +385,8 @@ struct ReportEngine: Sendable {
     ///   - summariesDir: Directory to write the summary file into.
     ///   - provenance: Run provenance captured by the caller; embedded in the JSON output.
     ///   - onLine: When provided, warnings are emitted here in addition to `print`.
+    ///   - day: The day the summary is dated. `collect` passes the day it started, so a run
+    ///     that crosses midnight writes the day its guard checked, not the next one.
     /// - Returns: What happened, so a caller can tell "today's point is on
     ///   disk" from "nothing was written, and here is why". Deliberately not a
     ///   bare Bool: the caller also has to know whether the `[partial]` marker
@@ -394,6 +396,7 @@ struct ReportEngine: Sendable {
         summariesDir: URL,
         provenance: Provenance? = nil,
         liveKinds: Set<String>? = nil,
+        day: Date = Date(),
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) -> SummaryEmitOutcome {
         let fm = FileManager.default
@@ -407,11 +410,12 @@ struct ReportEngine: Sendable {
             return .directoryUnavailable
         }
 
-        let today = SummaryJSONParser.dateFormatter.string(from: Date())
+        let today = SummaryJSONParser.dateFormatter.string(from: day)
         let summaryFile = summariesDir.appendingPathComponent("summary_\(today).json")
 
         if fm.fileExists(atPath: summaryFile.path),
-           let existingData = try? Data(contentsOf: summaryFile),
+           let existingData = try? BoundedFile.read(
+               summaryFile, limit: SummaryJSONParser.maxSummaryFileBytes, followSymlinks: false),
            let obj = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any],
            obj["date"] != nil, obj["totalDevices"] != nil, obj["source"] != nil {
             // Same-day summary is valid. A run that landed a source today rebuilds it from the
@@ -596,6 +600,10 @@ struct ReportEngine: Sendable {
     /// told this Mac to stand down. Same `[partial]` contract as above: nothing
     /// was collected, so the run is not the success a bare exit 0 implies.
     static let standDownMarker = "[partial] stood down:"
+
+    /// Ends the stand-down reason for a peer's live claim. Unlike the freshness stand-down it
+    /// means this Mac collected nothing that a peer has not yet finished, so a retry can help.
+    static let liveClaimStandDownSuffix = "standing down; another machine is already working here"
 
     /// The stand-down log line for a `CoordinationOutcome.standDown` reason.
     /// The reason already carries its own level tag (`[info] …` / `[warn] …`);
@@ -1102,7 +1110,8 @@ struct ReportEngine: Sendable {
                 latestVersion: familyLatest, osCounts: osCounts)
             currentCount += onLatest
         }
-        return Double(currentCount) / Double(totalDevices) * 100.0
+        // A count above the fleet (mixed sources) must not read past 100%.
+        return Double(min(currentCount, totalDevices)) / Double(totalDevices) * 100.0
     }
 
     private func pct(of count: Int?, total: Int) -> Double? {
@@ -1896,6 +1905,9 @@ struct ReportEngine: Sendable {
         case stoodDown
     }
 
+    /// True inside the tick's same-day retry of a run that failed or came back incomplete.
+    @TaskLocal static var isSameDayRetry = false
+
     @discardableResult
     static func collect(
         profile: String,
@@ -1915,6 +1927,9 @@ struct ReportEngine: Sendable {
         guard ProfileService.isValid(profile) else {
             throw ReportEngineError.invalidProfile(profile)
         }
+        // The day is fixed at the start: the guard below and the summary at the end must name
+        // the same one, or a collect that crosses midnight leaves the next day looking done.
+        let collectDay = Date()
 
         // Snapshot retention (v2.2.0): config-driven, OFF by default, once per
         // calendar day. Placed before the early-return guard so it runs on any
@@ -1937,11 +1952,15 @@ struct ReportEngine: Sendable {
         // per-kind cadence check already prevents redundant work, so dropping the
         // coarse day-guard for tier subsets is safe.
         let isFullCollect = tiers == Set(CollectionTier.allCases)
-        if !force, isFullCollect, let summariesDir = try? workspacePaths.summariesDir(for: profile) {
-            let today = SummaryJSONParser.dateFormatter.string(from: Date())
+        // The tick's same-day retry skips the guard: today's summary is what the failed run wrote,
+        // and the per-kind cadence below still fetches only what has not landed.
+        if !force, !isSameDayRetry, isFullCollect,
+           let summariesDir = try? workspacePaths.summariesDir(for: profile) {
+            let today = SummaryJSONParser.dateFormatter.string(from: collectDay)
             let summaryFile = summariesDir.appendingPathComponent("summary_\(today).json")
-            if FileManager.default.fileExists(atPath: summaryFile.path),
-               let data = try? Data(contentsOf: summaryFile),
+            if let data = try? BoundedFile.read(
+                   summaryFile, limit: SummaryJSONParser.maxSummaryFileBytes,
+                   followSymlinks: false),
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                obj["date"] != nil, obj["totalDevices"] != nil, obj["source"] != nil {
                 let msg = "[info] already collected today — skipping (use Refresh to force)"
@@ -2162,7 +2181,7 @@ struct ReportEngine: Sendable {
             savedKinds: savedKinds, nothingLanded: matrixLandedNothing,
             loadedConfig: loadedConfig, refreshSOFA: refreshSOFA,
             workspacePaths: workspacePaths, stateStore: stateStore,
-            patchDefinitionLimits: patchDefinitionLimits, onLine: onLine
+            patchDefinitionLimits: patchDefinitionLimits, day: collectDay, onLine: onLine
         )
 
         // Stamp this machine's activity so other Macs sharing the folder can
@@ -2292,6 +2311,7 @@ struct ReportEngine: Sendable {
         workspacePaths: WorkspacePaths.Type,
         stateStore: StateFileStore?,
         patchDefinitionLimits: DeviceCallLimits,
+        day: Date,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async {
         // SOFA OS currency: refresh all 4 platform feeds when the "sofa" kind
@@ -2364,7 +2384,7 @@ struct ReportEngine: Sendable {
                                                 sofaRefreshed: sofaRefreshSucceeded)
             unwritten = engine.emitSummaryJSON(
                 summariesDir: summariesDir, provenance: prov,
-                liveKinds: liveKinds, onLine: onLine
+                liveKinds: liveKinds, day: day, onLine: onLine
             ).partialReason
         } else if loadedConfig == nil {
             unwritten = "no config.yaml to summarize from"
@@ -2917,9 +2937,7 @@ struct ReportEngine: Sendable {
             let note = "[warn] \(live.host.display) is running \(live.operation) in this "
                 + "workspace until \(Self.approximateAge(until: live.expiresAt, now: now))"
             guard force else {
-                return .standDown(
-                    note + " — standing down; another machine is already working here"
-                )
+                return .standDown(note + " — \(liveClaimStandDownSuffix)")
             }
             return .proceed(
                 CoordinationState(coordinating: true, holdsClaim: false), notes: [note]
@@ -3363,8 +3381,11 @@ struct ReportEngine: Sendable {
         }
 
         let bridge = CLIBridge()
+        let stateStore = (try? workspacePaths.stateDir(for: profile)).map(StateFileStore.init(directory:))
+        let collectStart = Date()
         var schoolOutcomes: [CollectOutcome] = []
         var schoolSaved: Set<String> = []
+        var unlanded: [String] = []
         for (args, kind) in commands {
             onLine(.init(timestamp: Date(), level: .info,
                          text: "[info] collecting \(kind) for \(profile)"))
@@ -3380,7 +3401,11 @@ struct ReportEngine: Sendable {
                     text: "[warn] \(kind): launch failed — \(error.localizedDescription)"))
                 schoolResult = nil
             }
-            guard let (exitCode, data) = schoolResult else { continue }
+            guard let (exitCode, data) = schoolResult else {
+                unlanded.append(kind)
+                stateStore?.record(.failed(exitCode: nil), report: kind, at: collectStart)
+                continue
+            }
             schoolOutcomes.append(CollectOutcome(kind: kind, exitCode: exitCode))
             if exitCode == 0, !data.isEmpty {
                 // Cobra prints the parent help and exits 0 for an unknown
@@ -3390,15 +3415,20 @@ struct ReportEngine: Sendable {
                     onLine(.init(timestamp: Date(), level: .warn,
                         text: "[warn] \(kind): output is not JSON (renamed/unsupported "
                             + "command on this jamf-cli?) — snapshot not saved"))
+                    unlanded.append(kind)
+                    stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
                     continue
                 }
                 try saveSnapshot(data: data, kind: kind, dataDir: dataDir)
                 schoolSaved.insert(kind)
+                stateStore?.record(.landed, report: kind, at: collectStart)
                 onLine(.init(timestamp: Date(), level: .ok,
                              text: "[ok] \(kind): \(data.count) bytes"))
             } else {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] \(kind): exit \(exitCode) — skipped"))
+                unlanded.append(kind)
+                stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
             }
         }
 
@@ -3415,6 +3445,19 @@ struct ReportEngine: Sendable {
             onLine(.init(timestamp: Date(), level: .fail, text: msg))
             throw ReportEngineError.collectDead(profile: profile, failedCount: failedCount)
         }
+        reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
+    }
+
+    /// The `[partial]` line for sources a School or Protect collect did not land, so the run
+    /// reads as Partial and not as a clean success. No line when everything landed.
+    static func reportUnlanded(
+        _ kinds: [String], attempted: Int,
+        onLine: @Sendable (CLIBridge.LogLine) -> Void
+    ) {
+        guard !kinds.isEmpty else { return }
+        let msg = unlandedSourcesLine(kinds, attempted: attempted)
+        AppLogger.collect.warning("\(msg, privacy: .public)")
+        onLine(.init(timestamp: Date(), level: .warn, text: msg))
     }
 
     // MARK: - Public API: protectCollect
@@ -3449,6 +3492,11 @@ struct ReportEngine: Sendable {
         }
 
         let bridge = CLIBridge()
+        // The state folder sits under the data folder, which is all this call is given.
+        let stateStore = (try? WorkspacePaths.confinedFolder(["state"], under: dataDir))
+            .map(StateFileStore.init(directory:))
+        let collectStart = Date()
+        var unlanded: [String] = []
         for (args, kind) in commands {
             onLine(.init(timestamp: Date(), level: .info,
                          text: "[info] collecting \(kind) for \(profile)"))
@@ -3464,7 +3512,11 @@ struct ReportEngine: Sendable {
                     text: "[warn] \(kind): launch failed — \(error.localizedDescription)"))
                 protectResult = nil
             }
-            guard let (exitCode, data) = protectResult else { continue }
+            guard let (exitCode, data) = protectResult else {
+                unlanded.append(kind)
+                stateStore?.record(.failed(exitCode: nil), report: kind, at: collectStart)
+                continue
+            }
             if exitCode == 0, !data.isEmpty {
                 // Cobra prints the parent help and exits 0 for an unknown
                 // subcommand — saving that as a snapshot poisons the cache.
@@ -3473,16 +3525,22 @@ struct ReportEngine: Sendable {
                     onLine(.init(timestamp: Date(), level: .warn,
                         text: "[warn] \(kind): output is not JSON (renamed/unsupported "
                             + "command on this jamf-cli?) — snapshot not saved"))
+                    unlanded.append(kind)
+                    stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
                     continue
                 }
                 try saveSnapshot(data: data, kind: kind, dataDir: dataDir)
+                stateStore?.record(.landed, report: kind, at: collectStart)
                 onLine(.init(timestamp: Date(), level: .ok,
                              text: "[ok] \(kind): \(data.count) bytes"))
             } else {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] \(kind): exit \(exitCode) — skipped"))
+                unlanded.append(kind)
+                stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
             }
         }
+        reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
     }
 
     // MARK: - Public API: schoolGenerate

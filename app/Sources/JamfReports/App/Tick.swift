@@ -71,15 +71,23 @@ func runTick(
         clearRunNowMarker: { TickRunner.clearRunNowMarker(label: $0) },
         perform: { run in
             hold.touch()
-            return await hold.keepingAlive { await runSchedule(run.schedule, verbose: false) }
+            return await hold.keepingAlive {
+                // A same-day retry must not be answered by the once-a-day collect guard.
+                await ReportEngine.$isSameDayRetry.withValue(run.reason == .retry) {
+                    await runSchedule(run.schedule, verbose: false)
+                }
+            }
         },
         recordFailure: failures.record,
         holdsLock: { hold.isHeld },
         // Once per wake, after all runs, so a schedule that just fired is not
-        // reported overdue by the same process.
+        // reported overdue by the same process. Inside the heartbeat like the runs, so a slow
+        // webhook send cannot let the lock read as stale.
         notifyOverdue: {
-            await notifyOverdueSchedulesHeadless(
-                profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
+            await hold.keepingAlive {
+                await notifyOverdueSchedulesHeadless(
+                    profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
+            }
         })
 }
 

@@ -248,4 +248,18 @@ final class StateFileFailureTests: XCTestCase {
         XCTAssertNil(states[2].lastSuccess)
         XCTAssertEqual(states[2].consecutiveFailures, 0)
     }
+
+    /// A count read from a damaged file can be Int.max; the next failure must not trap on +1.
+    func testHugeFailureAndTimeoutCountsSaturate() throws {
+        try "\(Int.max) 2026-08-25T12:00:00Z -2".write(
+            to: tempDir.appendingPathComponent("security.fail"), atomically: true, encoding: .utf8)
+        try "\(Int.max)".write(
+            to: tempDir.appendingPathComponent("security.timeouts"),
+            atomically: true, encoding: .utf8)
+
+        try store.recordFailure(report: "security", at: t0, exitCode: CLIBridge.exitCodeTimedOut)
+
+        XCTAssertEqual(store.failures(report: "security")?.count, Int.max)
+        XCTAssertEqual(store.consecutiveTimeouts(for: "security"), Int.max)
+    }
 }

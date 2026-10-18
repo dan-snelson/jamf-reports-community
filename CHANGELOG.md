@@ -51,6 +51,18 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- A scheduled run's same-day retry after a partial run now collects again instead of reporting
+  "already collected today" and counting as a success.
+- A Jamf Protect or Jamf School source that fails to collect now makes the run read as Partial,
+  with a failure recorded for it, instead of a clean success.
+- A collect that runs past midnight now dates its summary by the day it started, so the next
+  day's scheduled collect is no longer skipped.
+- A scheduled run that stood down because another Mac held the workspace is now retried later
+  the same day.
+- A background-item start time stamped in the future no longer stops that schedule from running.
+- The OS-current share can no longer read above 100%.
+- A damaged failure-count file no longer crashes the next collect.
+- Run now no longer ends the background item's run when the app is quit while it streams.
 - A setting in `config.yaml` written as `Don't stop # note` now reads as the text before the
   comment, instead of keeping the comment as part of the value.
 - Saving a value that contains a line-break character other than a normal new line no longer

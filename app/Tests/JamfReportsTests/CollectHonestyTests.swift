@@ -188,6 +188,21 @@ final class CollectHonestyTests: XCTestCase {
         )
     }
 
+    /// A School or Protect collect that lands some sources and not others says so, in the
+    /// line the watcher and Run History read; one that lands everything says nothing.
+    func testReportUnlandedReadsAsPartialToTheWatcher() {
+        let collector = LogTextCollector()
+        ReportEngine.reportUnlanded(["protect-alerts"], attempted: 4, onLine: collector.append)
+        let watcher = CollectHonestyWatcher()
+        collector.texts.forEach(watcher.observe)
+        XCTAssertEqual(collector.texts.count, 1)
+        XCTAssertTrue(watcher.incomplete, "got: \(collector.texts)")
+
+        let clean = LogTextCollector()
+        ReportEngine.reportUnlanded([], attempted: 4, onLine: clean.append)
+        XCTAssertTrue(clean.texts.isEmpty)
+    }
+
     // MARK: - S1: standing down is not a success
 
     func testStandDownLineCarriesThePartialMarker() {
@@ -311,6 +326,16 @@ final class CollectHonestyTests: XCTestCase {
         let stoodDown = CollectHonestyWatcher()
         stoodDown.observe(ReportEngine.standDownLine(reason: "[info] peer collected recently"))
         XCTAssertFalse(stoodDown.incomplete, "another Mac collected; there is nothing to retry")
+
+        // A peer's live claim ends; the same-day retry can collect after it.
+        let liveClaim = CollectHonestyWatcher()
+        liveClaim.observe(ReportEngine.standDownLine(
+            reason: "[warn] peer-mac is running collect in this workspace until shortly — "
+                + ReportEngine.liveClaimStandDownSuffix))
+        XCTAssertTrue(liveClaim.stoodDown)
+        XCTAssertTrue(liveClaim.incomplete)
+        XCTAssertTrue(liveClaim.retryCouldHelp { _ in false })
+        XCTAssertFalse(liveClaim.producedFreshSnapshot)
 
         let sheets = CollectHonestyWatcher()
         sheets.observe(partialRunMarker(sheetFailures: 2))
@@ -474,6 +499,28 @@ final class CollectHonestyTests: XCTestCase {
             ),
             "a run that lost its summary must not read as a clean success"
         )
+    }
+
+    /// A collect that starts on one day and ends on the next dates its summary by the start,
+    /// the day its once-a-day guard checked.
+    func testSummaryIsDatedByTheDayPassedIn() throws {
+        let dataDir = root.appendingPathComponent("data3", isDirectory: true)
+        let summariesDir = root.appendingPathComponent("summaries3", isDirectory: true)
+        try GoldenFleetWorkspace.writeJSON(
+            GoldenFleetWorkspace.securitySummaryPayload(
+                total: 10, filevault: 10, sip: 10, firewall: 10, gatekeeper: 10),
+            to: dataDir.appendingPathComponent("security", isDirectory: true)
+                .appendingPathComponent(
+                    "security_\(GoldenFleetClock.stamp(GoldenFleetClock.anchorNoon())).json"))
+        let started = Date(timeIntervalSinceNow: -2 * 86_400)
+
+        let outcome = ReportEngine(config: ReportConfig(), dataDir: dataDir)
+            .emitSummaryJSON(summariesDir: summariesDir, day: started)
+
+        XCTAssertEqual(outcome, .wrote)
+        let day = SummaryJSONParser.dateFormatter.string(from: started)
+        let names = try FileManager.default.contentsOfDirectory(atPath: summariesDir.path)
+        XCTAssertEqual(names, ["summary_\(day).json"])
     }
 
     /// The success path still reports true, or the gate above would suppress

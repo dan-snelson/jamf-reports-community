@@ -1193,7 +1193,7 @@ final class OnboardingFlow {
             let exit: Int32
             do {
                 exit = try await CLIBridge().schoolGenerate(
-                    profile: profile, csvPath: nil, onLine: onLine)
+                    profile: profile, onLine: onLine)
             } catch {
                 firstReportExitCode = -1
                 lastError = error.localizedDescription

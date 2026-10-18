@@ -3567,7 +3567,7 @@ struct ReportEngine: Sendable {
 
     // MARK: - Public API: schoolGenerate
 
-    /// Build a Jamf School Excel report from cached jamf-cli school data and/or a CSV export.
+    /// Build a Jamf School Excel report from cached jamf-cli school data.
     ///
     /// Mirrors the Python `cmd_school_generate` function.
     ///
@@ -3577,10 +3577,8 @@ struct ReportEngine: Sendable {
     @discardableResult
     static func schoolGenerate(
         config: ReportConfig,
-        csvURL: URL?,
         dataDir: URL,
         outputURL: URL,
-        csvByteLimit: Int = InventoryCSV.maxBytes,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async throws -> [SheetFailure] {
         // PR-10 / threat-model T-11: strict-mode pre-flight applies to School
@@ -3593,13 +3591,6 @@ struct ReportEngine: Sendable {
         let core = SchoolDashboard(config: config, dataDir: dataDir, workbook: workbook)
         let sheets = sheetSettings(config, tabs: core.sheetPlan.map(\.name), onLine: onLine)
         let (_, schoolFailures) = core.writeAll(sheets: sheets)
-
-        if let csvURL {
-            let csvData = try InventoryCSV.read(csvURL, limit: csvByteLimit)
-            let school = SchoolCSVDashboard(config: config, csvData: csvData, workbook: workbook)
-            // SchoolCSVDashboard.writeAll() is currently a stub returning [].
-            _ = school?.writeAll()
-        }
 
         workbook.arrange(by: sheets)
         try workbook.write(to: outputURL)

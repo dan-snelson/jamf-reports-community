@@ -25,7 +25,7 @@ CSV export, or cached snapshots), generates multi-sheet Excel workbooks and self
 HTML reports, schedules unattended runs from one bundled background item, tracks run
 history, and surfaces a
 Historical Trends screen built on archived `summary.json` snapshots. It also generates Jamf
-School reports from `jamf-cli school` data and/or Jamf School device CSV exports.
+School reports from `jamf-cli school` data.
 
 All report generation is performed by a native Swift engine (`ReportEngine`); there is no
 Python in the report-generation path. Diagnostic bundles are produced natively by
@@ -1103,7 +1103,7 @@ Config screen use it). `csv-inbox/` is a folder another Mac can write on a share
 naming it (`onWarning`; the scheduled run records it); `InventoryCSV.read` goes through
 `BoundedFile.read(followSymlinks: false)` (`O_NOFOLLOW`, non-blocking, regular file checked on the
 descriptor) and stops at `InventoryCSV.maxBytes` (256 MB, about 100,000 rows at 2 KB). Report
-generation (`ReportEngine.csvDashboard`, `schoolGenerate`, the `historical_csv_dir` archive copy,
+generation (`ReportEngine.csvDashboard`, the `historical_csv_dir` archive copy,
 which writes the bytes it read and keeps the export's date, and Fleet Drift's prior-snapshot
 reads) uses it, so an over-cap or non-regular CSV throws `InventoryCSV.ReadError` and the run
 fails with `[error]` naming the file; there is no fallback to cached data.

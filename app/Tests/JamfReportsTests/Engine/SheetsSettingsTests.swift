@@ -63,7 +63,7 @@ final class SheetsSettingsTests: XCTestCase {
             func school(_ yaml: String) async throws -> [String] {
                 let out = scratch.appendingPathComponent("school-\(UUID().uuidString).xlsx")
                 try await ReportEngine.schoolGenerate(
-                    config: try ConfigLoader.loadFromString(yaml), csvURL: nil,
+                    config: try ConfigLoader.loadFromString(yaml),
                     dataDir: dataDir, outputURL: out, onLine: { lines.add($0.text) })
                 return try Self.tabs(of: out)
             }

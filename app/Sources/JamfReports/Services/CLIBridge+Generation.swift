@@ -157,7 +157,7 @@ extension CLIBridge {
                 generateXLSX: {
                     if schoolMode {
                         return try await self.schoolGenerate(
-                            profile: profile, csvPath: nil, onLine: onLine)
+                            profile: profile, onLine: onLine)
                     }
                     // A chosen HTML format is the run's one HTML report; `html.with_workbook`
                     // would write a second.

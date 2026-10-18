@@ -699,7 +699,6 @@ final class CLIBridge {
     /// Run school-generate for Jamf School tenants via the Swift engine.
     func schoolGenerate(
         profile: String,
-        csvPath: String?,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async throws -> Int32 {
         guard await authGuard(profile: profile, onLine: onLine) else {
@@ -720,7 +719,6 @@ final class CLIBridge {
             throw CLIBridgeError.workspaceMissing(profile: profile)
         }
         let engine = ReportEngine(config: config, dataDir: dataDir)
-        let csvURL = csvPath.map { URL(fileURLWithPath: $0) }
         let outputURL = engine.resolveOutputURL(
             stem: ExportNaming.reportKind(for: .xlsx, schoolMode: true), profile: profile,
             onLine: onLine)
@@ -744,7 +742,6 @@ final class CLIBridge {
         do {
             let failures = try await ReportEngine.schoolGenerate(
                 config: config,
-                csvURL: csvURL,
                 dataDir: dataDir,
                 outputURL: outputURL,
                 onLine: onLine

@@ -59,13 +59,15 @@ final class DiagnosticRedactor {
     private let serialRE: NSRegularExpression
     private let homePathRE: NSRegularExpression
     private let ipv4RE: NSRegularExpression
+    private let phoneE164RE: NSRegularExpression
+    private let phoneNANPRE: NSRegularExpression
 
     /// Literals per compiled alternation. Not a cap: a category with more is split across
     /// several regexes, since a cap dropped the shortest literals from redaction.
     private static let seedChunkSize = 5000
     private static let minSeedLen = 4
     private static let seededCategories =
-        ["serial", "device", "udid", "host", "ip", "user", "email", "org"]
+        ["serial", "device", "udid", "host", "ip", "phone", "user", "email", "org"]
 
     /// Exact key match (lowercased) → value replaced with `REDACTED_<UPPER>`.
     static let sensitiveJSONKeys: Set<String> = [
@@ -94,7 +96,9 @@ final class DiagnosticRedactor {
         // Redact the full value under the "user" category.
         "operatoruserhost": "user",
         "email": "email", "emailaddress": "email", "email_address": "email",
-        "phone": "user", "phonenumber": "user", "phone_number": "user",
+        "phone": "phone", "phonenumber": "phone", "phone_number": "phone",
+        "mobilephone": "phone", "mobile_phone": "phone",
+        "telephone": "phone", "telephonenumber": "phone",
         "filevault2enabledusernames": "user",
         "building": "org", "department": "org", "room": "org", "position": "org",
     ]
@@ -126,6 +130,11 @@ final class DiagnosticRedactor {
         self.ipv4RE = Self.mustCompile(
             #"(?<![\w.\-])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"#
             + #"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![\w\-]|\.\d)"#)
+        // A phone number needs a leading `+` (E.164) or separators (NANP), so a bare 10-digit
+        // Jamf ID, a date or a timestamp is not one.
+        self.phoneE164RE = Self.mustCompile(#"(?<![\w+])\+[1-9]\d{7,14}\b"#)
+        self.phoneNANPRE = Self.mustCompile(
+            #"(?<![\w.\-])\(?\d{3}\)?[ .\-]\d{3}[ .\-]\d{4}(?![\w\-]|\.\d)"#)
     }
 
     // MARK: - Public API
@@ -139,6 +148,7 @@ final class DiagnosticRedactor {
             "emails": redactEmails,
             "device_names_in_json": redactDeviceNames,
             "usernames": redactUsernames,
+            "phones": true,
         ]
     }
 
@@ -170,6 +180,9 @@ final class DiagnosticRedactor {
         }
         // `ip` has no keep-flag, like the key-based rule and the seeded literals.
         out = replaceMatches(ipv4RE, in: out) { g in self.placeholder("ip", g[0] ?? "") }
+        for re in [phoneE164RE, phoneNANPRE] {
+            out = replaceMatches(re, in: out) { g in self.placeholder("phone", g[0] ?? "") }
+        }
         if redactEmails {
             out = replaceMatches(emailRE, in: out) { g in self.placeholder("email", g[0] ?? "") }
         }
@@ -339,7 +352,7 @@ final class DiagnosticRedactor {
         return result
     }
 
-    /// `udid`, `ip`, and `org` have no keep-flag and are always redacted when
+    /// `udid`, `ip`, `phone` and `org` have no keep-flag and are always redacted when
     /// redaction is enabled — matching Python `_pii_enabled`.
     private func piiEnabled(_ category: String) -> Bool {
         switch category {

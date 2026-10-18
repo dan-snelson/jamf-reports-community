@@ -169,7 +169,7 @@ final class DiagnosticBundleServiceTests: XCTestCase {
               let ual = out["userAndLocation"] as? [String: Any],
               let disk = out["diskEncryption"] as? [String: Any]
         else { return XCTFail("not a dict") }
-        XCTAssertTrue((ual["phone"] as? String ?? "").hasPrefix("user-"))
+        XCTAssertTrue((ual["phone"] as? String ?? "").hasPrefix("phone-"))
         XCTAssertTrue((ual["realname"] as? String ?? "").hasPrefix("user-"))
         let names = disk["fileVault2EnabledUserNames"] as? [String] ?? []
         XCTAssertEqual(names.count, 2)

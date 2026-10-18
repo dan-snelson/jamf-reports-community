@@ -53,6 +53,8 @@ versions in this repository map to git tags.
   record and the cached audit snapshots are read with a size limit and refuse a link or a named
   pipe at the file's name. Before, a pipe planted there could freeze the screen or a scheduled
   run that read it. (#284)
+- Shared logs and diagnostic bundles now mask phone numbers, in free text and under phone
+  keys. (#283)
 
 ## [2.10.1] - 2026-10-17
 

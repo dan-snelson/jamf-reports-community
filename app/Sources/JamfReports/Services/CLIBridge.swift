@@ -158,8 +158,10 @@ final class CLIBridge {
                         data = try BoundedFile.read(
                             item.url, limit: BoundedFile.snapshotLimit, followSymlinks: false)
                     } catch {
+                        let name = item.url.lastPathComponent
+                        let reason = String(describing: error)
                         AppLogger.cli.warning(
-                            "cachedJSONSnapshots: skipping \(item.url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)"
+                            "snapshot skipped \(name, privacy: .public): \(reason, privacy: .public)"
                         )
                         return nil
                     }

@@ -36,8 +36,8 @@ extension ConfigDoctorService {
         return rows
     }
 
-    /// The tabs `CSVDashboard.sheetPlan` can write besides one per custom EA; the Jamf-cli tabs
-    /// are `SheetID`.
+    /// The tabs `CSVDashboard.sheetPlan` and `EASheets` can write besides one per custom EA; the
+    /// Jamf-cli tabs are `SheetID`.
     static let csvSheetNames = [
         "Device Inventory", "Stale Devices", "Security Controls", "Security Agents",
         "Compliance", "Mobile Device Inventory", "Mobile Stale Devices", "Fleet Drift",

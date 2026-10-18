@@ -92,14 +92,16 @@ enum ConfigDoctorService {
 
         let csvHeaders = loadNewestCSVHeaders(profile: profile)
         let csvFamily = csvHeaders.map { CSVFamilyDetector.detect(headers: $0) } ?? nil
-        let eaNames = ExtensionAttributeService.load(profile: profile).coverage.map(\.eaName)
+        let eaSnapshot = ExtensionAttributeService.load(profile: profile)
+        let eaNames = eaSnapshot.coverage.map(\.eaName)
 
         var rows = evaluate(
             config: config,
             parseError: parseError,
             csvHeaders: csvHeaders,
             csvFamily: csvFamily,
-            eaCoverageNames: eaNames
+            eaCoverageNames: eaNames,
+            eaDefinitionNames: eaSnapshot.definitions.compactMap(\.name)
         )
         rows += unknownKeyRows(profile: profile, workspaceRoot: workspaceRoot)
         rows += readerRows(profile: profile, workspaceRoot: workspaceRoot)
@@ -149,7 +151,8 @@ enum ConfigDoctorService {
         parseError: String?,
         csvHeaders: [String]?,
         csvFamily: CSVFamily?,
-        eaCoverageNames: [String]
+        eaCoverageNames: [String],
+        eaDefinitionNames: [String] = []
     ) -> [DoctorRow] {
         if let parseError {
             return [DoctorRow(
@@ -163,18 +166,25 @@ enum ConfigDoctorService {
         guard let config else { return [] }
 
         var rows: [DoctorRow] = []
+        // The workbook takes a custom EA's tab from the collected results when there are any
+        // (`EASheets`); the CSV's EA columns matter only without them.
+        let collectedEAs = !eaCoverageNames.isEmpty
         if let headers = csvHeaders {
             // A CSV validates every configured column against real headers, which
             // supersedes the bare "is it configured" required-column check — running
             // both would emit a contradictory OK (configured) + ERROR (not in CSV)
             // pair for the same field. Same reasoning gates the structural agent
             // checks, which the CSV path already covers.
-            rows += csvRows(config, headers: headers, family: csvFamily)
+            rows += csvRows(config, headers: headers, family: csvFamily,
+                            includeCustomEAs: !collectedEAs)
         } else {
             // No CSV to validate against: fall back to config-presence checks.
             rows += requiredColumnRows(config)
             rows += securityAgentStructuralRows(config)
-            rows += customEANoCSVRows(config, eaCoverageNames: eaCoverageNames)
+        }
+        if collectedEAs || csvHeaders == nil {
+            rows += customEAResultRows(
+                config, eaCoverageNames: eaCoverageNames, eaDefinitionNames: eaDefinitionNames)
         }
         rows += structuralRows(config)
         rows += baselineRows(config, eaCoverageNames: eaCoverageNames)
@@ -227,7 +237,8 @@ enum ConfigDoctorService {
     private static func csvRows(
         _ config: ReportConfig,
         headers: [String],
-        family: CSVFamily?
+        family: CSVFamily?,
+        includeCustomEAs: Bool = true
     ) -> [DoctorRow] {
         var rows: [DoctorRow] = []
         let normalized = Set(headers.map { CSVFamilyDetector.normalize($0) })
@@ -241,7 +252,7 @@ enum ConfigDoctorService {
         }
 
         rows += mappedColumnRows(config, headers: headers, normalized: normalized, family: family)
-        rows += customEARows(config, normalized: normalized)
+        if includeCustomEAs { rows += customEARows(config, normalized: normalized) }
         if family != .mobile {
             rows += securityAgentCSVRows(config, normalized: normalized)
             rows += complianceColumnCSVRows(config, normalized: normalized)
@@ -321,37 +332,37 @@ enum ConfigDoctorService {
         }
     }
 
-    /// The no-CSV counterpart of `customEARows`. A custom EA's workbook sheet is
-    /// built from the CSV export alone, so without one the EA silently renders
-    /// nothing. Never `.fail`: only fail rows reach the run log, and a jamf-cli-only
-    /// workspace with EAs configured is a valid setup. A column that names a
-    /// collected extension attribute (case-insensitive, as `baselineRows` matches)
-    /// only rates a `.suggest` — those values exist, and the period report reads them.
-    private static func customEANoCSVRows(
+    /// The counterpart of `customEARows` for the collected results: a custom EA's tab is built
+    /// from the `ea-results` rows whose name is its `column` (`EASheets`). Never `.fail`: only
+    /// fail rows reach the run log, and an EA that is not collected yet is a valid setup.
+    private static func customEAResultRows(
         _ config: ReportConfig,
-        eaCoverageNames: [String]
+        eaCoverageNames: [String],
+        eaDefinitionNames: [String]
     ) -> [DoctorRow] {
         let collected = Set(eaCoverageNames.map { $0.lowercased() })
+        let defined = Set(eaDefinitionNames.map { $0.lowercased() })
         return (config.customEas ?? []).compactMap { ea in
             let column = ea.column.trimmingCharacters(in: .whitespaces)
             guard !column.isEmpty else { return nil }
-            let id = "custom_ea.\(ea.name).no_csv"
+            let id = "custom_ea.\(ea.name).ea_results"
+            let title = "EA: \(ea.name)"
             if collected.contains(column.lowercased()) {
+                return DoctorRow(id: id, severity: .pass, title: title,
+                                 detail: "'\(column)' has collected values.", hint: nil)
+            }
+            if defined.isEmpty || defined.contains(column.lowercased()) {
                 return DoctorRow(
-                    id: id, severity: .suggest, title: "EA: \(ea.name)",
-                    detail: "No CSV export, so no workbook sheet — but '\(column)' is among "
-                        + "the collected extension attributes, so the period report can "
-                        + "still use it.",
-                    hint: "Drop a Jamf Pro CSV export with a '\(column)' column into "
-                        + "csv-inbox for the sheet."
-                )
+                    id: id, severity: .warn, title: title,
+                    detail: "No collected values for '\(column)', so this EA has no sheet.",
+                    hint: "Run Collect; a defined extension attribute with no value on any Mac "
+                        + "stays empty.")
             }
             return DoctorRow(
-                id: id, severity: .warn, title: "EA: \(ea.name)",
-                detail: "No CSV export to read, so this EA produces nothing — its sheet is "
-                    + "built from the CSV column '\(column)'.",
-                hint: "Drop a Jamf Pro CSV export with a '\(column)' column into csv-inbox."
-            )
+                id: id, severity: .warn, title: title,
+                detail: "'\(column)' is not an extension attribute defined in Jamf Pro, so "
+                    + "this EA has no sheet.",
+                hint: "Fix the custom_eas column to match the extension attribute's name.")
         }
     }
 

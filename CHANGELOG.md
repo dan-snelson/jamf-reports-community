@@ -9,6 +9,23 @@ versions in this repository map to git tags.
 
 ### Added
 
+- **Groups & Searches** now shows how many members each group has, its description, and flags
+  empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
+  Groups**), with a summary row that also counts policies with no scope. Saved mobile
+  searches spell out their criteria, and the list is no longer cut off at 30. All of it comes
+  from data the app already collects.
+- **Adopt EAs** on the Extension Attributes screen (and Data Sources) lists the Extension
+  Attributes jamf-cli already collected, with a guessed type for each, and adds the ones you
+  pick to `config.yaml` as tracked EAs or Security Agents. No CSV is needed. Importing a CSV
+  export is now a one-time option inside the same sheet: you pick the file, and it is read
+  once rather than from `csv-inbox`.
+- Custom EA sheets and the EA Warnings sheet now come from the extension attribute values
+  Jamf Reports collects, so a workbook no longer needs a CSV export for them. The EA Warnings
+  sheet says whether an EA is missing from Jamf Pro or defined with no values, and Config
+  Doctor reports the same.
+- **Protect** now shows which Protect computers match a Jamf Pro computer (by hardware UUID or
+  serial number, never by name), which have no Jamf Pro record, and which Jamf Pro Macs have no
+  Protect record.
 
 ### Changed
 
@@ -34,6 +51,18 @@ versions in this repository map to git tags.
 - **Check now** and the daily update check give up after 30 seconds instead of showing
   "Checking…" for as long as GitHub keeps trickling an answer, and turning the check off with a
   configuration profile takes effect without a relaunch.
+- The fleet report's Security Score no longer shows a change against an earlier period when the
+  score factors changed in between, since the two scores were measured differently.
+- Security Posture shows a dash, no grade and "No factor had data" when no score factor had
+  data, instead of 0.0 and a grade F.
+- The HTML report no longer shows two different stale-Mac counts. The Devices heading now
+  uses the same figure as the At a glance tile and the Needs attention list, with the same
+  note about Macs that never received the Jamf binary.
+- "Patch titles under 50%" in the HTML report is now worked out from the device counts, so a
+  title at 49.6% is no longer rounded up to 50% and missed; a title with no devices is skipped.
+- Dates are read the same way in every report. A date that cannot be read now shows as
+  Unknown or a dash instead of 0 or -1 days, and a Jamf School device with an unreadable
+  check-in is no longer listed as stale on the Stale Devices tab.
 
 ### Security
 

@@ -181,16 +181,21 @@ enum LogRedactor {
     // MARK: - Public API
 
     /// The text for a clipboard copy or a saved export: `redact`, then the diagnostic bundle's
-    /// `DiagnosticRedactor` seeded with `profile`'s tenant and environment IDs, so the Jamf host
-    /// and the IDs jamf-cli echoes in its error lines ("Environment '<uuid>' not found") leave
-    /// as placeholders. A nil `profile` seeds no IDs (demo mode never reads a real config).
+    /// `DiagnosticRedactor` seeded with `profile`'s tenant and environment IDs and its
+    /// configured server, so the Jamf host (an on-prem one too) and the IDs jamf-cli echoes in
+    /// its error lines ("Environment '<uuid>' not found") leave as placeholders. A nil `profile`
+    /// seeds nothing (demo mode never reads a real config).
     static func redactedForSharing(
         _ text: String,
         profile: String?,
-        scopeIDs: (String) -> [String] = { DiagnosticBundleService.scopeIDs(profile: $0) }
+        scopeIDs: (String) -> [String] = { DiagnosticBundleService.scopeIDs(profile: $0) },
+        serverHosts: (String) -> [String] = { DiagnosticBundleService.serverHosts(profile: $0) }
     ) -> String {
         let redactor = DiagnosticRedactor()
-        if let profile { redactor.seedScopeIDs(scopeIDs(profile)) }
+        if let profile {
+            redactor.seedScopeIDs(scopeIDs(profile))
+            redactor.seedServerHosts(serverHosts(profile))
+        }
         return redactor.redactText(redact(text))
     }
 

@@ -1905,13 +1905,13 @@ struct ReportEngine: Sendable {
         case stoodDown
     }
 
+    /// True inside the tick's same-day retry of a run that failed or came back incomplete.
+    @TaskLocal static var isSameDayRetry = false
+
     @discardableResult
     static func collect(
         profile: String,
         workspacePaths: WorkspacePaths.Type,
-    /// True inside the tick's same-day retry of a run that failed or came back incomplete.
-    @TaskLocal static var isSameDayRetry = false
-
         tiers: Set<CollectionTier> = Set(CollectionTier.allCases),
         skipExpensive: Bool = false,
         force: Bool = false,
@@ -1927,13 +1927,13 @@ struct ReportEngine: Sendable {
         guard ProfileService.isValid(profile) else {
             throw ReportEngineError.invalidProfile(profile)
         }
+        // The day is fixed at the start: the guard below and the summary at the end must name
+        // the same one, or a collect that crosses midnight leaves the next day looking done.
+        let collectDay = Date()
 
         // Snapshot retention (v2.2.0): config-driven, OFF by default, once per
         // calendar day. Placed before the early-return guard so it runs on any
         // collect path (headless scheduled, app refresh, ad-hoc, catch-up); its
-        // The day is fixed at the start: the guard below and the summary at the end must name
-        // the same one, or a collect that crosses midnight leaves the next day looking done.
-        let collectDay = Date()
         // own marker keeps it idempotent. Best-effort — never fails the collect.
         SnapshotRetentionService.sweepIfDue(profile: profile, onLine: onLine)
 
@@ -2311,11 +2311,11 @@ struct ReportEngine: Sendable {
         workspacePaths: WorkspacePaths.Type,
         stateStore: StateFileStore?,
         patchDefinitionLimits: DeviceCallLimits,
+        day: Date,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async {
         // SOFA OS currency: refresh all 4 platform feeds when the "sofa" kind
         // is in the requested tiers. Light network fetch — always in the Refresh tier
-        day: Date,
         // so snapshot-only and full runs both capture it.
         //
         // Both kinds below bypass the per-kind loop, so they must stamp the
@@ -3381,13 +3381,13 @@ struct ReportEngine: Sendable {
         }
 
         let bridge = CLIBridge()
-        var schoolOutcomes: [CollectOutcome] = []
-        var schoolSaved: Set<String> = []
         let stateStore = (try? workspacePaths.stateDir(for: profile)).map(StateFileStore.init(directory:))
         let collectStart = Date()
+        var schoolOutcomes: [CollectOutcome] = []
+        var schoolSaved: Set<String> = []
+        var unlanded: [String] = []
         for (args, kind) in commands {
             onLine(.init(timestamp: Date(), level: .info,
-        var unlanded: [String] = []
                          text: "[info] collecting \(kind) for \(profile)"))
             let schoolResult: (Int32, Data)?
             do {
@@ -3415,22 +3415,22 @@ struct ReportEngine: Sendable {
                     onLine(.init(timestamp: Date(), level: .warn,
                         text: "[warn] \(kind): output is not JSON (renamed/unsupported "
                             + "command on this jamf-cli?) — snapshot not saved"))
-                    continue
-                }
                     unlanded.append(kind)
                     stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
+                    continue
+                }
                 try saveSnapshot(data: data, kind: kind, dataDir: dataDir)
                 schoolSaved.insert(kind)
+                stateStore?.record(.landed, report: kind, at: collectStart)
                 onLine(.init(timestamp: Date(), level: .ok,
                              text: "[ok] \(kind): \(data.count) bytes"))
-                stateStore?.record(.landed, report: kind, at: collectStart)
             } else {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] \(kind): exit \(exitCode) — skipped"))
-            }
-        }
                 unlanded.append(kind)
                 stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
+            }
+        }
 
         // Total-outage guard for School: commands were attempted but none succeeded.
         // Without this, a dead School tenant silently records Success on every run.
@@ -3445,8 +3445,6 @@ struct ReportEngine: Sendable {
             onLine(.init(timestamp: Date(), level: .fail, text: msg))
             throw ReportEngineError.collectDead(profile: profile, failedCount: failedCount)
         }
-    }
-
         reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
     }
 
@@ -3460,6 +3458,8 @@ struct ReportEngine: Sendable {
         let msg = unlandedSourcesLine(kinds, attempted: attempted)
         AppLogger.collect.warning("\(msg, privacy: .public)")
         onLine(.init(timestamp: Date(), level: .warn, text: msg))
+    }
+
     // MARK: - Public API: protectCollect
 
     /// Run all jamf-cli protect collect commands and save JSON snapshots.
@@ -3492,13 +3492,13 @@ struct ReportEngine: Sendable {
         }
 
         let bridge = CLIBridge()
-        for (args, kind) in commands {
-            onLine(.init(timestamp: Date(), level: .info,
         // The state folder sits under the data folder, which is all this call is given.
         let stateStore = (try? WorkspacePaths.confinedFolder(["state"], under: dataDir))
             .map(StateFileStore.init(directory:))
         let collectStart = Date()
         var unlanded: [String] = []
+        for (args, kind) in commands {
+            onLine(.init(timestamp: Date(), level: .info,
                          text: "[info] collecting \(kind) for \(profile)"))
             let protectResult: (Int32, Data)?
             do {
@@ -3525,24 +3525,24 @@ struct ReportEngine: Sendable {
                     onLine(.init(timestamp: Date(), level: .warn,
                         text: "[warn] \(kind): output is not JSON (renamed/unsupported "
                             + "command on this jamf-cli?) — snapshot not saved"))
-                    continue
-                }
                     unlanded.append(kind)
                     stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
+                    continue
+                }
                 try saveSnapshot(data: data, kind: kind, dataDir: dataDir)
+                stateStore?.record(.landed, report: kind, at: collectStart)
                 onLine(.init(timestamp: Date(), level: .ok,
                              text: "[ok] \(kind): \(data.count) bytes"))
-                stateStore?.record(.landed, report: kind, at: collectStart)
             } else {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] \(kind): exit \(exitCode) — skipped"))
-            }
-        }
                 unlanded.append(kind)
                 stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
+            }
+        }
+        reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
     }
 
-        reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
     // MARK: - Public API: schoolGenerate
 
     /// Build a Jamf School Excel report from cached jamf-cli school data.

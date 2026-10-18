@@ -857,6 +857,9 @@ let cliArgs = CommandLine.arguments
 // LaunchAgentWriter's plist parser (`args[1] == "--scheduled-run"`) and the
 // routesToCLI check below (`cliArgs[1]`).
 if cliArgs.count > 1, cliArgs[1] == "--tick" {
+    // Run now streams this process's output through a pipe; if the GUI quits mid-run, a write
+    // must fail with EPIPE instead of killing the tick (and the collect) with SIGPIPE.
+    signal(SIGPIPE, SIG_IGN)
     let code = Task.detached { await runTick(arguments: cliArgs) }
     exit(await code.value)
 } else if cliArgs.count > 1, cliArgs[1] == "--scheduled-run",

@@ -153,7 +153,16 @@ final class CLIBridge {
                 .sorted { $0.modified > $1.modified }
                 .prefix(max(limit, 0))
                 .compactMap { item -> CachedJSONSnapshot? in
-                    guard let data = try? Data(contentsOf: item.url) else { return nil }
+                    let data: Data
+                    do {
+                        data = try BoundedFile.read(
+                            item.url, limit: BoundedFile.snapshotLimit, followSymlinks: false)
+                    } catch {
+                        AppLogger.cli.warning(
+                            "cachedJSONSnapshots: skipping \(item.url.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)"
+                        )
+                        return nil
+                    }
                     // S-01: reject truncated / malformed snapshots so a
                     // partially-written file from a crash mid-write does
                     // not render green in AuditView.
@@ -1326,7 +1335,8 @@ final class CLIBridge {
             profile: profile, cacheSubdir: cacheSubdir, file: deviceCacheFilename(trimmedID),
             current: devicesDir)]
         for url in fallback.compactMap({ $0 }) {
-            if let data = try? Data(contentsOf: url) {
+            if let data = try? BoundedFile.read(
+                url, limit: BoundedFile.deviceDetailLimit, followSymlinks: false) {
                 return DeviceDetailResult(data: data, fromCache: true, cacheURL: url)
             }
         }

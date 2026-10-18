@@ -727,10 +727,9 @@ enum LaunchAgentService {
     ) -> ParsedRunStatus? {
         guard let root = WorkspacePathGuard.root(for: profile),
               let url,
-              let safeURL = WorkspacePathGuard.validate(url, under: root),
-              let values = try? safeURL.resourceValues(forKeys: [.fileSizeKey]),
-              (values.fileSize ?? 0) <= 1_048_576,
-              let data = try? Data(contentsOf: safeURL),
+              WorkspacePathGuard.validate(url, under: root) != nil,
+              let data = try? BoundedFile.read(
+                  url, limit: BoundedFile.documentLimit, followSymlinks: false),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
@@ -745,10 +744,9 @@ enum LaunchAgentService {
 
     private static func readMultiRunStatus(from url: URL?, label: String) -> ParsedRunStatus? {
         guard let url,
-              let safeURL = validatedMultiLogURL(url.path, label: label),
-              let values = try? safeURL.resourceValues(forKeys: [.fileSizeKey]),
-              (values.fileSize ?? 0) <= 1_048_576,
-              let data = try? Data(contentsOf: safeURL),
+              validatedMultiLogURL(url.path, label: label) != nil,
+              let data = try? BoundedFile.read(
+                  url, limit: BoundedFile.documentLimit, followSymlinks: false),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
@@ -868,7 +866,8 @@ enum LaunchAgentService {
             .appendingPathComponent("summaries")
             .appendingPathComponent("summary_\(logFilename).json")
         if FileManager.default.fileExists(atPath: summaryURL.path),
-           let data = try? Data(contentsOf: summaryURL) {
+           let data = try? BoundedFile.read(
+               summaryURL, limit: BoundedFile.documentLimit, followSymlinks: false) {
             let verification = SnapshotManifest.verify(snapshot: summaryURL, data: data)
             // Trust only `.verified` or `.absent` (legacy pre-PR-11).
             // `.mismatch`, `.corrupt`, and `.omitted` all signal an
@@ -990,13 +989,9 @@ enum LaunchAgentService {
     static func parseLogTail(
         from url: URL
     ) -> (exitCode: Int32?, hasFailureMarker: Bool, hasPartialMarker: Bool) {
-        guard let fh = FileHandle(forReadingAtPath: url.path) else { return (nil, false, false) }
-        defer { fh.closeFile() }
-
-        let fileSize = fh.seekToEndOfFile()
-        let readSize = min(fileSize, 2_048)
-        fh.seek(toFileOffset: fileSize - readSize)
-        let data = fh.readDataToEndOfFile()
+        guard let (data, _) = try? BoundedFile.readTail(url, limit: 2_048) else {
+            return (nil, false, false)
+        }
         guard let text = String(data: data, encoding: .utf8) else { return (nil, false, false) }
 
         var hasFailureMarker = false
@@ -1041,7 +1036,9 @@ enum LaunchAgentService {
         guard let root = WorkspacePathGuard.root(for: profile) else { return nil }
         let expanded = (rawPath as NSString).expandingTildeInPath
         let url = URL(fileURLWithPath: expanded)
-        return WorkspacePathGuard.validate(url, under: root)
+        // Judged where it leads, returned as named: a link at the name must still be visible to
+        // the reader, which refuses it.
+        return WorkspacePathGuard.validate(url, under: root) == nil ? nil : url.standardizedFileURL
     }
 
     private static func validatedMultiLogURL(_ rawPath: String, label: String) -> URL? {
@@ -1054,7 +1051,7 @@ enum LaunchAgentService {
         let safePath = logDir.path
         let safePrefix = safePath + "/"
         guard resolved.path == safePath || resolved.path.hasPrefix(safePrefix) else { return nil }
-        return resolved
+        return url.standardizedFileURL
     }
 
     private static func bootout(_ label: String) -> Int32 {

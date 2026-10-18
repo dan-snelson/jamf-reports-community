@@ -50,6 +50,7 @@ final class DiagnosticRedactor {
     private var cache: [String: String] = [:]
     private var seededRegexes: [String: [NSRegularExpression]] = [:]
     private var scopeIDRegex: NSRegularExpression?
+    private var serverHostRegex: NSRegularExpression?
 
     private let secretPatterns: [(NSRegularExpression, String)]
     private let hostnameURLRE: NSRegularExpression
@@ -159,6 +160,13 @@ final class DiagnosticRedactor {
             out = replaceMatches(hostnameBareRE, in: out) { g in
                 self.placeholder("host", g[0] ?? "")
             }
+            // The profile's own server, which the patterns above miss when it is on-prem and
+            // written without a scheme (`jss.example.org:8443`).
+            if let serverHostRegex {
+                out = replaceMatches(serverHostRegex, in: out) { g in
+                    self.placeholder("host", (g[0] ?? "").lowercased())
+                }
+            }
         }
         // `ip` has no keep-flag, like the key-based rule and the seeded literals.
         out = replaceMatches(ipv4RE, in: out) { g in self.placeholder("ip", g[0] ?? "") }
@@ -227,6 +235,20 @@ final class DiagnosticRedactor {
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 }
         scopeIDRegex = literals.isEmpty ? nil : Self.mustCompile(
             literals.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|"),
+            [.caseInsensitive])
+    }
+
+    /// Registers the profile's configured Jamf server (`host:port` and `host`) to remove
+    /// wherever it appears, with or without a scheme. Applied only while hostname redaction is on.
+    func seedServerHosts(_ hosts: [String]) {
+        let literals = Set(hosts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .filter { $0.count >= Self.minSeedLen }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 }
+        serverHostRegex = literals.isEmpty ? nil : Self.mustCompile(
+            "(?<![A-Za-z0-9-])(?:"
+                + literals.map { NSRegularExpression.escapedPattern(for: $0) }
+                    .joined(separator: "|")
+                + ")(?![A-Za-z0-9-])",
             [.caseInsensitive])
     }
 
@@ -449,6 +471,8 @@ enum DiagnosticBundleService {
         var cliProfile: String = ""
         /// The profile's tenant and environment IDs, redacted wherever they appear.
         var scopeIDs: [String] = []
+        /// The profile's configured Jamf server, as `host:port` and `host`.
+        var serverHosts: [String] = []
         /// Folders `makeSources` did not collect because they are symlinks, as skipped entries.
         /// `stageFiles` reads neither `logsDir` nor `summariesDir` when its entry is here.
         var refused: [ManifestEntry] = []
@@ -523,6 +547,7 @@ enum DiagnosticBundleService {
             dataDir: try WorkspacePaths.dataDir(for: profile),
             cliProfile: profile,
             scopeIDs: options.redact ? scopeIDs(profile: profile) : [],
+            serverHosts: options.redact ? serverHosts(profile: profile) : [],
             refused: refused
         )
     }
@@ -556,6 +581,34 @@ enum DiagnosticBundleService {
             return siblings
         }
         return scopeIDs(profile: profile, inConfig: text) + siblings
+    }
+
+    /// The Jamf server `profile` points at in jamf-cli's config file, as `host:port` and `host`
+    /// (just `host` when no port is set). A bare on-prem host is in no snapshot, so the seeded
+    /// literals and the URL pattern miss it in a shared log. No file or no `url` gives none.
+    static func serverHosts(
+        profile: String,
+        configURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/jamf-cli/config.yaml")
+    ) -> [String] {
+        guard let configured = ProfileService.readConfigFile(at: configURL),
+              let url = configured.first(where: { $0.name == profile })?.url else { return [] }
+        return hostForms(ofURL: url)
+    }
+
+    /// Pure: `host:port` and `host` of a configured server URL, scheme, credentials and path
+    /// removed.
+    static func hostForms(ofURL url: String) -> [String] {
+        var rest = Substring(url.trimmingCharacters(in: .whitespacesAndNewlines))
+        if let scheme = rest.range(of: "://") { rest = rest[scheme.upperBound...] }
+        rest = rest.prefix { !"/?#".contains($0) }
+        if let at = rest.lastIndex(of: "@") { rest = rest[rest.index(after: at)...] }
+        let hostPort = String(rest)
+        if hostPort.isEmpty { return [] }
+        // A bracketed IPv6 literal is kept whole; the IPv4 and hostname rules do not cover it.
+        guard !hostPort.hasPrefix("["), let colon = hostPort.lastIndex(of: ":")
+        else { return [hostPort] }
+        return [hostPort, String(hostPort[..<colon])]
     }
 
     /// Pure: the `tenant-id` and `environment-id` values under `profile` in config text.
@@ -647,6 +700,7 @@ enum DiagnosticBundleService {
         let redactor: DiagnosticRedactor? = options.redact ? makeRedactor(options) : nil
         redactor?.seedFromWorkspace(sources.dataDir)
         redactor?.seedScopeIDs(sources.scopeIDs)
+        redactor?.seedServerHosts(sources.serverHosts)
 
         let entries = try stageFiles(
             sources: sources, into: staging, redactor: redactor, options: options, now: now)
@@ -971,12 +1025,18 @@ enum DiagnosticBundleService {
         // `ditto -c -k` makes a PKZip; without `--keepParent` the staging dir's
         // *contents* land at the archive root (logs/, summaries/, …). --norsrc
         // /--noextattr suppress AppleDouble (`._*`) and `__MACOSX` entries.
-        let result = runProcess(
-            "/usr/bin/ditto",
-            ["-c", "-k", "--norsrc", "--noextattr", staging.path, zipURL.path])
-        guard result.code == 0 else {
+        let result = JamfCLIInstaller.runProcessSync(
+            executable: URL(fileURLWithPath: "/usr/bin/ditto"),
+            arguments: ["-c", "-k", "--norsrc", "--noextattr", staging.path, zipURL.path],
+            // Scrubbed like every other spawn: no DYLD_INSERT_LIBRARIES et al. inherited.
+            environment: CLIBridge.environmentForJamfCLI(),
+            timeout: 30)
+        if result.timedOut {
+            throw DiagnosticBundleError.archiveFailed("ditto did not finish within 30 s")
+        }
+        guard result.exitCode == 0 else {
             throw DiagnosticBundleError.archiveFailed(
-                result.stderr.isEmpty ? "ditto exit \(result.code)" : result.stderr)
+                result.stderr.isEmpty ? "ditto exit \(result.exitCode)" : result.stderr)
         }
     }
 
@@ -1124,45 +1184,4 @@ enum DiagnosticBundleService {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.string(from: date)
     }
-
-    private static func runProcess(
-        _ executable: String, _ arguments: [String], timeout: TimeInterval = 30
-    ) -> (code: Int32, stdout: String, stderr: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        // Scrub the environment like every other jamf-cli spawn — don't inherit
-        // DYLD_INSERT_LIBRARIES / SSL_CERT_FILE et al. into the doctor/version probes.
-        process.environment = CLIBridge.environmentForJamfCLI()
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-        do {
-            try process.run()
-        } catch {
-            return (-1, "", error.localizedDescription)
-        }
-        // Watchdog: terminate a wedged child so the bundle can't hang the UI
-        // indefinitely (the pipe read below blocks until the process exits).
-        let box = ProcessBox(process)
-        let watchdog = DispatchWorkItem { if box.process.isRunning { box.process.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        watchdog.cancel()
-        return (
-            process.terminationStatus,
-            String(decoding: outData, as: UTF8.self),
-            String(decoding: errData, as: UTF8.self))
-    }
-}
-
-/// Carries a `Process` into the timeout watchdog closure. `Process.terminate()`
-/// and `isRunning` are documented thread-safe, so unchecked-Sendable is sound —
-/// mirrors the `TextLineBuffer` pattern used elsewhere in the app.
-private final class ProcessBox: @unchecked Sendable {
-    let process: Process
-    init(_ process: Process) { self.process = process }
 }

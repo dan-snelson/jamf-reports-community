@@ -36,6 +36,39 @@ enum BoundedFile {
         return data
     }
 
+    /// The last `limit` bytes of the regular file at `url` and whether the file was longer. Same
+    /// open as `read` (non-blocking, type checked on the descriptor), for logs that may be large.
+    static func readTail(
+        _ url: URL, limit: Int, followSymlinks: Bool = false
+    ) throws -> (data: Data, truncated: Bool) {
+        let flags = O_RDONLY | O_NONBLOCK | O_CLOEXEC | (followSymlinks ? 0 : O_NOFOLLOW)
+        let descriptor = open(url.path, flags)
+        guard descriptor >= 0 else { throw Failure.unreadable(errno) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0 else { throw Failure.unreadable(errno) }
+        guard (info.st_mode & S_IFMT) == S_IFREG else { throw Failure.notRegular }
+        let size = UInt64(max(info.st_size, 0))
+        let truncated = size > UInt64(limit)
+        do {
+            try handle.seek(toOffset: truncated ? size - UInt64(limit) : 0)
+            return (try handle.read(upToCount: limit) ?? Data(), truncated)
+        } catch {
+            throw Failure.unreadable(EIO)
+        }
+    }
+
+    /// Largest small JSON document worth reading from a folder a peer can write (a run's
+    /// status file, a per-run summary): a few hundred bytes to a few KB when genuine.
+    static let documentLimit = 1_048_576
+
+    /// Largest cached `pro audit` or group-tools snapshot read for the Audit screen.
+    static let snapshotLimit = 64 * 1024 * 1024
+
+    /// Largest cached single-device record.
+    static let deviceDetailLimit = 16 * 1024 * 1024
+
     /// Largest workspace state file worth reading (day markers, the alert ledger, `state/`):
     /// each is a line or a small JSON document, so anything bigger is corrupt or planted.
     static let stateFileLimit = 64 * 1024

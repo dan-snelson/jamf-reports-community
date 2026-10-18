@@ -1,6 +1,8 @@
 import XCTest
 @testable import JamfReports
 
+private let thirtyDays = StaleRule(days: 30)
+
 /// One rating per Mac: the Devices Risk pill, the detail panel's badge, the Priority filter, the
 /// CSV and the inventory sort all read `RiskScoringService`. The old "over 90 days since
 /// check-in is Critical" rule is not a second rating.
@@ -24,7 +26,7 @@ final class DevicesRiskRatingTests: XCTestCase {
         let mac = healthyMac(daysSinceContact: 120)
         XCTAssertEqual(mac.securityGapCount(policy: .default), 0)
 
-        let risk = RiskScoringService.risk(for: mac, policy: .default)
+        let risk = RiskScoringService.risk(for: mac, policy: .default, staleRule: thirtyDays)
         XCTAssertEqual(risk.triggered.map(\.factor), [.staleOffline])
         XCTAssertEqual(risk.score, 5)
         XCTAssertEqual(risk.level, .low)
@@ -34,14 +36,14 @@ final class DevicesRiskRatingTests: XCTestCase {
     func testTheListPillAndThePanelBadgeNameTheSameBand() {
         for days in [1, 45, 120] {
             let risk = RiskScoringService.risk(
-                for: healthyMac(daysSinceContact: days), policy: .default)
+                for: healthyMac(daysSinceContact: days), policy: .default, staleRule: thirtyDays)
             let pill = DevicesView.riskPillText(risk.level)
             XCTAssertEqual(pill, risk.level.displayLabel)
             XCTAssertEqual(DevicesView.priorityRiskBadgeText(risk), "\(pill) · \(risk.score)")
         }
         var broken = healthyMac(daysSinceContact: 1)
         broken.fileVault = "UNENCRYPTED"
-        let risk = RiskScoringService.risk(for: broken, policy: .default)
+        let risk = RiskScoringService.risk(for: broken, policy: .default, staleRule: thirtyDays)
         XCTAssertEqual(risk.level, .high)
         XCTAssertEqual(DevicesView.riskPillText(risk.level), "High")
         XCTAssertEqual(DevicesView.priorityRiskBadgeText(risk), "High · 15")
@@ -53,25 +55,26 @@ final class DevicesRiskRatingTests: XCTestCase {
         XCTAssertEqual(tones, [.teal, .muted, .gold, .warn, .danger])
     }
 
-    /// Patch failures and failed rules have their own columns and filters; with nothing else
-    /// wrong they are no longer a Critical rating of their own.
-    func testPatchFailuresAndFailedRulesAloneAreNotCritical() {
+    /// Patch failures have their own column and filter; with nothing else wrong they are no
+    /// longer a Critical rating of their own.
+    func testPatchFailuresAloneAreNotCritical() {
         var mac = healthyMac(daysSinceContact: 2)
-        mac.failedRules = 40
         mac.patchFailures = (1...3).map {
             DevicePatchFailure(
                 title: "App \($0)", status: "Failed", date: "2026-10-01", latestVersion: "1.0")
         }
-        let risk = RiskScoringService.risk(for: mac, policy: .default)
+        let risk = RiskScoringService.risk(for: mac, policy: .default, staleRule: thirtyDays)
         XCTAssertLessThan(risk.level, .critical)
-        XCTAssertEqual(risk.triggered.map(\.factor), [.mscpMediumFailures])
+        XCTAssertTrue(risk.triggered.isEmpty)
     }
 
     func testTheCSVRiskColumnIsTheScoresBand() {
         let stale = healthyMac(daysSinceContact: 120)
         let row = DevicesView.exportCSV(
             devices: [stale], policy: .default,
-            riskLevel: { RiskScoringService.risk(for: $0, policy: .default).level }
+            riskLevel: {
+                RiskScoringService.risk(for: $0, policy: .default, staleRule: thirtyDays).level
+            }
         ).components(separatedBy: "\n")[1]
         XCTAssertTrue(row.hasSuffix(",low"), row)
     }
@@ -80,7 +83,8 @@ final class DevicesRiskRatingTests: XCTestCase {
         let mac = healthyMac(daysSinceContact: 1)
         let down = RiskScoringService.SecurityAgentCheck(
             value: "Missing", connectedValue: "Installed")
-        let risk = RiskScoringService.risk(for: mac, agentCheck: down, policy: .default)
+        let risk = RiskScoringService.risk(
+            for: mac, agentCheck: down, policy: .default, staleRule: thirtyDays)
         XCTAssertEqual(risk.triggered.map(\.factor), [.securityAgentDisconnected])
     }
 }

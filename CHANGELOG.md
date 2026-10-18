@@ -36,6 +36,17 @@ versions in this repository map to git tags.
   stopped being stale under your stale settings. The "Compliance Changed" section is gone from this
   sheet, since collected inventory carries no per-Mac compliance count. A report built from a CSV
   still gets its CSV-based Fleet Drift when there is no earlier day of collected inventory.
+- **Computers** no longer merges a CSV dropped in `csv-inbox/`; it shows what jamf-cli collected.
+  The Failed Rules line in a Mac's detail panel and the failed-rules part of the Security filter
+  are gone with it, since only a CSV supplied them.
+- A Mac's risk rating now counts it as stale by your stale settings (`stale_device_days` and
+  `stale_basis`) instead of a fixed 30 days, so Computers, the Priority filter and the risk pill
+  agree with the stale counts elsewhere.
+
+### Removed
+
+- The boot-drive risk factor ("Boot Drive >95% Full") is gone: only a CSV export supplied the
+  boot-drive figure, and jamf-cli data has none. (#281)
 
 ### Removed
 

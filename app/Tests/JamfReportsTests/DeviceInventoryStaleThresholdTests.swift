@@ -69,22 +69,6 @@ final class DeviceInventoryStaleThresholdTests: XCTestCase {
         XCTAssertTrue(record(days: "31").stale)
     }
 
-    func testCSVMacAtExactlyTheThresholdIsNotStaleOneDayLaterIs() {
-        func record(daysAgo: Int) -> DeviceInventoryRecord {
-            let stamp = Date().addingTimeInterval(-Double(daysAgo) * 86_400 - 3_600)
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-            return DeviceInventoryService.recordFromCSV(
-                ["Computer Name": "M", "Serial Number": "S",
-                 "Last Check-in": formatter.string(from: stamp)],
-                source: "fleet.csv", staleThresholdDays: 30)
-        }
-        XCTAssertEqual(record(daysAgo: 30).daysSinceContact, 30)
-        XCTAssertFalse(record(daysAgo: 30).stale)
-        XCTAssertTrue(record(daysAgo: 31).stale)
-    }
-
     // MARK: - One rule for a record
 
     func testRecordIsStaleOnlyPastTheThresholdAndSnapshotCountsTheSameMacs() {

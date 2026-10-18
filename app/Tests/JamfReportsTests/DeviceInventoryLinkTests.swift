@@ -82,15 +82,14 @@ final class DeviceInventoryLinkTests: XCTestCase {
         XCTAssertTrue(linkWarnings.first?.contains("jamf-cli-data/computers") == true)
     }
 
-    func testALinkedInboxIsNamedAndARealFolderIsNot() throws {
-        try write("Computer Name,Serial Number\nMac-C,SER3\n", to: "elsewhere/inventory.csv")
-        try link("csv-inbox", to: "elsewhere")
+    func testACSVDroppedInTheInboxIsNotRead() throws {
+        try write("Computer Name,Serial Number\nMac-C,SER3\n", to: "csv-inbox/inventory.csv")
         try write(computers(named: "Mac-A", id: "1"),
                   to: "jamf-cli-data/computers/computers_20261015T060000.json")
-        let warnings = DeviceInventoryService.load(profile: profile, demoMode: false).warnings
-            .filter { $0.contains("symbolic link") }
-        XCTAssertEqual(warnings.count, 1, "only csv-inbox is a link: \(warnings)")
-        XCTAssertTrue(warnings.first?.contains("csv-inbox") == true)
+        let snapshot = DeviceInventoryService.load(profile: profile, demoMode: false)
+        XCTAssertEqual(snapshot.devices.map(\.name), ["Mac-A"])
+        XCTAssertFalse(snapshot.sourceFiles.contains { $0.hasSuffix(".csv") })
+        XCTAssertTrue(snapshot.warnings.isEmpty, "\(snapshot.warnings)")
     }
 
     func testALinkedConfigYAMLIsStillRead() throws {

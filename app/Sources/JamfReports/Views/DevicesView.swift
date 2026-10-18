@@ -142,7 +142,6 @@ struct DevicesView: View {
                 return device.patchFailureCount > 0
             case .security:
                 return device.securityGapCount(policy: activeSnapshot.securityPolicy) > 0
-                    || device.failedRules > 0
             case .priorityAction:
                 // The Critical or High band of the same score the Risk pill shows.
                 return priorityRisk(for: device).level >= .high
@@ -165,7 +164,7 @@ struct DevicesView: View {
     private func priorityRisk(for device: DeviceInventoryRecord) -> DeviceRisk {
         RiskScoringService.risk(
             for: device, agentCheck: agentCheck(for: device),
-            policy: activeSnapshot.securityPolicy)
+            policy: activeSnapshot.securityPolicy, staleRule: staleRule)
     }
 
     /// The device's status against the tenant's configured security agent, or
@@ -993,18 +992,6 @@ struct DevicesView: View {
                     securityRow("Bootstrap", value: device.bootstrapToken,
                                 tone: bootstrapTone(device.bootstrapToken))
                 }
-                HStack(alignment: .firstTextBaseline) {
-                    Text("FAILED RULES")
-                        .font(Theme.Fonts.mono(10.5, weight: .semibold))
-                        .tracking(1.0)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .frame(width: Self.detailLabelWidth, alignment: .leading)
-                    Text(device.failedRules == 0 ? "0" : "\(device.failedRules)")
-                        .font(.footnote)
-                        .foregroundStyle(device.failedRules == 0 ? Theme.Colors.fg2 : Theme.Colors.warn)
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 4)
             }
         }
     }

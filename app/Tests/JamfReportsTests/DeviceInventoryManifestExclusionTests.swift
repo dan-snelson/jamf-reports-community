@@ -37,7 +37,7 @@ final class DeviceInventoryManifestExclusionTests: XCTestCase {
 
     /// The regression: a manifest newer than the snapshot must not be picked as
     /// the device source. If it is, the kind reads as zero devices and the whole
-    /// screen falls back to whatever CSV happens to be lying around.
+    /// screen reads as empty.
     func testManifestNeverOutranksTheSnapshotItDescribes() throws {
         let kindDir = root
             .appendingPathComponent(profile, isDirectory: true)

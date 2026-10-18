@@ -188,39 +188,6 @@ final class DeviceInventoryRecordTests: XCTestCase {
         XCTAssertNil(record(["serialNumber": "NONE1"]).hardwareEncrypted)
     }
 
-    func testBuiltinCSVAppleSiliconRowsAreHardwareEncrypted() throws {
-        let url = TestFixtures.dir("csv/jamf1128_computers_builtin.csv")
-        let (_, rows) = try CSVParser.parse(Data(contentsOf: url))
-        let records = rows.map {
-            DeviceInventoryService.recordFromCSV($0, source: "jamf1128_computers_builtin.csv")
-        }
-        XCTAssertEqual(records.count, 4)
-        XCTAssertEqual(records.map(\.hardwareEncrypted), [true, true, true, true])
-    }
-
-    /// `Apple Silicon` is Yes or No; the model and architecture decide when it is blank.
-    func testCSVHardwareColumns() {
-        func encrypted(_ row: [String: String]) -> Bool? {
-            DeviceInventoryService.recordFromCSV(
-                row.merging(["Computer Name": "Lab-Mac", "Serial Number": "S1"]) { a, _ in a },
-                source: "computers.csv"
-            ).hardwareEncrypted
-        }
-        XCTAssertEqual(encrypted(["Apple Silicon": "true"]), true)
-        XCTAssertEqual(encrypted(["Apple Silicon": "No", "Model Identifier": "MacBookPro16,2"]),
-                       true)
-        XCTAssertEqual(encrypted(["Apple Silicon": "No", "Model Identifier": "MacBookPro14,1"]),
-                       false)
-        XCTAssertEqual(encrypted(["Apple Silicon": "FALSE", "Model Identifier": "iMac19,1"]), false)
-        XCTAssertNil(encrypted(["Apple Silicon": "No"]), "an Intel Mac could still have a T2")
-        XCTAssertEqual(encrypted(["Apple Silicon": "", "Architecture Type": "arm64"]), true)
-        // The short header older exports and the app's earlier `columns.architecture` default use.
-        XCTAssertEqual(encrypted(["Architecture": "x86_64", "Model Identifier": "MacBookPro14,1"]),
-                       false)
-        XCTAssertNil(encrypted(["Apple Silicon": "Unknown"]))
-        XCTAssertNil(encrypted([:]))
-    }
-
     /// One source with an answer gives it; two that agree keep it; two that disagree are
     /// unknown, so FileVault off stays at the FileVault level rather than the first guess.
     func testMergeTreatsDisagreeingHardwareAnswersAsUnknown() {

@@ -388,6 +388,8 @@ final class CollectHonestyWatcher: @unchecked Sendable {
     private var unlanded: Set<String> = []
     /// A `[partial]` line that names no source, so no failure record can explain it.
     private var unexplainedPartial = false
+    /// A `[partial]` line for a failure a retry repeats and no failure record can explain.
+    private var permanentPartial = false
 
     init() {}
 
@@ -407,13 +409,16 @@ final class CollectHonestyWatcher: @unchecked Sendable {
               !line.hasSuffix(deviceScanGapsMarkerSuffix) else { return }
         let summary = line.hasPrefix(ReportEngine.summaryNotWrittenMarker)
         let kinds = Self.unlandedKinds(in: line)
+        let protectThrew = line.hasPrefix(ReportEngine.protectCollectFailedMarker)
         // Follows from the sources line before it, which names them.
         let noSourceLanded = line.hasPrefix(
             "\(ReportEngine.summaryNotWrittenMarker) \(ReportEngine.noSourceLandedReason)")
         lock.withLock {
             partial = true
             if summary { summaryFailed = true }
-            if let kinds { unlanded.formUnion(kinds) } else if !noSourceLanded {
+            if let kinds { unlanded.formUnion(kinds) } else if protectThrew {
+                permanentPartial = true
+            } else if !noSourceLanded {
                 unexplainedPartial = true
             }
         }
@@ -449,11 +454,13 @@ final class CollectHonestyWatcher: @unchecked Sendable {
     /// lines only name sources whose last failure a retry would repeat. Run History still
     /// reads such a run as Partial from its log.
     func retryCouldHelp(lastFailureRepeats: (String) -> Bool) -> Bool {
-        let (partial, unexplained, kinds) = lock.withLock {
-            (self.partial, unexplainedPartial, unlanded)
+        let (partial, unexplained, permanent, kinds) = lock.withLock {
+            (self.partial, unexplainedPartial, permanentPartial, unlanded)
         }
         guard partial else { return false }
-        return unexplained || kinds.isEmpty || !kinds.allSatisfy(lastFailureRepeats)
+        if unexplained { return true }
+        if kinds.isEmpty { return !permanent }
+        return !kinds.allSatisfy(lastFailureRepeats)
     }
 
     /// The rule self-remediation uses (`WorkspaceStore.lastFailureRepeatsOnRetry`), read from

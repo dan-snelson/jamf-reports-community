@@ -174,7 +174,7 @@ enum CollectRouter {
                 try await protectCollect(protectProfile, dataDir, onLine)
             } catch {
                 onLine(.init(timestamp: Date(), level: .warn,
-                    text: "[partial] protect collect failed: \(error.localizedDescription)"))
+                    text: "\(ReportEngine.protectCollectFailedMarker)\(error.localizedDescription)"))
             }
         }
     }

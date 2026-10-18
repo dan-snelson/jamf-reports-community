@@ -405,6 +405,36 @@ final class CollectHonestyTests: XCTestCase {
         XCTAssertTrue(watcher.retryCouldHelp(profile: profile))
     }
 
+    /// A School or Protect source that failed with exit 5 (missing permission) is classified
+    /// as Pro kinds are, so the retry leaves it alone.
+    func testAProtectKindThatFailedForAMissingPermissionIsNotRetried() throws {
+        let store = StateFileStore(directory: try WorkspacePaths.stateDir(for: profile))
+        store.record(
+            .failed(exitCode: CLIBridge.exitCodePermissionDenied), report: "protect-alerts",
+            at: Date(),
+            cause: FailureCause.classify(
+                exitCode: CLIBridge.exitCodePermissionDenied, stdout: Data()))
+        let watcher = CollectHonestyWatcher()
+        let collector = LogTextCollector()
+        ReportEngine.reportUnlanded(["protect-alerts"], attempted: 4, onLine: collector.append)
+        collector.texts.forEach(watcher.observe)
+        XCTAssertTrue(watcher.incomplete)
+        XCTAssertFalse(watcher.retryCouldHelp(profile: profile))
+    }
+
+    func testAProtectCollectThatThrewIsNotRetriedUnlessSomethingElseCouldBe() {
+        let alone = CollectHonestyWatcher()
+        alone.observe("\(ReportEngine.protectCollectFailedMarker)jamf-cli not found")
+        XCTAssertTrue(alone.incomplete)
+        XCTAssertFalse(alone.retryCouldHelp { _ in false })
+
+        let withOther = CollectHonestyWatcher()
+        withOther.observe(ReportEngine.unlandedSourcesLine(["groups"], attempted: 9))
+        withOther.observe("\(ReportEngine.protectCollectFailedMarker)jamf-cli not found")
+        XCTAssertTrue(withOther.retryCouldHelp { _ in false })
+        XCTAssertFalse(withOther.retryCouldHelp { _ in true })
+    }
+
     func testOneMissingSourceARetryCouldFetchStillRetries() throws {
         let store = StateFileStore(directory: try WorkspacePaths.stateDir(for: profile))
         store.record(

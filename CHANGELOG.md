@@ -53,6 +53,9 @@ versions in this repository map to git tags.
 
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
+- The same-day retry of a scheduled run no longer repeats for a Jamf Protect or Jamf School
+  source that failed for a reason a retry cannot fix (a missing permission, a command the
+  profile's API does not serve), or for a Protect collect that could not start. (#284)
 - A scheduled run's same-day retry after a partial run now collects again instead of reporting
   "already collected today" and counting as a success.
 - A Jamf Protect or Jamf School source that fails to collect now makes the run read as Partial,

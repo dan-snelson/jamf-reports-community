@@ -621,6 +621,10 @@ struct ReportEngine: Sendable {
     /// Ahead of the kinds in `unlandedSourcesLine`; `CollectHonestyWatcher` reads them back.
     static let unlandedSourcesMarker = "source(s) did not land this run: "
 
+    /// Starts the `[partial]` line for a Protect collect that threw, naming no source: the
+    /// failures that throw (no jamf-cli, an unusable profile) are ones a retry repeats.
+    static let protectCollectFailedMarker = "[partial] protect collect failed: "
+
     /// Why no summary is written when every attempted source failed. The watcher reads that
     /// line as a result of the sources named in `unlandedSourcesLine`, not a cause of its own.
     static let noSourceLandedReason = "no source landed this run"
@@ -3428,7 +3432,10 @@ struct ReportEngine: Sendable {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] \(kind): exit \(exitCode) — skipped"))
                 unlanded.append(kind)
-                stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
+                // The cause lets the same-day retry leave a permanent failure (a 403) alone.
+                stateStore?.record(
+                    .failed(exitCode: exitCode), report: kind, at: collectStart,
+                    cause: FailureCause.classify(exitCode: exitCode, stdout: data))
             }
         }
 
@@ -3537,7 +3544,10 @@ struct ReportEngine: Sendable {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] \(kind): exit \(exitCode) — skipped"))
                 unlanded.append(kind)
-                stateStore?.record(.failed(exitCode: exitCode), report: kind, at: collectStart)
+                // The cause lets the same-day retry leave a permanent failure (a 403) alone.
+                stateStore?.record(
+                    .failed(exitCode: exitCode), report: kind, at: collectStart,
+                    cause: FailureCause.classify(exitCode: exitCode, stdout: data))
             }
         }
         reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)

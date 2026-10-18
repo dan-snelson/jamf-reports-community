@@ -148,7 +148,7 @@ Each run mode is strict — it does exactly one thing:
 | `backup` | `jamf-cli pro backup` (and `protect backup` when Protect is connected) only — config objects to `backups/`, no collect, no report | No |
 
 The `csv-assisted` mode was retired in 2.11. A schedule saved with it runs as
-`jamf-cli-full`, and Run History notes that on each run. Adding one from the command line
+`jamf-cli-full`, and Run History notes that on each run until you save the schedule again. Adding one from the command line
 (`jamf-reports schedules add --mode csv-assisted`) is refused with a message that names
 `jamf-cli-full`.
 

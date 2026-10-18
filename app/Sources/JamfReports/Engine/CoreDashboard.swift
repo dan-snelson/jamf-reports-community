@@ -89,6 +89,7 @@ struct CoreDashboard: Sendable {
             // --- Device health (sheets 22–24) ---
             ("Check-in Health", writeCheckinHealth),
             ("Active Devices", writeActiveDevices),
+            ("Fleet Drift", writeFleetDrift),
             ("Group Hygiene", writeGroupHygiene),
             // --- Update & patch details (sheets 25–28) ---
             ("Patch Failures", writePatchFailures),
@@ -697,7 +698,7 @@ struct CoreDashboard: Sendable {
 
     /// What a sheet's subtitle says about the rule: the window, and the dates when they are
     /// not just the check-in.
-    private func ruleSubtitle(_ rule: StaleRule, window: String = "Stale threshold") -> String {
+    func ruleSubtitle(_ rule: StaleRule, window: String = "Stale threshold") -> String {
         rule.usesDefaultBasis
             ? "\(window): \(rule.days) days"
             : "\(window): \(rule.days) days since \(rule.basisPhrase)"

@@ -200,7 +200,7 @@ struct FleetDriftWriter {
             let priorN = Int(prior[fc]?.trimmingCharacters(in: .whitespaces) ?? "") ?? -1
             return curN >= 0 && priorN >= 0 && curN != priorN
         }
-        row = writeSectionWithNote(
+        row = Self.writeSectionWithNote(
             ws: ws, row: row,
             title: "Compliance Changed",
             note: complianceNote,
@@ -230,12 +230,13 @@ struct FleetDriftWriter {
         headers: [String],
         dataRows: [[String]]
     ) -> Int {
-        return writeSectionWithNote(ws: ws, row: row, title: title, note: nil,
+        return Self.writeSectionWithNote(ws: ws, row: row, title: title, note: nil,
                                     headers: headers, dataRows: dataRows)
     }
 
+    /// Shared with the snapshot-based Fleet Drift sheet (`SnapshotFleetDrift`).
     @discardableResult
-    private func writeSectionWithNote(
+    static func writeSectionWithNote(
         ws: Worksheet,
         row: Int,
         title: String,

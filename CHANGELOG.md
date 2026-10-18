@@ -11,6 +11,11 @@ versions in this repository map to git tags.
 
 - The Devices screen is now **Computers**, matching Jamf Pro's naming. Mobile Fleet keeps
   mobile devices. Your saved sidebar choices and export file names are unchanged.
+- **Fleet Drift** now compares the collected inventory from two different days, so it no longer
+  needs a CSV export. It lists Macs that joined or left, macOS changes, and Macs that became or
+  stopped being stale under your stale settings. The "Compliance Changed" section is gone from this
+  sheet, since collected inventory carries no per-Mac compliance count. A report built from a CSV
+  still gets its CSV-based Fleet Drift when there is no earlier day of collected inventory.
 
 ## [2.10.1] - 2026-10-17
 

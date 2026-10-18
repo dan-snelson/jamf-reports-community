@@ -1372,6 +1372,7 @@ struct CustomSheetGroup: Sendable {
             .mobileSupervisionStatus,
             .checkinHealth,
             .activeDevices,
+            .fleetDrift,
             .groupHygiene,
             .smartGroups,
             .environmentStats,

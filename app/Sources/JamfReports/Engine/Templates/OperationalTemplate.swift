@@ -20,6 +20,7 @@ struct OperationalTemplate: ReportTemplate {
             .fleetOverview,
             .checkinHealth,
             .activeDevices,
+            .fleetDrift,
             .patchCompliance,
             .patchFailures,
             .updateStatus,

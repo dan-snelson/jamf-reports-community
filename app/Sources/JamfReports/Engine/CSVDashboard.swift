@@ -271,7 +271,8 @@ struct CSVDashboard: Sendable {
                 plan.append(("Mobile Stale Devices", writeMobileStaleCSV))
             }
             // Fleet Drift is only available for computer-family CSVs.
-            if let prior = priorSnapshot {
+            // The snapshot sheet (CoreDashboard) already holds this tab name.
+            if let prior = priorSnapshot, workbook.sheet(named: "Fleet Drift") == nil {
                 plan.append(("Fleet Drift", { self.writeFleetDrift(prior: prior) }))
             }
         }

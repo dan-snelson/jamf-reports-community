@@ -1,8 +1,7 @@
 # Configuration & Templates
 
 `config.yaml` is the bridge between your Jamf data shape and the report logic. It maps
-your tenant's column and Extension Attribute names to the logical fields the reports
-expect. One `config.yaml` lives in each profile workspace.
+your tenant's Extension Attribute names and settings to what the reports track. One `config.yaml` lives in each profile workspace.
 
 The complete, annotated schema is the repo's
 [`config.example.yaml`](https://github.com/tonyyo11/jamf-reports-community/blob/main/config.example.yaml).
@@ -11,20 +10,24 @@ ones.
 
 ## How config.yaml is created
 
-- **During onboarding** — the CSV-mapping step scaffolds a `config.yaml` with best-guess
-  column mappings from a Jamf Pro CSV export (or a minimal config if you skip).
+- **During onboarding** — creating the workspace writes a minimal `config.yaml` for
+  jamf-cli data.
+- **Adopt EAs** — on the Extension Attributes screen (and Data Sources), lists the Extension
+  Attributes jamf-cli collected, with a guessed type for each, and adds the ones you pick to
+  `custom_eas` or `security_agents`. Existing settings are kept. A Jamf Pro CSV export can
+  be imported once from the same sheet, or with `jamf-reports scaffold --csv`, to suggest
+  EAs; the file is read once and never again.
 
-Scaffolding is a starting point, not a final answer. Always review the result.
+The result is a starting point, not a final answer. Always review it.
 
 ## The Config screen
 
 ![config.yaml editor](images/config-editor.png)
 
-In the app, the **Config** screen edits `config.yaml` through eight tabs:
+In the app, the **Config** screen edits `config.yaml` through seven tabs:
 
 | Tab | What it covers |
 |---|---|
-| Columns | CSV column → logical field mappings |
 | Security Agents | third-party agents to track (CrowdStrike, etc.) |
 | Custom EAs | extra Extension-Attribute-driven sheets |
 | Thresholds | stale-device days, disk-usage and compliance bands |
@@ -33,25 +36,23 @@ In the app, the **Config** screen edits `config.yaml` through eight tabs:
 | Scoring | the Security Policy card and the Security Score's factors and weights |
 | From config.yaml | read-only: settings no tab edits, keys the app does not read, lines it skipped |
 
-## Reviewing column mappings
+## Retired column mappings (2.11)
 
-Scaffolding fuzzy-matches headers; check these common mistakes:
+Reports no longer map CSV columns. The `columns` and `mobile_columns` blocks and
+`charts.archive_current_csv` are no longer read: Config Doctor lists them as no longer
+read, and the next Config save removes `columns` and `mobile_columns` (the next Customize
+apply removes `charts.archive_current_csv`) after keeping a dated copy of `config.yaml`. A
+`config.yaml` that still has them loads as before. The Config screen's Columns tab is gone.
 
-- `manager` must be a real manager field, not Jamf's `Managed` status column.
-- `secure_boot` must map to the Secure Boot column.
-- `bootstrap_token` should map to the escrowed state.
-- `disk_percent_full` must be a percentage column, not free space in MB.
-
-Field names are exact and case-sensitive — `operating_system` (not `os_version`),
-`last_checkin` (not `last_contact`), `email` (not `assigned_user_email`). The
+Key names are exact and case-sensitive. The
 [`config.example.yaml`](https://github.com/tonyyo11/jamf-reports-community/blob/main/config.example.yaml)
 header comments list every field.
 
 ## Tracked sections
 
-Not every config block has a screen in the app. The Config screen's seven editing tabs
-cover `columns`, `security_agents`, `custom_eas`, `thresholds`, `platform`, `output`, and
-`scoring`; the eighth, **From config.yaml**, is read-only and lists what none of them
+Not every config block has a screen in the app. The Config screen's six editing tabs
+cover `security_agents`, `custom_eas`, `thresholds`, `platform`, `output`, and
+`scoring`; the seventh, **From config.yaml**, is read-only and lists what none of them
 edit. `notify` and `ai` each have their own dedicated panel elsewhere in the app
 (linked below). `alerts`, `retention`, and `compliance.baselines` are hand-edited in
 `config.yaml` directly — there is no editor for them in the app yet, and so are
@@ -71,9 +72,9 @@ file changed on disk after the screen loaded it. See
   that says the agent is absent or off ("Not Installed", "not running", "Disconnected") never
   matches, and a blank `connected_value` counts any non-empty value.
 - **`sheets`** — `only`, `skip` and `order`, by tab name (case-insensitive), shape every
-  report workbook: the Jamf Pro tabs, the CSV tabs, the Charts tab and Jamf School
+  report workbook: the Jamf Pro tabs, the custom EA tabs, the Charts tab and Jamf School
   workbooks. The report template picks its sheets first, so `only` never adds a tab; a
-  name in both `only` and `skip` is not written; `order` can put a CSV tab ahead of the
+  name in both `only` and `skip` is not written; `order` can put a custom EA tab ahead of the
   Jamf Pro tabs; a non-empty `only` drops Charts unless you list "Charts"; an `only` that
   names no tab of the workbook is ignored with a warning. An empty `only: []` means no
   restriction. Period and fleet workbooks do not read these.
@@ -111,12 +112,9 @@ date (at least one stays on).
 - device-compliance rows carry only the check-in day count, so with `inventory` or `contact`
   listed the app reads those dates from the `computers` snapshot, matched by Jamf ID and then
   serial. Without a snapshot, only the check-in counts, and the run log says so.
-- A CSV has the inventory date only when its "Last Inventory Update" column is mapped as
-  `columns.last_inventory`. Without it, `inventory` does not apply to CSV rows, and Config Doctor
-  says so.
 - The one rule counts the daily summary's stale figure, the Overview, Computers, Offline Outreach
   (its tiers bucket by stale age), the workbook (Active Devices, Compliance Posture, Device
-  Compliance, Check-in Health, Patch Summary Dashboard, Executive Summary), the CSV sheets, the HTML
+  Compliance, Check-in Health, Patch Summary Dashboard, Executive Summary), the HTML
   report and the Security Score's `checked_in` factor, whose name says which dates it counts. The
   Health Audit's own stale finding stays jamf-cli's. Mobile devices are not covered.
 
@@ -187,10 +185,7 @@ encrypts its internal disk; with FileVault off the disk simply unlocks without a
 on the card). Those Macs are named "FileVault off (hardware-encrypted)" and counted apart.
 The rule needs the Mac's model details from the latest inventory collect; a Mac whose
 record is missing, ambiguous (two records on one serial number) or a virtual machine keeps
-FileVault's own level. On a CSV, map `architecture` ("Architecture Type") and
-`model_identifier` ("Model Identifier"); `model` is the marketing name ("Model") and does not
-identify a T2 Mac. Config Doctor warns when the rule is set, a CSV is present and either
-key is unmapped.
+FileVault's own level.
 
 **Macs that did not report a control.** A Mac whose value Jamf did not collect for a control
 (`NOT_COLLECTED`, a blank, FileVault still encrypting) is not counted as failing it. The Security
@@ -200,7 +195,7 @@ share, and say how many there were ("not reported: N", shown only when N is abov
 percentages themselves, such as SIP on 1%, still count every Mac.
 
 **Your own on and off values.** The app reads values such as `Enabled`, `Encrypted`, `Off`
-and `Not Enabled`. When your organization maps its own extension attribute or CSV column to
+and `Not Enabled`. When your organization maps its own extension attribute to
 a control and it says something else, such as `Pass` and `Fail` or `Compliant` and
 `Non-Compliant`, the app cannot tell whether a Mac passes and counts it as not measured.
 List your words under `on_values` and `off_values`, per control (`filevault`, `sip`,
@@ -209,7 +204,7 @@ them. A value must match whole, in any case, with `-` and `_` read as spaces, so
 `Non-Compliant` is not read as `Compliant`. `off_values` is checked first, then `on_values`,
 then the built-in words; a value in both lists reads as off. These words apply to each
 Mac's own value. The totals that jamf-cli's security report carries (the counts on the
-Security Posture screen) keep jamf-cli's words. Config → Run check warns about a value that
+Security Posture screen) keep jamf-cli's words. Health Audit → Config warns about a value that
 is not text, an empty value, and a value listed in both.
 
 **Score factors.** The Security Score is the weighted share of Macs that pass each factor.
@@ -240,7 +235,7 @@ not compare a score with one counted differently.
 
 A level written as `warn`, `failure`, `gap`, `ignored`, `skip` or `not counted` is read,
 in any case. A value the app cannot read leaves that control at `fail` (the hardware rule
-at FileVault's level); the Scoring card and Config → Run check name it and the level used
+at FileVault's level); the Scoring card and Health Audit → Config name it and the level used
 instead.
 
 ### Shared workspaces (`shared_workspace`)
@@ -438,9 +433,9 @@ written. Charts *embedded in* the workbook are governed separately by
 The app reads config.yaml the way you wrote it. Two-, three- and four-space indentation,
 or a mix, all read the same; a key typed twice reads as its last value everywhere; a list
 item written as a bare `-` with its contents underneath works. What it cannot read it
-says, by line number, on the Config screen and in Run check: a line indented differently
+says, by line number, on the Config screen and in Config Doctor: a line indented differently
 from its neighbours, a line with no `key: value`, a tab in the indentation, a `|` or `>`
-block value, a list not closed on its line, a `---` second document. Run check also lists
+block value, a list not closed on its line, a `---` second document. Config Doctor also lists
 every key the app does not read, with the key you probably meant (`os_version` for
 `operating_system`), and says when a value you typed was replaced, clamped or ignored, so
 a hand-typed setting is never changed in silence. It never prints a value that could be a
@@ -463,9 +458,9 @@ existing config.yaml the same way before replacing it.
 
 ## Checking your config
 
-**Config → Run check** runs every validation the app has — not just "does `config.yaml`
-parse". It reports column mappings that no longer match your CSV, baselines pointing at
-extension attributes nobody collects, malformed alert rules, data-accuracy problems, and
+**Health Audit → Config** (Config Doctor) runs every validation the app has — not just
+"does `config.yaml` parse". It reports baselines pointing at
+extension attributes nobody collects, tracked extension attributes with no collected values, malformed alert rules, data-accuracy problems, and
 the state of the workspace folder, each with a concrete fix. On a shared workspace it also
 reports the other Macs writing there. It also lists every key the app does not read, with the
 nearest known key, each line it skipped, each typed value it replaced or clamped, and the
@@ -473,14 +468,14 @@ keys it reads that nothing uses.
 
 Two of its findings are about a workspace that is fine but not the one you expected: it
 says when **more history for this profile exists in another folder** (naming it and how
-much is there), and when **a workspace is new**, so column mappings and thresholds are
+much is there), and when **a workspace is new**, so thresholds and tracked extension attributes are
 defaults rather than something you set. Both are suggestions, not failures, and both stay
 quiet once the workspace has history.
 
 The same checks run headlessly as `jamf-reports check` — see
 [Command Line](https://github.com/tonyyo11/jamf-reports-community/wiki/07-Command-Line).
 A scheduled run records any *failing* check in its own log, so a run that collects happily
-against broken column mappings no longer looks clean in Run History.
+against a broken config no longer looks clean in Run History.
 
 ## Report templates
 

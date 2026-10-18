@@ -14,11 +14,9 @@ schedule, with a **Collect now** action that re-collects just what is behind —
 not have to be on Security Posture to learn that security data stopped landing. See
 [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).
 
-With no jamf-cli connection at all — a CSV-only workspace — most of these screens have
-nothing to show: Computers and Offline Outreach render from CSV columns (plus
-`custom_eas` / `security_agents`) and stay populated; everything else on this page needs
-jamf-cli data. See [App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding) for how a
-CSV-only or Jamf School-only setup gets through onboarding. Jamf School data doesn't feed
+Every screen on this page reads jamf-cli data. With no jamf-cli connection, or no collect
+yet, most of them have nothing to show. See [App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding#running-without-jamf-cli-credentials) for how a
+Jamf School-only setup gets through onboarding. Jamf School data doesn't feed
 these interactive dashboards either — it produces a separate generated workbook; see
 [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School).
 
@@ -47,6 +45,7 @@ these interactive dashboards either — it produces a separate generated workboo
   policy that lowers it, adds no risk points. A value Jamf did not collect shows neutral,
   not red.
   Data source: per-device snapshots of computers and mobile-device inventory (tier 1).
+  The table shows what jamf-cli collected; a CSV export is no longer merged in.
 - **Device Lookup** — find one device by serial, hostname, asset tag, or ID.
   Data source: per-device snapshot of computer detail from `pro device <id>` (tier 1).
 - **Trends** — historical charts over archived snapshots, including SIP, firewall and
@@ -142,7 +141,9 @@ these interactive dashboards either — it produces a separate generated workboo
   (not a coverage percentage — EAs are custom and often legitimately sparse, so the
   screen never grades them against 100%) and top-value distributions. A drift callout
   flags EAs whose device count dropped sharply since the previous collect, comparing an
-  EA against its own prior value rather than an absolute target.
+  EA against its own prior value rather than an absolute target. **Adopt EAs…** lists the
+  EAs jamf-cli collected, with a guessed type for each, and adds the ones you pick to
+  `config.yaml` as tracked EAs or security agents; it can also import a CSV export once.
   Data source: per-device EA results (tier 1) and device inventory (tier 1).
 
 ## Fleet
@@ -153,13 +154,20 @@ these interactive dashboards either — it produces a separate generated workboo
   distribution, and a device/profile inventory.
   Data source: `mobile-devices-list` (one fetch with the General, Hardware, Security and
   User and Location sections, tier 1) and profiles (tier 2).
-- **Jamf Protect** — Protect alerts, agent health, and insights. Shows an explicit
+- **Jamf Protect** — Protect alerts, agent health, and insights. A **Jamf Pro match** card
+  shows which Protect computers match a Jamf Pro computer (by hardware UUID or serial
+  number, never by name), which have no Jamf Pro record, and which Jamf Pro Macs have no
+  Protect record. Shows an explicit
   "Protect not detected" state for tenants that do not run Jamf Protect.
   Data source: Jamf Protect GraphQL API (separate OAuth2 credentials, tier 2).
-- **Groups & Searches** — computer and mobile-device group inventory (smart vs. static),
-  plus advanced mobile-device searches.
+- **Groups & Searches** — computer and mobile-device group inventory (smart vs. static)
+  with each group's member count and description. Empty groups and groups no policy or
+  profile uses are flagged (from the Health Audit's **Analyze Groups**), and a summary row
+  also counts policies with no scope. Saved advanced mobile-device searches spell out their
+  criteria, and the list is not cut off.
   Data source: Classic API computer/mobile-device group lists (tier 1, same as the group
-  lists in Health Audit above) and advanced mobile-device searches.
+  lists in Health Audit above), advanced mobile-device searches, and the latest Analyze
+  Groups result.
 
 ## Automation
 
@@ -192,7 +200,7 @@ these interactive dashboards either — it produces a separate generated workboo
   the others. Overview score cards
   and sections are chosen on the Overview itself.
   Data source: no tier (user preferences).
-- **Data Sources** — the inputs surface: cached `jamf-cli` data, the CSV inbox, and
+- **Data Sources** — the inputs surface: cached `jamf-cli` data, **Adopt EAs**, and
   snapshot status.
   Data source: no tier (local workspace cache status).
 - **Backups** — snapshot and compare Jamf Pro configuration backups. **Diff Selected**

@@ -66,9 +66,9 @@ weekly trend points; irregular collection produces irregular timelines.
 
 Trend data uses two on-disk stores, kept separate on purpose:
 
-- **CSV snapshot history** (`snapshots/`) — dated Jamf Pro CSV exports. The trend source
-  for export-only data: Extension Attributes, compliance failure lists, department and
-  manager slicing.
+- **CSV snapshot history** (`snapshots/`) — dated Jamf Pro CSV exports you place there.
+  Since 2.11 the app no longer copies a CSV into this folder itself (`archive_current_csv`
+  is retired); the Trends screen is built from the daily summaries.
 - **jamf-cli JSON history** (`jamf-cli-data/`) — cached API responses. The trend source
   for API-native summaries: OS adoption from `inventory-summary`, device-state trend from
   `device-compliance`, security posture from `security`.

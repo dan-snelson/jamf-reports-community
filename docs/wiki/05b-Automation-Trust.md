@@ -20,9 +20,9 @@ alerts). Both record to Run History under a distinct `cli-collect` / `cli-genera
 so a self-scheduled cron/launchd job that calls the CLI is no longer invisible.
 
 Every scheduled run also records **failing config checks** in its own log. A run collects
-happily against broken column mappings and exits 0, so without this the config rots
-invisibly for weeks. Only genuine failures surface — warnings are for a human reading the
-Config screen, and putting them here would make every run look broken.
+happily against a broken config and exits 0, so without this the config rots
+invisibly for weeks. Only genuine failures surface — warnings are for a human reading
+Config Doctor, and putting them here would make every run look broken.
 
 The **dead-man switch is the exception** — it can only track a *schedule* the app itself
 knows about (managed, hand-built, or imported from a legacy plist). It measures "overdue"
@@ -241,7 +241,7 @@ alerts:
 ### How and when alerts fire
 
 - **Only on runs that collect.** Alerts evaluate after a run that produced a fresh summary
-  — `snapshot-only`, `jamf-cli-full`, or `csv-assisted`. A `jamf-cli-only` run generates
+  — `snapshot-only` or `jamf-cli-full`. A `jamf-cli-only` run generates
   from cache and never evaluates alerts.
 - **A rule whose metric has no data that day never fires.** Missing data is not an alert —
   that gap is the dead-man switch's job, not an alert's.

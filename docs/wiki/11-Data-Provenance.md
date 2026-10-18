@@ -28,10 +28,18 @@ Tier 1 kinds include:
 
 Feeds these screens:
 
-- **Computers** table and detail panel
+- **Computers** table and detail panel (what jamf-cli collected; a risk rating counts a Mac
+  as stale by your `stale_device_days` and `stale_basis`)
+- The workbook's **Fleet Drift** sheet, which compares the `computers` snapshots of two
+  different days
+- **Groups & Searches** (group member counts and descriptions come from the group lists and
+  the Health Audit's Analyze Groups result)
 - **Device Lookup**
 - Failure drawers in **Patch Compliance** and **OS Updates**
-- **Extension Attributes** coverage and value distributions
+- **Extension Attributes** coverage and value distributions, and the custom EA and EA
+  Warnings tabs in the workbook (read from `ea-results`, not from a CSV)
+- **Jamf Protect** "Jamf Pro match": `protect-computers` joined to `computers` by hardware
+  UUID or serial number, never by name
 - **Compliance Benchmarks** (Platform API)
 - **Compliance Posture** mSCP/STIG band distributions
 - Per-device drill-down in error lists
@@ -82,15 +90,15 @@ Feeds these screens:
 Do not expect these screens to update immediately when a device changes. They reflect the
 most recent collection run, which may be hours or days old depending on your schedule.
 
-## CSV-only workspaces
+## Without a jamf-cli connection
 
-None of the three tiers above populate without a jamf-cli connection. A workspace running
-on a CSV export alone (no jamf-cli, or jamf-cli installed but never authenticated) only
-populates **Computers** and **Offline Outreach** — both render from CSV columns plus
-`custom_eas` / `security_agents`, not from any jamf-cli tier. Every other screen in this
-document stays empty until jamf-cli is connected and collecting. See
-[App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding) for how a CSV-only setup
-gets through onboarding in the first place.
+None of the three tiers above populate without a jamf-cli connection. A workspace with
+jamf-cli missing or never authenticated shows only what an earlier collect left in its
+cache; every screen in this document stays empty until jamf-cli is connected and
+collecting. There is no CSV mode (retired in 2.11): a CSV export is no longer merged into
+**Computers** or read for workbook tabs, and the `csv-inbox` folder is ignored. See
+[App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding#running-without-jamf-cli-credentials)
+for how onboarding works before real credentials exist.
 
 ## Summary field derivations
 

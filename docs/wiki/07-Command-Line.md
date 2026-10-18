@@ -31,8 +31,8 @@ jamf-reports --help
 ## Commands
 
 Every command operates on a workspace **profile** (the same profiles the app
-manages under `~/Jamf-Reports/<profile>/`), except `scaffold`, which works on a
-standalone CSV file (its `--csv` is optional — see below).
+manages under `~/Jamf-Reports/<profile>/`), except `scaffold`, which writes a
+standalone `config.yaml` (its `--csv` is optional — see below).
 
 If the workspace has been moved off its default location (Settings → Workspace
 location), point the CLI at it with `JRC_WORKSPACES_ROOT`:
@@ -59,7 +59,7 @@ name as `%2C` and a percent sign as `%25`.
 | `collect` | Collect fresh `jamf-cli` snapshots | `--profile`, `--tiers refresh,inventory,scan`, `--force` |
 | `html` | Generate the self-contained HTML report (the Full Instance layout: figures and attention list first, collapsed detail groups, audit appendix) | `--profile`, `--output <path>` |
 | `backup` | Back up Jamf Pro config objects (`jamf-cli pro backup`), and Jamf Protect's (`jamf-cli protect backup`) when the workspace has Protect connected and is not on shared storage | `--profile` |
-| `scaffold` | Build a `config.yaml` from a Jamf Pro CSV export, or a minimal jamf-cli-only config with no CSV | `--csv <path>` (optional), `--out <path>` |
+| `scaffold` | Write a minimal jamf-cli-only `config.yaml`; with a Jamf Pro CSV export, also add its extra columns as `custom_eas` (read once) | `--csv <path>` (optional), `--out <path>` |
 | `check` | Run every config, data-accuracy and workspace check, with a fix for each finding | `--profile`, `--json` |
 | `capabilities` | Report which `jamf-cli` commands are available | `--json` |
 | `diagnostic-bundle` | Build a redacted diagnostic zip | `--profile` |
@@ -70,8 +70,8 @@ name as `%2C` and a percent sign as `%25`.
 ### Gating a job on config health
 
 `check` runs every validation the app has, not just "does `config.yaml` parse":
-column mappings against your CSV, baselines pointing at extension attributes
-nobody collects, malformed alert rules, data accuracy, and the state of the
+baselines pointing at extension attributes
+nobody collects, tracked extension attributes with no collected values, malformed alert rules, data accuracy, and the state of the
 workspace folder — including whether more history for the profile sits in
 another folder, and whether this is a new workspace still on default settings.
 On a shared workspace it also lists the other Macs writing there. Each finding
@@ -109,13 +109,16 @@ A few behaviors worth knowing:
   exits successfully without re-collecting. Pass `--force` to override.
 - `scaffold` **overwrites** the `--out` file if it already exists — it's an
   initial-setup command. It copies the existing file to `<out>.bak-<date-time>`
-  first and prints the path on stderr. To safely update an existing `config.yaml`, use the
-  app's re-scaffold (which merges non-destructively) instead. This applies whether
-  or not `--csv` is given.
+  first and prints the path on stderr. To add extension attributes to an existing
+  `config.yaml`, use **Adopt EAs** in the app, which keeps your other settings. This applies
+  whether or not `--csv` is given.
+- `scaffold --csv <path>` reads the export once and writes only `custom_eas` for its
+  columns Jamf Reports does not already know. No `columns` mapping is written, and the CSV is
+  not read again by `generate`, `collect` or any schedule.
 - `collect` tolerates a missing `config.yaml` and proceeds with defaults; `generate`
   and `html` require one to exist and fail without it. `scaffold --out <path>` with
   `--csv` omitted writes a minimal jamf-cli-only `config.yaml` — the same starting
-  point the GUI onboarding's **Skip for now** step writes — so a `config.yaml` can
+  point the GUI onboarding's Workspace step writes — so a `config.yaml` can
   be created headlessly with no CSV export at all.
 - `collect` and `generate` surface the app's automation-trust signals. A successful
   `collect` evaluates metric alerts and posts the `notify:` webhook digest (just like a
@@ -171,7 +174,13 @@ jamf-reports schedules run com.github.tonyyo11.jamf-reports-community.multi.mana
 ```
 
 `--cadence` accepts four forms: `"Daily 06:20"`, `"Mon 07:00"` (any weekday name),
-`"Weekdays 09:00"`, and `"Day 15 06:20"` (a day of the month). A schedule added this way is
+`"Weekdays 09:00"`, and `"Day 15 06:20"` (a day of the month).
+
+`--mode` takes `snapshot-only`, `jamf-cli-only`, `jamf-cli-full` or `backup`. The retired
+`csv-assisted` mode (2.11) is refused with a message that names `jamf-cli-full`; a schedule
+saved earlier with it runs as `jamf-cli-full`. See
+[Scheduling & Automation](https://github.com/tonyyo11/jamf-reports-community/wiki/05-Scheduling-and-Automation)
+for what each mode does. A schedule added this way is
 picked up by the bundled background item on its next wake, gets the same missed-run
 catch-up as one built in the GUI, and shows up in the dead-man switch.
 

@@ -28,8 +28,9 @@ cannot upgrade past 1.27.0 should pin jamf-cli to 1.23.x instead. See
 [Installation](https://github.com/tonyyo11/jamf-reports-community/wiki/01-Installation) for the full requirements table and pre-built binary
 links.
 
-jamf-cli is optional — the app also works from a Jamf Pro CSV export and cached
-snapshots with no jamf-cli installed. If you're skipping it, go to step 4.
+jamf-cli is optional — without it the app works only from cached snapshots, since live
+collection, scheduling and automation all go through jamf-cli. If you're skipping it, go to
+step 4.
 
 **Only use Jamf School?** On the Welcome chooser, choose **Connect Jamf School** — a
 dedicated path that skips the Jamf Pro Authenticate and Validate steps and connects your
@@ -40,16 +41,10 @@ no Jamf Pro server access needed), but you never enter Jamf Pro credentials. Jam
 support ships community-validated — the maintainer has no Jamf School tenant to test
 against, so please report anything that looks off.
 
-**Only have a CSV export?** jamf-cli still has to be *installed* to get through the Install
-CLI step — Next stays disabled until the app detects it on `PATH` — even if you never
-connect it to a real Jamf Pro tenant. The Authenticate step accepts a URL plus placeholder
-client ID/secret without contacting the server, and Validate lets you continue even when
-the connection check reports failure, so you can complete onboarding with placeholder Jamf
-Pro credentials and map a CSV at the CSV step. (Jamf School is not
-connected from a Jamf Pro workspace: it gets its own workspace.)
-One honest caveat: scheduling and automation always collect via jamf-cli, so a CSV-only
-workspace can't use managed automation, alerts, or the dead-man switch — reports there
-are a manual export-CSV-then-Generate cycle.
+**No CSV mode.** Reports are built from jamf-cli data. The CSV report mode, the CSV
+mapping step and the `csv-inbox` folder were retired in 2.11; see
+[Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding#running-without-jamf-cli-credentials)
+for what onboarding needs.
 
 ## 3. Create a read-only API role
 
@@ -69,7 +64,7 @@ districts pick **Connect Jamf School** instead).
 
 ## 5. Follow the onboarding steps
 
-The flow walks through eight steps — see [App Onboarding](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding) for the
+The flow walks through seven steps — see [App Onboarding](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding) for the
 full detail on each:
 
 1. **Welcome** — a short intro to what onboarding will do.
@@ -86,18 +81,15 @@ full detail on each:
    never persisted by the app; `jamf-cli` keeps the credentials in the macOS keychain and
    caches tokens on disk.
 5. **Validate** — the app confirms the connection works.
-6. **CSV mapping** — optionally add a Jamf Pro CSV export for the sheets that need
-   per-device export columns (Stale Devices, Security Agents, custom Extension
-   Attributes). You can **Skip for now** and add one later.
-7. **Add products (optional)** — connect Jamf Protect here if you use it, or skip and add it
+6. **Add products (optional)** — connect Jamf Protect here if you use it, or skip and add it
    later from the Data Sources screen. Jamf School uses its own workspace.
-8. **First report** — for Jamf Pro, the app collects a snapshot (refresh and inventory
+7. **First report** — for Jamf Pro, the app collects a snapshot (refresh and inventory
    data, not the per-device scans) and then generates a first report, so the dashboards
    have data to show. For Jamf School, this step only generates.
 
 ## 6. Your first collect and report
 
-Step 8 above already ran a first collect and generate for you, on the Jamf Pro path. The
+Step 7 above already ran a first collect and generate for you, on the Jamf Pro path. The
 per-device scans (patch and update failure detail, DDM status, MDM command history) haven't
 run yet — they run on the weekly schedule, or on demand via **Collect now** on Overview. From here on, use the
 **Collect now** and **Generate Report** buttons on the Overview screen whenever you want

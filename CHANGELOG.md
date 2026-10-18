@@ -37,6 +37,19 @@ versions in this repository map to git tags.
   sheet, since collected inventory carries no per-Mac compliance count. A report built from a CSV
   still gets its CSV-based Fleet Drift when there is no earlier day of collected inventory.
 
+### Removed
+
+- The **Columns** tab on Config, the column-mapping step in setup, the **CSV Inbox** card on
+  Data Sources and the Re-scaffold and Run check buttons are gone. Reports no longer need
+  column names mapped to a CSV: Extension Attributes and security agents are adopted from the
+  data jamf-cli collected (**Adopt EAs**), and a CSV export can still be imported once from
+  the same sheet or with `jamf-reports scaffold --csv`, which now writes only
+  `custom_eas`. New workspaces no longer get a `csv-inbox` folder; files already in one are
+  left alone.
+- `columns`, `mobile_columns` and `charts.archive_current_csv` are retired settings. Config
+  Doctor lists them as no longer read, and the next Config save removes `columns` and
+  `mobile_columns` from `config.yaml` after keeping a dated copy of the file.
+
 ### Fixed
 
 - A setting in `config.yaml` written as `Don't stop # note` now reads as the text before the

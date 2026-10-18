@@ -5,14 +5,7 @@ import TipKit
 struct SourcesView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast
-    @State private var csvFiles: [InboxFile] = []
     @State private var families: [SnapshotFamily] = []
-    @State private var inboxWatcher = CSVInboxService.DirectoryWatcher()
-    @State private var pendingClearFile: InboxFile?
-    @State private var pendingClearProfile: String?
-    @State private var showClearConfirm = false
-    @State private var clearError: String?
-    @State private var showClearError = false
     @State private var resolutionError: String?
     @State private var showElevateScopeConfirm = false
     @State private var pendingScopeProfile: String?
@@ -65,7 +58,7 @@ struct SourcesView: View {
 
             HStack(alignment: .top, spacing: 14) {
                 cliCard
-                csvCard
+                eaCard
             }
             doctorCard
             ConnectionCard()
@@ -95,38 +88,13 @@ struct SourcesView: View {
         }
         .onAppear {
             reload()
-            startInboxWatcher()
             reloadCapabilities()
         }
         .onChange(of: workspace.profile) { _, _ in
-            pendingClearFile = nil
-            pendingClearProfile = nil
-            showClearConfirm = false
             doctorOutcome = nil
             doctorRunning = false
             reload()
-            startInboxWatcher()
             reloadCapabilities()
-        }
-        .onDisappear {
-            inboxWatcher.stop()
-        }
-        .confirmationDialog(
-            "Clear \"\(pendingClearFile?.name ?? "")\"?",
-            isPresented: $showClearConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Clear inbox file", role: .destructive) {
-                clearPendingFile()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the CSV file from disk.")
-        }
-        .alert("CSV Inbox Error", isPresented: $showClearError) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(clearError ?? "Unknown error")
         }
         .confirmationDialog(
             "Elevate \"\(pendingScopeProfile ?? "")\" to Full Admin?",
@@ -154,7 +122,7 @@ struct SourcesView: View {
             Text("Data Sources")
                 .font(Theme.Fonts.serif(26, weight: .bold))
                 .foregroundStyle(Theme.Text.primary)
-            Text("Live API · cached snapshots · CSV inboxes · historical archives")
+            Text("Live API · cached snapshots · historical archives")
                 .font(.footnote)
                 .foregroundStyle(Theme.Text.tertiary(contrast))
         }
@@ -336,119 +304,29 @@ struct SourcesView: View {
         }
     }
 
-    private var csvCard: some View {
+    private var eaCard: some View {
         Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    Image(systemName: "folder.fill").foregroundStyle(Theme.Colors.tealBright)
+                    Image(systemName: "tablecells.badge.ellipsis")
+                        .foregroundStyle(Theme.Colors.tealBright)
                         .font(.system(size: 16))
-                    SectionHeader(title: "CSV Inbox")
-                    Spacer()
-                    Pill(text: "\(csvFiles.count) FILES", tone: .muted)
+                    SectionHeader(title: "Extension Attributes")
                 }
-                // One line, shortened in the middle: a path has no spaces to wrap at, so it
-                // broke wherever the card ran out of width.
-                Mono(text: workspaceDisplayPath(subpath: "csv-inbox") + "/")
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(workspaceDisplayPath(subpath: "csv-inbox") + "/")
-
-                if csvFiles.isEmpty {
-                    emptyCSVState
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(csvFiles.enumerated()), id: \.element.id) { idx, f in
-                            HStack(spacing: 10) {
-                                Image(systemName: "doc.text")
-                                    .foregroundStyle(
-                                        f.status == .pending
-                                            ? Theme.Colors.gold
-                                            : Theme.Text.tertiary(contrast)
-                                    )
-                                    .font(.system(size: 12))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Mono(text: f.name, color: Theme.Text.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .help(f.name)
-                                    Mono(
-                                        text: "\(FileDisplay.date(f.mtime)) · \(f.size)",
-                                        size: 10.5
-                                    )
-                                    .lineLimit(1)
-                                }
-                                Spacer(minLength: 8)
-                                Pill(text: f.status.rawValue, tone: tone(for: f.status))
-                                Menu {
-                                    if f.status != .archived {
-                                        Button {
-                                            archiveInboxFile(f)
-                                        } label: {
-                                            Label("Archive", systemImage: "archivebox")
-                                        }
-                                    }
-                                    Button(role: .destructive) {
-                                        pendingClearFile = f
-                                        pendingClearProfile = workspace.profile
-                                        showClearConfirm = true
-                                    } label: {
-                                        Label("Clear inbox file", systemImage: "trash")
-                                    }
-                                } label: {
-                                    Image(systemName: "ellipsis.circle")
-                                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                                        .font(.system(size: 14))
-                                }
-                                .menuStyle(.button)
-                                .buttonStyle(.plain)
-                                .disabled(workspace.demoMode)
-                                .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
-                                .accessibilityLabel("Actions for \(f.name)")
-                            }
-                            .padding(.vertical, 8)
-                            if idx < csvFiles.count - 1 {
-                                Divider().background(Theme.Hairline.standard)
-                            }
-                        }
-                    }
+                Text("Pick the Extension Attributes and security agents collected from Jamf "
+                    + "Pro to track in config.yaml. A CSV export can be imported once instead.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
+                PNPButton(title: "Adopt EAs", icon: "tablecells.badge.ellipsis", size: .sm) {
+                    guard !workspace.demoMode else { return }
+                    showingEAWalkthrough = true
                 }
-
-                if !csvFiles.isEmpty {
-                    Text(CSVInboxService.statusCaption)
-                        .font(.caption)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(spacing: 8) {
-                    PNPButton(title: "Open in Finder", icon: "folder", size: .sm) {
-                        guard !workspace.demoMode else { return }
-                        let url = (ProfileService.workspaceURL(for: workspace.profile)
-                                    ?? WorkspaceRootStore.defaultRoot)
-                            .appendingPathComponent("csv-inbox", isDirectory: true)
-                        SystemActions.openFolder(url)
-                    }
-                    .disabled(workspace.demoMode)
-                    .help(workspace.demoMode
-                          ? DemoData.liveOnlyHelp
-                          : "Open the csv-inbox folder where you drop fresh CSV exports.")
-                    // Lists the collected EAs (or imports a CSV once) and writes config.yaml.
-                    PNPButton(
-                        title: "Adopt EAs",
-                        icon: "tablecells.badge.ellipsis",
-                        style: .ghost,
-                        size: .sm
-                    ) {
-                        guard !workspace.demoMode else { return }
-                        showingEAWalkthrough = true
-                    }
-                    .disabled(workspace.demoMode)
-                    .help(workspace.demoMode
-                          ? DemoData.liveOnlyHelp
-                          : "Pick collected Extension Attributes (or import a CSV once) to "
-                              + "track in config.yaml.")
-                }
-                .padding(.top, 4)
+                .disabled(workspace.demoMode)
+                .help(workspace.demoMode
+                      ? DemoData.liveOnlyHelp
+                      : "Pick collected Extension Attributes (or import a CSV once) to "
+                          + "track in config.yaml.")
                 TipView(SourcesTips.eaTracking)
                     .frame(maxWidth: 460, alignment: .leading)
             }
@@ -711,7 +589,7 @@ struct SourcesView: View {
                     .disabled(workspace.demoMode)
                     .help(workspace.demoMode
                           ? DemoData.liveOnlyHelp
-                          : "Open the snapshots directory where dated CSV/JSON archives live.")
+                          : "Open the snapshots directory where dated archives live.")
                 }
                 if families.isEmpty {
                     emptyFamiliesState
@@ -754,9 +632,8 @@ struct SourcesView: View {
                     Text("Families appear as snapshot types are archived: summaries "
                         + "(daily trend data: a day's first collect writes it, and each later "
                         + "collect that fetches new data rebuilds it) plus dated computers, "
-                        + "mobile, compliance, and patching archives created when CSV exports "
-                        + "are snapshotted. A jamf-cli-only workspace typically shows only "
-                        + "summaries.")
+                        + "mobile, compliance, and patching archives. A jamf-cli-only workspace "
+                        + "typically shows only summaries.")
                         .font(.caption)
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                         .fixedSize(horizontal: false, vertical: true)
@@ -765,27 +642,11 @@ struct SourcesView: View {
         }
     }
 
-    private var emptyCSVState: some View {
-        EmptyStateView(
-            systemImage: "tablecells.badge.ellipsis",
-            title: "No CSV files in the inbox.",
-            message: "Drop Jamf Pro exports here before running a CSV-assisted report. "
-                + "Add your Extension Attribute columns to the export to track them.",
-            // The walkthrough writes config.yaml.
-            primaryAction: workspace.demoMode ? nil : EmptyStateAction(
-                label: "Set up EA tracking",
-                icon: "tablecells.badge.ellipsis",
-                action: { showingEAWalkthrough = true }
-            )
-        )
-        .padding(.vertical, 10)
-    }
-
     private var emptyFamiliesState: some View {
         EmptyStateView(
             systemImage: "archivebox",
             title: "No snapshot families yet",
-            message: "Families appear after collection or CSV archival runs: "
+            message: "Families appear after collection runs: "
                 + "summaries (written by a collect that fetches data), plus dated computers, "
                 + "mobile, compliance, and patching archives."
         )
@@ -796,7 +657,6 @@ struct SourcesView: View {
     private func reload() {
         guard !workspace.demoMode else {
             // The demo workspace, never this Mac's: no folder is read.
-            csvFiles = DemoData.inboxFiles(for: workspace.profile)
             families = DemoData.snapshotFamilies(for: workspace.profile)
             connectedProducts = .none
             sourcesPlan = CollectSourcesPlan.build(.init(
@@ -811,7 +671,6 @@ struct SourcesView: View {
         }
         reloadConnectedProducts()
         reloadSourcesPlan()
-        csvFiles = CSVInboxService().list(profile: workspace.profile)
         families = SnapshotArchiveService().families(profile: workspace.profile)
 
         do {
@@ -875,51 +734,6 @@ struct SourcesView: View {
             guard profile == workspace.profile, !workspace.demoMode else { return }
             sourcesPlan = plan
             cachedAt = dates
-        }
-    }
-
-    private func clearPendingFile() {
-        guard !workspace.demoMode else { return }
-        guard let file = pendingClearFile,
-              let profile = pendingClearProfile else {
-            return
-        }
-
-        do {
-            try CSVInboxService().clear(file, profile: profile)
-            pendingClearFile = nil
-            pendingClearProfile = nil
-            if profile == workspace.profile {
-                reload()
-            }
-        } catch {
-            clearError = "Couldn't remove the inbox file: \(error.localizedDescription). "
-                + "It may be open in another app or read-only."
-            showClearError = true
-        }
-    }
-
-    private func archiveInboxFile(_ file: InboxFile) {
-        guard !workspace.demoMode else { return }
-        let profile = workspace.profile
-        do {
-            try CSVInboxService().archive(file, profile: profile)
-            reload()
-        } catch {
-            clearError = "Couldn't archive the inbox file: \(error.localizedDescription)"
-            showClearError = true
-        }
-    }
-
-    /// Watch the profile's csv-inbox for dropped exports. Demo mode watches
-    /// nothing: its inbox is fixed.
-    private func startInboxWatcher() {
-        guard !workspace.demoMode else {
-            inboxWatcher.stop()
-            return
-        }
-        inboxWatcher.start(profile: workspace.profile) {
-            reload()
         }
     }
 
@@ -987,14 +801,6 @@ struct SourcesView: View {
     private func scopeHelp(_ scope: APIScope) -> String {
         if workspace.demoMode { return DemoData.liveOnlyHelp }
         return Self.scopeExplanation(scope) + " Click to change."
-    }
-
-    private func tone(for status: InboxFileStatus) -> Pill.Tone {
-        switch status {
-        case .pending: .gold
-        case .consumed: .teal
-        case .archived: .muted
-        }
     }
 
     /// Older builds wrote these kinds under other folder names; their snapshots still count.

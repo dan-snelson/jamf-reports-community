@@ -11,11 +11,9 @@ final class OnboardingFlow {
         case workspace
         case authenticate
         case validate
-        case csvMapping
         case addProducts
         case firstReport
-        // Jamf School-only path step. Added at the end so the Jamf Pro path's
-        // rawValues (and everything keyed off them) stay byte-identical.
+        // Jamf School-only path step.
         case schoolConnect
 
         var id: Int { rawValue }
@@ -29,7 +27,6 @@ final class OnboardingFlow {
             case .authenticate: "Authenticate"
             case .validate: "Validate"
             case .addProducts: "Add products"
-            case .csvMapping: "CSV mapping"
             case .firstReport: "First report"
             case .schoolConnect: "Connect School"
             }
@@ -106,8 +103,6 @@ final class OnboardingFlow {
         case invalidScopeID
         case missingJamfCLI
         case missingWorkspace
-        case csvOutsideAllowedZones
-        case csvMappingNotOffered
         case processFailed(String)
 
         var errorDescription: String? {
@@ -126,10 +121,6 @@ final class OnboardingFlow {
                 "Could not find jamf-cli on PATH."
             case .missingWorkspace:
                 "Create the workspace before running this step."
-            case .csvOutsideAllowedZones:
-                "Choose a CSV from ~/Documents, ~/Downloads, or ~/Desktop."
-            case .csvMappingNotOffered:
-                "A Jamf School workspace has no CSV to map: its reports come from jamf-cli."
             case .processFailed(let message):
                 message
             }
@@ -228,15 +219,10 @@ final class OnboardingFlow {
     var workspaceCreated = false
     var profileRegistered = false
     var connectionValidated = false
-    var selectedCSVURL: URL?
-    var csvScaffolded = false
-    var csvMappingSkipped = false
     var firstReportExitCode: Int32?
 
     var isRegisteringProfile = false
     var isValidatingConnection = false
-    var isScaffoldingCSV = false
-    var isSkippingCSVMapping = false
     var isRunningFirstReport = false
 
     var lastError: String?
@@ -249,7 +235,6 @@ final class OnboardingFlow {
     /// The gateway's answer about a Platform API profile's scope ID; nil for OAuth2 profiles
     /// and before validation.
     var connectionCheck: ConnectionCheck.Verdict?
-    var csvOutput: [CLIBridge.LogLine] = []
     var firstReportOutput: [CLIBridge.LogLine] = []
 
     private let installer = JamfCLIInstaller()
@@ -259,16 +244,6 @@ final class OnboardingFlow {
     @ObservationIgnored let profileLister: ProfileLister
     @ObservationIgnored let profileRemover: ProfileRemover
     @ObservationIgnored let workspaceTrasher: WorkspaceTrasher
-
-    // User data zones accepted by policy for the first CSV export.
-    private var allowedCSVRoots: [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return [
-            home.appendingPathComponent("Documents", isDirectory: true),
-            home.appendingPathComponent("Downloads", isDirectory: true),
-            home.appendingPathComponent("Desktop", isDirectory: true),
-        ]
-    }
 
     /// Runs no subprocess: `@State` builds this during a view update, and a child-process wait
     /// there spins the main run loop into a nested layout that aborts AttributeGraph. The
@@ -307,33 +282,17 @@ final class OnboardingFlow {
 
     var isCheckingJamfCLI: Bool { jamfCLIStatus == .checking }
 
-    /// The ordered steps for the active `productPath`.
-    ///
-    /// The Jamf Pro sequence is exactly the pre-existing rawValue order, so
-    /// sequence-indexed navigation is byte-identical to the old rawValue+1
-    /// stepping. The Jamf School sequence skips the Pro-only Authenticate /
-    /// Validate / Add-products steps and inserts `.schoolConnect` AFTER
-    /// `.csvMapping` — the same reason `.addProducts` follows `.csvMapping` on
-    /// the Pro path: the CSV step rewrites `config.yaml`, so the product-connect
-    /// step (which merges `school_cli` into it) must run last of the two, or its
-    /// keys would be clobbered.
+    /// The ordered steps for the active `productPath`. The Jamf School sequence skips the
+    /// Pro-only Authenticate / Validate / Add-products steps for `.schoolConnect`, which merges
+    /// `school_cli` into the config.yaml the workspace step wrote.
     var stepSequence: [Step] {
         switch productPath {
         case .pro:
             [.welcome, .installCLI, .workspace, .authenticate, .validate,
-             .csvMapping, .addProducts, .firstReport]
+             .addProducts, .firstReport]
         case .school:
-            [.welcome, .installCLI, .workspace, .csvMapping, .schoolConnect, .firstReport]
+            [.welcome, .installCLI, .workspace, .schoolConnect, .firstReport]
         }
-    }
-
-    /// Only the Jamf Pro path maps a CSV: the scaffold reads Jamf Pro column names, and Jamf School
-    /// reports come from jamf-cli. On the School path the CSV step only writes config.yaml.
-    var offersCSVMapping: Bool { productPath == .pro }
-
-    /// A step's name on this path.
-    func label(for step: Step) -> String {
-        step == .csvMapping && !offersCSVMapping ? "Workspace config" : step.label
     }
 
     /// 1-based position of `currentStep` within `stepSequence`.
@@ -373,8 +332,6 @@ final class OnboardingFlow {
             // resolves to Jamf School. Advancing without it would leave a
             // Pro-detected empty config.
             schoolConnected && !isConnectingSchool
-        case .csvMapping:
-            (csvScaffolded || csvMappingSkipped) && !isScaffoldingCSV && !isSkippingCSVMapping
         case .firstReport:
             !isRunningFirstReport
         }
@@ -467,9 +424,7 @@ final class OnboardingFlow {
         }
         if currentStep == .schoolConnect {
             clearSchoolAPIKey()
-            // Backing into csvMapping re-runs scaffold/skip, which rewrites
-            // config.yaml and clobbers the school_cli block — require the
-            // connect step to be redone so the block is rewritten too.
+            // The workspace step can change the profile, so the connection is made again.
             schoolConnected = false
             schoolConnectionError = nil
         }
@@ -481,12 +436,8 @@ final class OnboardingFlow {
         let profile = profileName.trimmed
         let existed = ProfileService.workspaceURL(for: profile)
             .map { FileManager.default.fileExists(atPath: $0.path) } ?? true
-        try Self.createWorkspaceFolders(for: profile)
+        try Self.createJamfCLIOnlyWorkspace(for: profile)
         if !existed, !createdWorkspaces.contains(profile) { createdWorkspaces.append(profile) }
-        // config.yaml is intentionally not written here. The CSV mapping step
-        // produces it via ScaffoldService.writeConfig; the skip path produces it via
-        // ScaffoldService.writeMinimalConfig. Writing a placeholder here would block
-        // scaffold (which refuses to overwrite an existing file).
         workspaceCreated = true
         lastError = nil
     }
@@ -509,7 +460,6 @@ final class OnboardingFlow {
         let paths = [
             ProfileService.workspacesRoot(),
             workspace,
-            workspace.appendingPathComponent("csv-inbox", isDirectory: true),
             workspace.appendingPathComponent("jamf-cli-data", isDirectory: true),
             workspace.appendingPathComponent("Generated Reports", isDirectory: true),
             workspace.appendingPathComponent("automation", isDirectory: true),
@@ -1039,116 +989,6 @@ final class OnboardingFlow {
         }
     }
 
-    func scaffoldCSV(from url: URL) async {
-        selectedCSVURL = nil
-        csvScaffolded = false
-        csvMappingSkipped = false
-        csvOutput.removeAll()
-        lastError = nil
-
-        do {
-            guard offersCSVMapping else { throw FlowError.csvMappingNotOffered }
-            let csvURL = try validatedCSVURL(url)
-            guard let workspace = workspaceURL else { throw FlowError.missingWorkspace }
-            let profile = profileName.trimmed
-            guard ProfileService.isValid(profile) else { throw FlowError.invalidProfile }
-
-            selectedCSVURL = csvURL
-            isScaffoldingCSV = true
-            defer { isScaffoldingCSV = false }
-
-            let outputConfig = workspace.appendingPathComponent("config.yaml")
-            // It may be a config.yaml typed by hand, so it is copied aside first.
-            try keepCopy(of: outputConfig)
-            // Remove any prior attempt or skip-seeded config so the user can
-            // re-enter the mapping step without leaving a half-written file.
-            try? FileManager.default.removeItem(at: outputConfig)
-
-            csvOutput.append(.init(timestamp: Date(), level: .info, text: "[info] reading CSV headers…"))
-            let result = try ScaffoldService.matchColumns(from: csvURL, profile: profile)
-
-            let familyLabel: String
-            let matchedCount: Int
-            switch result.family {
-            case .mobile:
-                familyLabel = "mobile device export"
-                matchedCount = result.mobileColumns.count
-            case .computers:
-                familyLabel = "computer export"
-                matchedCount = result.columns.count + result.complianceColumns.count
-            case nil:
-                familyLabel = "export (family unknown)"
-                matchedCount = result.columns.count + result.complianceColumns.count
-            }
-            csvOutput.append(.init(
-                timestamp: Date(), level: .ok,
-                text: "[ok] Detected \(familyLabel) — matched \(matchedCount) column(s)"
-            ))
-
-            try ScaffoldService.writeConfig(to: outputConfig, result: result, profile: profile)
-            SharedConfigPin.confirmWrittenConfig(at: outputConfig, profile: profile)
-            csvOutput.append(.init(
-                timestamp: Date(), level: .ok,
-                text: "[ok] config.yaml written to \(outputConfig.lastPathComponent)"
-            ))
-            csvScaffolded = true
-        } catch {
-            lastError = error.localizedDescription
-        }
-    }
-
-    /// Seed a minimal `config.yaml` so the user can skip CSV mapping and still produce
-    /// a working workspace.
-    func skipCSVMapping() async {
-        selectedCSVURL = nil
-        csvScaffolded = false
-        csvMappingSkipped = false
-        csvOutput.removeAll()
-        lastError = nil
-
-        let profile = profileName.trimmed
-        guard ProfileService.isValid(profile) else {
-            lastError = FlowError.invalidProfile.localizedDescription
-            return
-        }
-        guard let workspace = workspaceURL else {
-            lastError = FlowError.missingWorkspace.localizedDescription
-            return
-        }
-
-        isSkippingCSVMapping = true
-        defer { isSkippingCSVMapping = false }
-
-        let outputConfig = workspace.appendingPathComponent("config.yaml")
-        csvOutput.append(.init(timestamp: Date(), level: .info, text: "[info] writing minimal config.yaml…"))
-        do {
-            try keepCopy(of: outputConfig)
-            try ScaffoldService.writeMinimalConfig(to: outputConfig, profile: profile)
-            SharedConfigPin.confirmWrittenConfig(at: outputConfig, profile: profile)
-            csvOutput.append(.init(
-                timestamp: Date(), level: .ok,
-                text: offersCSVMapping
-                    ? "[ok] minimal config.yaml written — jamf-cli data is enough; add a CSV "
-                        + "later from Data Sources for per-device sheets"
-                    : "[ok] config.yaml written — Jamf School reports come from jamf-cli"
-            ))
-            csvMappingSkipped = true
-        } catch {
-            lastError = error.localizedDescription
-        }
-    }
-
-    /// Copies an existing config.yaml aside before setup replaces it, and says where.
-    private func keepCopy(of config: URL) throws {
-        guard let backup = try ConfigService.backUp(config) else { return }
-        csvOutput.append(.init(
-            timestamp: Date(), level: .info,
-            text: "[info] kept a copy of the existing config.yaml as \(backup.lastPathComponent)"
-                + (ConfigService.backupOmitsWebhook(backup)
-                    ? "; its webhook URL is not kept, so enter it again after a restore" : "")
-        ))
-    }
-
     /// One first-report stage (collect or generate) for a profile, streaming log lines.
     typealias FirstReportStep = (
         String, @escaping @Sendable (CLIBridge.LogLine) -> Void
@@ -1330,15 +1170,6 @@ final class OnboardingFlow {
               let url = components.url
         else { return nil }
         return url
-    }
-
-    private func validatedCSVURL(_ url: URL) throws -> URL {
-        let resolved = url.resolvingSymlinksInPath().standardizedFileURL
-        guard allowedCSVRoots.contains(where: { resolved.path.hasPrefix($0.path + "/") || resolved.path == $0.path })
-        else {
-            throw FlowError.csvOutsideAllowedZones
-        }
-        return resolved
     }
 
     /// P9-A-07: Accept finalized credential bytes from `SecureSecretField`.

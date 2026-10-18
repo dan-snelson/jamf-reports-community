@@ -38,11 +38,11 @@ final class ConfigSaveTypedTextTests: XCTestCase {
                        "output:\n  output_dir: B\n\n# Next section\n\nhtml:\n  x: 1\n")
     }
 
-    /// A key the Config screen does not edit inside `columns:` stays: the save sets its own
+    /// A key the Config screen does not edit inside `output:` stays: the save sets its own
     /// keys on the block as read.
-    func testAnUnknownKeyInsideColumnsSurvivesASave() throws {
+    func testAnUnknownKeyInsideARewrittenBlockSurvivesASave() throws {
         let (root, url) = try workspace(
-            with: "columns:\n  computer_name: Name\n  site_code: \"Site Code\"\n")
+            with: "output:\n  output_dir: Reports\n  site_code: \"Site Code\"\n")
         _ = try saveLoaded(root: root)
         let text = try String(contentsOf: url, encoding: .utf8)
         XCTAssertNotNil(text.range(of: #"\n  site_code: "?Site Code"?\n"#,
@@ -56,13 +56,13 @@ final class ConfigSaveTypedTextTests: XCTestCase {
     func testAListBlockTypedAsAMappingIsLeftAsTyped() throws {
         let eas = "custom_eas:\n  Battery:\n    column: Battery Cycle Count\n    type: text\n"
         let agents = "security_agents: Agent One\n"
-        let (root, url) = try workspace(with: "columns:\n  computer_name: Name\n" + eas + agents)
+        let (root, url) = try workspace(with: "thresholds:\n  stale_device_days: 45\n" + eas + agents)
 
         let loaded = try ConfigService.load(profile: Self.profile, workspaceRoot: root)
         XCTAssertEqual(loaded.state.customEAs, [], "the editor reads it as empty")
         XCTAssertEqual(loaded.state.securityAgents, [])
         var state = loaded.state
-        state.columns["computer_name"] = "Device Name"
+        state.staleDeviceDays = "61"
         state.securityAgents = [
             ConfigSecurityAgent(name: "Added", column: "Added - Status", connectedValue: "Up"),
         ]
@@ -73,7 +73,7 @@ final class ConfigSaveTypedTextTests: XCTestCase {
         XCTAssertEqual(saved.report.keptBlocks, ["custom_eas", "security_agents"])
         let text = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(text.contains(eas + agents), text)
-        XCTAssertTrue(text.contains("computer_name: Device Name"), text)
+        XCTAssertTrue(text.contains("stale_device_days: 61"), text)
         XCTAssertFalse(text.contains("Added"), text)
     }
 
@@ -98,7 +98,7 @@ final class ConfigSaveTypedTextTests: XCTestCase {
     /// A rewritten block is emitted afresh, so a comment inside it is gone. Every save that
     /// drops one keeps a copy of the file that holds it.
     func testEverySaveThatDropsACommentKeepsACopyHoldingIt() throws {
-        let typed = "columns:\n  # the export's name column\n  computer_name: Name  # mine\n"
+        let typed = "output:\n  # the export's name column\n  output_dir: Reports  # mine\n"
             + "\n# Thresholds\nthresholds:\n  stale_device_days: 30\n"
         let (root, url) = try workspace(with: typed)
 
@@ -125,7 +125,7 @@ final class ConfigSaveTypedTextTests: XCTestCase {
 
     func testASaveWithNoCommentInsideTheBlocksItRewritesMakesNoCopy() throws {
         let (root, url) = try workspace(
-            with: "# Columns\ncolumns:\n  computer_name: \"Name # 1\"\n\n# Others\nhtml:\n"
+            with: "# Output\noutput:\n  output_dir: \"Reports # 1\"\n\n# Others\nhtml:\n"
                 + "  # not a block this screen edits\n  track_history: false\n")
         let saved = try saveLoaded(root: root)
         XCTAssertEqual(saved.report, ConfigSaveReport())
@@ -137,7 +137,7 @@ final class ConfigSaveTypedTextTests: XCTestCase {
     /// A line the reader skipped is not in what it read, so a rewrite of its block loses it,
     /// and the refresh after the save clears its note.
     func testASaveThatDropsAnUnreadLineInsideABlockKeepsACopy() throws {
-        let typed = "columns:\n  computer_name: Name\n  just some words\n"
+        let typed = "output:\n  output_dir: Reports\n  just some words\n"
             + "html:\n  also some words\n  track_history: false\n"
         let (root, url) = try workspace(with: typed)
         let loaded = try ConfigService.load(profile: Self.profile, workspaceRoot: root)
@@ -157,7 +157,7 @@ final class ConfigSaveTypedTextTests: XCTestCase {
     /// A duplicate key is read (both copies are written back), and html is not rewritten.
     func testNotesOnLinesThatAreKeptMakeNoCopy() throws {
         let (root, url) = try workspace(
-            with: "columns:\n  computer_name: A\n  computer_name: B\nhtml:\n  stray words\n")
+            with: "output:\n  output_dir: A\n  output_dir: B\nhtml:\n  stray words\n")
         let loaded = try ConfigService.load(profile: Self.profile, workspaceRoot: root)
         XCTAssertEqual(loaded.document.parseNotes.map(\.line), [2, 5])
 
@@ -165,7 +165,7 @@ final class ConfigSaveTypedTextTests: XCTestCase {
         XCTAssertFalse(saved.report.droppedUnreadLines)
         XCTAssertNil(saved.report.backupName)
         XCTAssertEqual(try backups(beside: url), [])
-        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("computer_name: A"))
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("output_dir: A"))
     }
 
     // MARK: Backups

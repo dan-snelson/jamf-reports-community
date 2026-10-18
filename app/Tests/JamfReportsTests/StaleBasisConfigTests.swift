@@ -281,21 +281,8 @@ final class StaleBasisConfigTests: XCTestCase {
         XCTAssertTrue(text.contains("contact_gap_days: 14"), "an explicit default is not dropped")
     }
 
-    func testLastInventoryIsAnOptionalColumnWrittenOnlyWhenSet() throws {
-        XCTAssertTrue(ConfigState.optionalColumnKeys.contains("last_inventory"))
-        XCTAssertEqual(ConfigState.defaultState.columns["last_inventory"], "")
-        let ws = try workspace()
-        try write("columns:\n  computer_name: Computer Name\n", ws)
-        let untouched = try resave(ws) { $0.staleDeviceDays = "31" }
-        XCTAssertEqual(untouched.columns["last_inventory"], "")
-        XCTAssertFalse(try saved(ws).contains("last_inventory"))
-        let mapped = try resave(ws) { $0.columns["last_inventory"] = "Last Inventory Update" }
-        XCTAssertEqual(mapped.columns["last_inventory"], "Last Inventory Update")
-    }
-
     func testTheScreensWrittenKeysIncludeTheNewOnes() {
         XCTAssertTrue(ConfigEditedKeys.paths.contains(["thresholds", "stale_basis"]))
         XCTAssertTrue(ConfigEditedKeys.paths.contains(["thresholds", "contact_gap_days"]))
-        XCTAssertTrue(ConfigEditedKeys.paths.contains(["columns", "last_inventory"]))
     }
 }

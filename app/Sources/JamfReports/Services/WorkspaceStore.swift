@@ -15,7 +15,6 @@ final class WorkspaceStore {
     @ObservationIgnored let connectionStore: ConnectionStore
     var schedules: [Schedule]
     var customEAs: [CustomEA]
-    var columnMappings: [ColumnMapping]
     var demoMode: Bool
 
     /// Shared trend store, owned here so it SURVIVES tab navigation. Overview and
@@ -281,44 +280,6 @@ final class WorkspaceStore {
             .map { names[$0] }
     }
 
-    // MARK: Column label / required metadata
-
-    private static let columnLabels: [String: String] = [
-        "computer_name":     "Computer Name",
-        "serial_number":     "Serial Number",
-        "operating_system":  "Operating System",
-        "last_checkin":      "Last Check-in",
-        "department":        "Department",
-        "manager":           "Manager",
-        "email":             "Email",
-        "filevault":         "FileVault Status",
-        "sip":               "SIP Status",
-        "firewall":          "Firewall Enabled",
-        "gatekeeper":        "Gatekeeper",
-        "secure_boot":       "Secure Boot",
-        "bootstrap_token":   "Bootstrap Token",
-        "disk_percent_full": "Disk % Full",
-        "architecture":      "Architecture",
-        "model":             "Model",
-        "model_identifier":  "Model Identifier",
-        "last_enrollment":   "Last Enrollment",
-        "mdm_expiry":        "MDM Profile Expiry",
-        "full_name":           "Full Name",
-        "asset_tag":           "Asset Tag",
-        "building":            "Building",
-        "position":            "Position",
-        "last_logged_in_user": "Last Logged-in User",
-        "recovery_lock":       "Recovery Lock",
-        "battery_health":      "Battery Health",
-        "entra_sso_status":    "Entra SSO Status",
-        "purchase_date":       "Purchase Date",
-        "last_inventory":      "Last Inventory Update",
-    ]
-
-    private static let requiredColumnKeys: Set<String> = [
-        "computer_name", "serial_number", "operating_system", "last_checkin",
-    ]
-
     // MARK: Init
 
     init(
@@ -365,7 +326,6 @@ final class WorkspaceStore {
             : Self.loadSchedules(baseProfile: ManagedAutomation.managedBaseProfile(
                 profiles: realProfiles, policy: AutomationPolicy.current()))
         self.customEAs = DemoData.customEAs
-        self.columnMappings = DemoData.columnMappings
         self.selectedScoreCards = Self.loadPersistedScoreCards() ?? Self.defaultScoreCards
         self.overviewLayout = OverviewLayout.parse(
             UserDefaults.standard.string(forKey: Self.overviewLayoutKey))
@@ -471,7 +431,6 @@ final class WorkspaceStore {
         configState = .defaultState
         _loadedDoc = nil
         _savedState = nil
-        rebuildColumnMappings()
         rebuildCustomEAs()
         Task {
             do { try await loadConfig() } catch {
@@ -645,13 +604,10 @@ final class WorkspaceStore {
     }
 
     /// Human-readable summary of the customizations the current config carries,
-    /// e.g. "12 column mappings, 1 security agent, 16 custom EAs". Empty when the
+    /// e.g. "1 security agent, 16 custom EAs". Empty when the
     /// loaded state has nothing customized (so callers can omit the clause).
     func clearedConfigSummary() -> String {
         var parts: [String] = []
-        let columns = configState.columns.values.filter { !$0.isEmpty }.count
-            + configState.mobileColumns.values.filter { !$0.isEmpty }.count
-        if columns > 0 { parts.append("\(columns) column mapping\(columns == 1 ? "" : "s")") }
         let agents = configState.securityAgents.count
         if agents > 0 { parts.append("\(agents) security agent\(agents == 1 ? "" : "s")") }
         let eas = configState.customEAs.count
@@ -801,11 +757,10 @@ final class WorkspaceStore {
             configError = nil
             configRepairedKeys = []
         }
-        rebuildColumnMappings()
         rebuildCustomEAs()
     }
 
-    /// Flush current configState (+ any column mapping edits) to disk atomically. Returns what
+    /// Flush current configState to disk atomically. Returns what
     /// the save left as typed, for the Config screen to say.
     @discardableResult
     func saveConfig() async throws -> ConfigSaveReport {
@@ -813,7 +768,6 @@ final class WorkspaceStore {
         // config.yaml in the real workspaces root, where profile discovery and the
         // background item's all-profiles runs treat it as a real workspace.
         guard !demoMode else { return ConfigSaveReport() }
-        syncColumnMappingsToState()
         let changedFolders = SharedConfigPin.changedFolderKeys(
             before: _savedState.map { ($0.outputDir, $0.archiveDir) },
             after: (configState.outputDir, configState.archiveDir))
@@ -919,40 +873,7 @@ final class WorkspaceStore {
         configRepairedKeys = []
         securityPolicy = .default
         securityPolicyIssues = []
-        rebuildColumnMappings()
         rebuildCustomEAs()
-    }
-
-    /// Takes the column mappings a re-scaffold just wrote to config.yaml into the working
-    /// config and its saved baseline, and rebuilds the Columns tab. Other unsaved edits stay.
-    /// Before, the Columns tab kept the old mappings, and the Save the re-scaffold toast asks
-    /// for wrote them back over the merge.
-    ///
-    /// The file's stamp moves with the write only when the merge read the file this screen
-    /// loaded (`readStamp`, from `ScaffoldService.mergeIntoConfig`). If it had changed on disk
-    /// since, the screen's other values are still the old ones, so the stamp stays and the
-    /// next Save refuses (`changedOnDisk`) until the screen reloads. The document and stamp it
-    /// then adopts are the merge's own (`savedDocument`, `savedStamp`), not a fresh read: a file
-    /// edited after the merge's save keeps a stamp that no longer matches, so the next Save
-    /// refuses instead of taking that edit as the screen's own.
-    func adoptScaffoldedColumns(
-        from saved: ConfigState, readStamp: ConfigFileStamp,
-        savedDocument: YAMLCodec.YAMLDocument, savedStamp: ConfigFileStamp
-    ) {
-        guard !demoMode else { return }
-        configState.columns = saved.columns
-        configState.mobileColumns = saved.mobileColumns
-        configState.failuresCountColumn = saved.failuresCountColumn
-        configState.failuresListColumn = saved.failuresListColumn
-        _savedState?.columns = saved.columns
-        _savedState?.mobileColumns = saved.mobileColumns
-        _savedState?.failuresCountColumn = saved.failuresCountColumn
-        _savedState?.failuresListColumn = saved.failuresListColumn
-        if _loadedStamp?.isSameFile(as: readStamp) == true {
-            _loadedDoc = savedDocument
-            _loadedStamp = savedStamp
-        }
-        rebuildColumnMappings()
     }
 
     // MARK: Mutations
@@ -996,33 +917,6 @@ final class WorkspaceStore {
     }
 
     // MARK: Private helpers
-
-    /// Copy columnMappings.value back into configState.columns before saving.
-    private func syncColumnMappingsToState() {
-        for mapping in columnMappings {
-            configState.columns[mapping.key] = mapping.value
-        }
-    }
-
-    /// Rebuild [ColumnMapping] from configState.columns. A live workspace's status is read
-    /// off its value (empty is unmapped, else mapped): `columnMappings` starts as the demo's
-    /// list, and carrying its badges over put the demo's one warning on every live workspace.
-    /// Demo mode keeps its own badges.
-    private func rebuildColumnMappings() {
-        let statusByKey: [String: ColumnMapping.Status] = demoMode
-            ? Dictionary(columnMappings.map { ($0.key, $0.status) }, uniquingKeysWith: { $1 })
-            : [:]
-        columnMappings = ConfigState.columnKeys.map { key in
-            let value = configState.columns[key] ?? ""
-            return ColumnMapping(
-                key: key,
-                label: Self.columnLabels[key] ?? key,
-                value: value,
-                required: Self.requiredColumnKeys.contains(key),
-                status: statusByKey[key] ?? (value.isEmpty ? .skip : .ok)
-            )
-        }
-    }
 
     /// Rebuild [CustomEA] display models from configState.customEAs.
     private func rebuildCustomEAs() {

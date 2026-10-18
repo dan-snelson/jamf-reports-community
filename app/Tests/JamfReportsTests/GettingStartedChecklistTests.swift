@@ -102,7 +102,7 @@ final class GettingStartedChecklistTests: XCTestCase {
         let byKind = Dictionary(uniqueKeysWithValues: checklist.steps.map { ($0.kind, $0.destinationTab) })
         XCTAssertEqual(byKind[.connect], Tab.sources.rawValue)
         XCTAssertEqual(byKind[.collect], Tab.sources.rawValue)
-        XCTAssertEqual(byKind[.customize], Tab.config.rawValue)
+        XCTAssertEqual(byKind[.customize], Tab.sources.rawValue)
         XCTAssertEqual(byKind[.schedule], Tab.schedules.rawValue)
         XCTAssertEqual(byKind[.report], Tab.reports.rawValue)
     }

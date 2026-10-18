@@ -102,19 +102,16 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         )
     }
 
-    // MARK: - Part 2: Step enum has addProducts between validate and csvMapping
+    // MARK: - Part 2: Step order
 
-    /// addProducts must come AFTER csvMapping so that ScaffoldService.writeConfig
-    /// runs first and writeProtect/writeSchoolConfig can merge into an existing file.
-    /// ScaffoldService.writeConfig deletes any prior config.yaml before writing;
-    /// if addProducts ran first its writes would be silently destroyed.
-    func test_stepOrder_addProductsAfterCSVMappingBeforeFirstReport() {
+    /// addProducts follows validate and precedes firstReport; the workspace step has already
+    /// written config.yaml, so writeProtect/writeSchoolConfig merge into an existing file.
+    func test_stepOrder_addProductsAfterValidateBeforeFirstReport() {
         let steps = OnboardingFlow.Step.allCases
-        let csvMappingIdx = steps.firstIndex(of: .csvMapping)!
+        let workspaceIdx = steps.firstIndex(of: .workspace)!
         let addProductsIdx = steps.firstIndex(of: .addProducts)!
         let firstReportIdx = steps.firstIndex(of: .firstReport)!
-        XCTAssertLessThan(csvMappingIdx, addProductsIdx,
-                          ".csvMapping must precede .addProducts (avoid config.yaml clobber)")
+        XCTAssertLessThan(workspaceIdx, addProductsIdx)
         XCTAssertLessThan(addProductsIdx, firstReportIdx,
                           ".addProducts must precede .firstReport")
     }
@@ -337,10 +334,8 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     // MARK: - Part 2: Config wiring (protect + school written into config.yaml)
     //
     // Tests call writeProtectConfig/writeSchoolConfig directly (internal access).
-    // The sequence mirrors the real wizard flow: createWorkspace → skipCSVMapping
-    // (writes config.yaml) → writeProtectConfig → assert. This proves that the
-    // config survives scaffoldCSV's removeItem because addProducts comes AFTER
-    // csvMapping in the step order.
+    // The sequence mirrors the real wizard flow: createWorkspace (writes config.yaml) →
+    // writeProtectConfig → assert.
 
     func test_writeProtectConfig_setsEnabledAndProfile() async throws {
         let root = FileManager.default.temporaryDirectory
@@ -356,9 +351,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.profileName = profile
         try flow.createWorkspace()
-        // csvMapping step writes config.yaml — must come BEFORE addProducts.
-        await flow.skipCSVMapping()
-        XCTAssertNil(flow.lastError, "skipCSVMapping should succeed: \(flow.lastError ?? "")")
 
         // Now call the real writer (internal).
         try flow.writeProtectConfig(profileSlug: profile, protectProfileName: "my-protect")
@@ -385,7 +377,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.profileName = profile
         try flow.createWorkspace()
-        await flow.skipCSVMapping()
 
         // Pre-check: scaffolded config should have a branding or jamf_cli block.
         let beforeLoad = try ConfigService.load(profile: profile)
@@ -482,9 +473,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.profileName = profile
         try flow.createWorkspace()
-        // csvMapping step must precede addProducts.
-        await flow.skipCSVMapping()
-        XCTAssertNil(flow.lastError)
 
         try flow.writeSchoolConfig(profileSlug: profile, schoolProfileName: "my-school")
 
@@ -499,17 +487,16 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     // MARK: - Jamf School product path: step sequence
 
     /// The School path skips the Pro-only Authenticate / Validate / Add-products
-    /// steps and inserts .schoolConnect AFTER .csvMapping (so csvMapping's
-    /// config.yaml rewrite can't clobber the school_cli keys).
+    /// steps and inserts .schoolConnect after the workspace step that writes config.yaml.
     func test_schoolPath_stepSequence_skipsProSteps() {
         let flow = OnboardingFlow()
         flow.productPath = .school
         XCTAssertEqual(
             flow.stepSequence,
-            [.welcome, .installCLI, .workspace, .csvMapping, .schoolConnect, .firstReport],
-            "School path sequence must skip authenticate/validate/addProducts and place schoolConnect after csvMapping"
+            [.welcome, .installCLI, .workspace, .schoolConnect, .firstReport],
+            "School path sequence must skip authenticate/validate/addProducts"
         )
-        XCTAssertEqual(flow.stepCount, 6, "School path has 6 steps")
+        XCTAssertEqual(flow.stepCount, 5, "School path has 5 steps")
     }
 
     /// nextStep from each School step lands on the expected next step.
@@ -519,7 +506,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         flow.currentStep = .welcome
 
         let expected: [OnboardingFlow.Step] =
-            [.installCLI, .workspace, .csvMapping, .schoolConnect, .firstReport]
+            [.installCLI, .workspace, .schoolConnect, .firstReport]
         for step in expected {
             flow.nextStep()
             XCTAssertEqual(flow.currentStep, step, "School nextStep should reach \(step)")
@@ -537,10 +524,9 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         XCTAssertEqual(flow.currentStep, .firstReport, "nextStep at the last School step must be a no-op")
     }
 
-    /// Backing out of schoolConnect resets the connection state: csvMapping's
-    /// scaffold/skip rewrites config.yaml (clobbering the school_cli block), so
-    /// a stale schoolConnected == true would let the flow advance past a step
-    /// whose on-disk result no longer exists.
+    /// Backing out of schoolConnect resets the connection state: the workspace step can
+    /// change the profile, so a stale schoolConnected == true would let the flow advance past
+    /// a step whose result belongs to the old profile.
     func test_schoolPath_previousStep_resetsSchoolConnection() {
         let flow = OnboardingFlow()
         flow.productPath = .school
@@ -550,9 +536,9 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
 
         flow.previousStep()
 
-        XCTAssertEqual(flow.currentStep, .csvMapping)
+        XCTAssertEqual(flow.currentStep, .workspace)
         XCTAssertFalse(flow.schoolConnected,
-                       "Backing into csvMapping must force the connect step to be redone")
+                       "Backing into the workspace step must force the connect step to be redone")
         XCTAssertNil(flow.schoolConnectionError)
     }
 
@@ -563,7 +549,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         flow.currentStep = .firstReport
 
         let expected: [OnboardingFlow.Step] =
-            [.schoolConnect, .csvMapping, .workspace, .installCLI, .welcome]
+            [.schoolConnect, .workspace, .installCLI, .welcome]
         for step in expected {
             flow.previousStep()
             XCTAssertEqual(flow.currentStep, step, "School previousStep should reach \(step)")
@@ -577,7 +563,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.productPath = .school
         flow.currentStep = .schoolConnect
-        XCTAssertEqual(flow.stepPosition, 5, "schoolConnect is the 5th step in the School sequence")
+        XCTAssertEqual(flow.stepPosition, 4, "schoolConnect is the 4th step in the School sequence")
     }
 
     // MARK: - Jamf School product path: canAdvance gates
@@ -663,10 +649,10 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         XCTAssertEqual(
             flow.stepSequence,
             [.welcome, .installCLI, .workspace, .authenticate, .validate,
-             .csvMapping, .addProducts, .firstReport],
-            "Pro path step sequence must remain the original 8-step order"
+             .addProducts, .firstReport],
+            "Pro path step sequence has no CSV step"
         )
-        XCTAssertEqual(flow.stepCount, 8)
+        XCTAssertEqual(flow.stepCount, 7)
     }
 
     /// Walking the Pro sequence must reach firstReport and stop — it must NOT
@@ -675,7 +661,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.currentStep = .welcome
         let expected: [OnboardingFlow.Step] =
-            [.installCLI, .workspace, .authenticate, .validate, .csvMapping, .addProducts, .firstReport]
+            [.installCLI, .workspace, .authenticate, .validate, .addProducts, .firstReport]
         for step in expected {
             flow.nextStep()
             XCTAssertEqual(flow.currentStep, step)
@@ -705,10 +691,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.profileName = profile
         try flow.createWorkspace()
-        // csvMapping runs before schoolConnect on the School path — seed the
-        // minimal config first, exactly as the wizard does.
-        await flow.skipCSVMapping()
-        XCTAssertNil(flow.lastError, "skipCSVMapping should succeed: \(flow.lastError ?? "")")
 
         // The workspace profile IS the School profile on the School-only path.
         try flow.writeSchoolConfig(profileSlug: profile, schoolProfileName: profile)

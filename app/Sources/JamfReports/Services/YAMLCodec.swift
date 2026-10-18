@@ -167,18 +167,24 @@ enum YAMLCodec {
 
     static func encode(
         _ document: YAMLDocument,
-        replacingTopLevelKeys keys: Set<String>
+        replacingTopLevelKeys keys: Set<String>,
+        removingTopLevelKeys removed: Set<String> = []
     ) throws -> String {
         guard case .mapping(let root) = document.root else { throw CodecError.invalidTopLevel }
 
         var output: [String] = []
         let lines = document.originalText.components(separatedBy: .newlines)
         let blocks = replacedBlocks(in: lines, keys: keys, root: root)
+        let removedLines = Set(removed.flatMap { key in
+            topLevelBlockRanges(of: key, in: lines).flatMap { Array($0) }
+        })
         var replaced: Set<String> = []
         var index = 0
 
         while index < lines.count {
-            if let block = blocks[index], let value = root.value(for: block.key) {
+            if removedLines.contains(index) {
+                index += 1
+            } else if let block = blocks[index], let value = root.value(for: block.key) {
                 output.append(contentsOf: emitTopLevel(key: block.key, value: value))
                 replaced.insert(block.key)
                 index = block.end

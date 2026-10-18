@@ -53,6 +53,8 @@ versions in this repository map to git tags.
 
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
+- A schedule whose last success was recorded while the Mac's clock was set ahead is retried
+  after a partial run, instead of waiting until that date. (#284)
 - The same-day retry of a scheduled run no longer repeats for a Jamf Protect or Jamf School
   source that failed for a reason a retry cannot fix (a missing permission, a command the
   profile's API does not serve), or for a Protect collect that could not start. (#284)

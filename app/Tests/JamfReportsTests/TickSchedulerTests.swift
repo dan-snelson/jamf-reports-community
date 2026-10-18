@@ -157,6 +157,20 @@ final class TickSchedulerTests: XCTestCase {
 
     // MARK: - Same-day retry
 
+    func testSuccessStampFarInTheFutureDoesNotBlockTheRetry() {
+        let s = schedule("collect", cadence: "Daily 06:00", mode: .snapshotOnly)
+        let label = s.launchAgentLabel!
+        let now = date(2026, 9, 7, 7, 5)
+        let started = [label: date(2026, 9, 7, 6, 0)]
+        let ahead = tickState(started: started, succeeded: [label: now.addingTimeInterval(30 * 86_400)])
+        XCTAssertEqual(TickScheduler.due(
+            schedules: [s], state: ahead, runNowLabels: [], now: now).map(\.reason), [.retry])
+        // A real success since the fire still ends the retries.
+        let done = tickState(started: started, succeeded: [label: date(2026, 9, 7, 6, 30)])
+        XCTAssertTrue(TickScheduler.due(
+            schedules: [s], state: done, runNowLabels: [], now: now).isEmpty)
+    }
+
     /// A collect that failed at its 06:00 fire is retried an hour later — not
     /// on the next wake, and not the next day.
     func testFailedRunIsRetriedAfterAnHourNotBefore() {

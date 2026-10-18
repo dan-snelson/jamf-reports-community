@@ -153,7 +153,11 @@ enum TickScheduler {
         mode: Schedule.RunMode, label: String, fire: Date, state: TickState, now: Date
     ) -> Bool {
         guard mode.runsAtLoad else { return false }
-        guard (state.lastSucceeded[label] ?? .distantPast) < fire else { return false }
+        // A success stamped beyond clock skew ahead (a clock set ahead once) is no success yet.
+        let succeeded = state.lastSucceeded[label].flatMap {
+            $0.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance ? $0 : nil
+        } ?? .distantPast
+        guard succeeded < fire else { return false }
         let retries = state.retryCount[label] ?? 0
         guard retryBackoffs.indices.contains(retries) else { return false }
         let started = startStamp(label, state: state, now: now)

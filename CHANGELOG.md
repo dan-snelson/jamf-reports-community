@@ -9,6 +9,9 @@ versions in this repository map to git tags.
 
 ### Added
 
+- **Protect** now shows which Protect computers match a Jamf Pro computer (by hardware UUID or
+  serial number, never by name), which have no Jamf Pro record, and which Jamf Pro Macs have no
+  Protect record.
 - **Groups & Searches** now shows how many members each group has, its description, and flags
   empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
   Groups**), with a summary row that also counts policies with no scope. Saved mobile

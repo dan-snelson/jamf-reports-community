@@ -812,7 +812,7 @@ struct DuplicateSerialRow: Decodable, Sendable {
 // Shape: { "totalCount": N, "results": [ { "id": "211"(String), "name": String,
 //   "criteria": [...], "displayFields": [String], "siteId": "-1"(String) } ] }
 
-struct AdvancedMobileSearchCriterion: Decodable, Sendable {
+struct AdvancedMobileSearchCriterion: Decodable, Sendable, Equatable {
     let name: String?
     let priority: Int?
     let andOr: String?
@@ -822,7 +822,7 @@ struct AdvancedMobileSearchCriterion: Decodable, Sendable {
     let closingParen: Bool?
 }
 
-struct AdvancedMobileSearchRow: Decodable, Sendable {
+struct AdvancedMobileSearchRow: Decodable, Sendable, Equatable {
     let id: String?
     let name: String?
     let criteria: [AdvancedMobileSearchCriterion]?
@@ -843,7 +843,7 @@ struct AdvancedMobileSearchEnvelope: Decodable, Sendable {
 // Shape (Classic API, snake_case, flat array): [ { "id": Int, "is_smart": Bool, "name": String } ]
 // `is_smart` is optional in the wire shape; absent → treat as false (static group).
 
-struct ClassicGroupRow: Decodable, Sendable {
+struct ClassicGroupRow: Decodable, Sendable, Equatable {
     let id: Int?
     let isSmart: Bool
     let name: String?
@@ -860,6 +860,38 @@ struct ClassicGroupRow: Decodable, Sendable {
         // Treat missing is_smart as false (static group) for forward-compat.
         isSmart = try container.decodeIfPresent(Bool.self, forKey: .isSmart) ?? false
         name = try container.decodeIfPresent(String.self, forKey: .name)
+    }
+}
+
+// MARK: - Groups list (membership)
+// `jamf-cli pro groups list --output json` (kind `groups`): a bare array, one row per Classic
+// group with its member count. `groupJamfProId` is the Classic id as text, so it joins a
+// `ClassicGroupRow` once the group type matches (a computer and a mobile group can share an id).
+// Read field by field: a value of an unexpected type costs that field, never the row.
+
+struct GroupsListRow: Decodable, Sendable, Equatable {
+    let jamfProID: String?
+    let name: String?
+    let description: String?
+    /// `COMPUTER` or `MOBILE`.
+    let type: String?
+    let membershipCount: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case jamfProID = "groupJamfProId"
+        case name = "groupName"
+        case description = "groupDescription"
+        case type = "groupType"
+        case membershipCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        jamfProID = c.lenientText(forKey: .jamfProID)
+        name = c.lenientText(forKey: .name)
+        description = c.lenientText(forKey: .description)
+        type = c.lenientText(forKey: .type)
+        membershipCount = c.lenientCount(forKey: .membershipCount)
     }
 }
 

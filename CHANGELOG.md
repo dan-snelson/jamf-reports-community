@@ -7,6 +7,14 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+### Added
+
+- **Groups & Searches** now shows how many members each group has, its description, and flags
+  empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
+  Groups**), with a summary row that also counts policies with no scope. Saved mobile
+  searches spell out their criteria, and the list is no longer cut off at 30. All of it comes
+  from data the app already collects.
+
 ### Changed
 
 - The Devices screen is now **Computers**, matching Jamf Pro's naming. Mobile Fleet keeps

@@ -216,4 +216,214 @@ final class GroupInventoryServiceTests: XCTestCase {
         // File was just written — snapshotDate is within the 36-hour window.
         XCTAssertEqual(snap.cacheSource, .fresh)
     }
+
+    // MARK: - Membership, analysis and policy joins
+
+    private func makeDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("group-inv-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func write(_ content: String, _ name: String, in dir: URL) throws -> URL {
+        let url = dir.appendingPathComponent(name)
+        try Data(content.utf8).write(to: url)
+        return url
+    }
+
+    private let computerJSON = """
+    [{"id": 1, "is_smart": true, "name": "All"}, {"id": 2, "is_smart": false, "name": "Empty"},
+     {"id": 3, "is_smart": false, "name": "Unlisted"}]
+    """
+    private let mobileJSON = #"[{"id": 1, "is_smart": true, "name": "All iPads"}]"#
+
+    func testMembershipJoinsByIdAndType() throws {
+        let dir = try makeDir()
+        defer { remove(dir) }
+        // Group 3 is in no `groups` row; mobile group 1 shares an id with computer group 1.
+        let groups = """
+        [{"groupJamfProId": "1", "groupType": "COMPUTER", "membershipCount": 101,
+          "groupDescription": "  Everything ", "smart": true},
+         {"groupJamfProId": "2", "groupType": "COMPUTER", "membershipCount": 0,
+          "groupDescription": ""},
+         {"groupJamfProId": "1", "groupType": "MOBILE", "membershipCount": 7}]
+        """
+        let snap = GroupInventoryService.load(
+            searchesURL: nil,
+            computerGroupsURL: try write(computerJSON, "c.json", in: dir),
+            mobileGroupsURL: try write(mobileJSON, "m.json", in: dir),
+            groupsURL: try write(groups, "g.json", in: dir))
+
+        let all = snap.classicComputerGroups[0], empty = snap.classicComputerGroups[1]
+        XCTAssertEqual(snap.detail(for: all, .computer).memberCount, 101)
+        XCTAssertEqual(snap.detail(for: all, .computer).description, "Everything")
+        XCTAssertEqual(snap.detail(for: snap.classicMobileGroups[0], .mobile).memberCount, 7)
+        XCTAssertTrue(snap.detail(for: empty, .computer).isEmpty)
+        XCTAssertNil(snap.detail(for: empty, .computer).description)
+        XCTAssertNil(snap.detail(for: snap.classicComputerGroups[2], .computer).memberCount,
+                     "no groups row must read as unknown, not 0")
+        XCTAssertEqual(snap.emptyGroupCount, 1)
+        XCTAssertNil(snap.unusedGroupCount)
+        XCTAssertNil(snap.unscopedPolicyCount)
+    }
+
+    func testEmptyGroupCountIsNilWithoutGroupsSnapshot() throws {
+        let dir = try makeDir()
+        defer { remove(dir) }
+        let snap = GroupInventoryService.load(
+            searchesURL: nil, computerGroupsURL: try write(computerJSON, "c.json", in: dir),
+            mobileGroupsURL: nil)
+        XCTAssertNil(snap.emptyGroupCount)
+    }
+
+    func testGroupsFixtureDecodesAndJoins() throws {
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/jamf-cli-data/groups/groups.json")
+        let dir = try makeDir()
+        defer { remove(dir) }
+        let snap = GroupInventoryService.load(
+            searchesURL: nil,
+            computerGroupsURL: try write(
+                #"[{"id": 67, "name": "Screensaver"}, {"id": 1, "is_smart": true, "name": "A"}]"#,
+                "c.json", in: dir),
+            mobileGroupsURL: nil, groupsURL: fixture)
+        XCTAssertEqual(snap.detail(for: snap.classicComputerGroups[0], .computer).memberCount, 0)
+        XCTAssertEqual(snap.detail(for: snap.classicComputerGroups[1], .computer).memberCount, 101)
+    }
+
+    func testBadFieldCostsThatFieldNotTheList() throws {
+        let dir = try makeDir()
+        defer { remove(dir) }
+        let groups = """
+        [{"groupJamfProId": 1, "groupType": "COMPUTER", "membershipCount": "many",
+          "groupDescription": {"x": 1}},
+         "not a row",
+         {"groupJamfProId": "2", "groupType": "COMPUTER", "membershipCount": 5}]
+        """
+        let snap = GroupInventoryService.load(
+            searchesURL: nil, computerGroupsURL: try write(computerJSON, "c.json", in: dir),
+            mobileGroupsURL: nil, groupsURL: try write(groups, "g.json", in: dir))
+        let first = snap.detail(for: snap.classicComputerGroups[0], .computer)
+        XCTAssertNil(first.memberCount)
+        XCTAssertNil(first.description)
+        XCTAssertEqual(snap.detail(for: snap.classicComputerGroups[1], .computer).memberCount, 5)
+    }
+
+    func testUnusedGroupsAndAnalysisDateFromAnalyzeSnapshot() throws {
+        let dir = try makeDir()
+        defer { remove(dir) }
+        let analysis = """
+        [{"id": "2", "name": "Empty", "memberCount": 0, "type": "static"}, {"id": 99}]
+        """
+        let url = try write(analysis, "group-tools-analyze_20260915T060000.json", in: dir)
+        let snap = GroupInventoryService.load(
+            searchesURL: nil, computerGroupsURL: try write(computerJSON, "c.json", in: dir),
+            mobileGroupsURL: nil, analysisURL: url)
+        XCTAssertEqual(snap.detail(for: snap.classicComputerGroups[1], .computer).unused, true)
+        XCTAssertEqual(snap.detail(for: snap.classicComputerGroups[0], .computer).unused, false)
+        XCTAssertEqual(snap.unusedGroupCount, 1, "ids the group list lacks are not counted")
+        XCTAssertEqual(snap.analysisDate, CloudStorage.snapshotTimestamp(of: url))
+    }
+
+    func testUnreadableAnalysisLeavesUnusedUnknown() throws {
+        let dir = try makeDir()
+        defer { remove(dir) }
+        let snap = GroupInventoryService.load(
+            searchesURL: nil, computerGroupsURL: try write(computerJSON, "c.json", in: dir),
+            mobileGroupsURL: nil, analysisURL: try write("{}", "a.json", in: dir))
+        XCTAssertNil(snap.unusedGroupCount)
+        XCTAssertNil(snap.analysisDate)
+        XCTAssertNil(snap.detail(for: snap.classicComputerGroups[0], .computer).unused)
+    }
+
+    func testUnscopedPolicyCountComesFromNoScopeFindings() throws {
+        let dir = try makeDir()
+        defer { remove(dir) }
+        let policy = """
+        [{"summary": {"total_policies": 3, "enabled": 3, "disabled": 0, "config_findings": 3,
+                      "warnings": 2, "info": 1},
+          "config_findings": [
+            {"severity": "warning", "policy": "A", "policy_id": "1", "check": "no_scope",
+             "detail": ""},
+            {"severity": "warning", "policy": "B", "policy_id": "2", "check": "no_scope",
+             "detail": ""},
+            {"severity": "info", "policy": "C", "policy_id": "3", "check": "no_category",
+             "detail": ""}]}]
+        """
+        let snap = GroupInventoryService.load(
+            searchesURL: nil, computerGroupsURL: try write(computerJSON, "c.json", in: dir),
+            mobileGroupsURL: nil, policyStatusURL: try write(policy, "p.json", in: dir))
+        XCTAssertEqual(snap.unscopedPolicyCount, 2)
+    }
+
+    // MARK: - Newest by stamp
+
+    func testNewestSnapshotIgnoresConflictCopyAndDatesFromFilename() throws {
+        let dir = try makeDir()
+        defer { remove(dir) }
+        let stem = "classic-computer-groups_"
+        _ = try write(#"[{"id": 1, "name": "Old"}]"#, stem + "20260901T060000.json", in: dir)
+        _ = try write(#"[{"id": 1, "name": "New"}]"#, stem + "20260910T060000.json", in: dir)
+        _ = try write(#"[{"id": 1, "name": "Copy"}]"#, stem + "20260910T060000 2.json", in: dir)
+
+        let newest = try XCTUnwrap(FileManager.newestJSONFile(in: dir))
+        let snap = GroupInventoryService.load(
+            searchesURL: nil, computerGroupsURL: newest, mobileGroupsURL: nil)
+        XCTAssertEqual(snap.classicComputerGroups.first?.name, "New")
+        XCTAssertEqual(snap.snapshotDate, CloudStorage.snapshotTimestamp(of: newest))
+    }
+
+    // MARK: - Equality
+
+    /// Same file name and stamp, different rows: the old count-only comparison called these equal.
+    func testSnapshotEqualityComparesContent() throws {
+        let dir = try makeDir()
+        defer { remove(dir) }
+        let url = try write(
+            #"[{"id": 1, "name": "One"}]"#, "a_20260901T060000.json", in: dir)
+        let first = GroupInventoryService.load(
+            searchesURL: nil, computerGroupsURL: url, mobileGroupsURL: nil)
+        _ = try write(#"[{"id": 1, "name": "Two"}]"#, "a_20260901T060000.json", in: dir)
+        let second = GroupInventoryService.load(
+            searchesURL: nil, computerGroupsURL: url, mobileGroupsURL: nil)
+        XCTAssertNotEqual(first, second)
+    }
+
+    // MARK: - Criteria summary
+
+    private func search(_ criteriaJSON: String) throws -> AdvancedMobileSearchRow {
+        let json = #"{"id": "1", "name": "S", "criteria": \#(criteriaJSON)}"#
+        return try JSONDecoder().decode(AdvancedMobileSearchRow.self, from: Data(json.utf8))
+    }
+
+    func testCriteriaSummaryJoinsWithAndOrAndParens() throws {
+        let row = try search("""
+        [{"name": "Model", "priority": 1, "andOr": "and", "searchType": "like", "value": "iPad",
+          "openingParen": true, "closingParen": false},
+         {"name": "Model", "priority": 2, "andOr": "or", "searchType": "like", "value": "iPhone",
+          "openingParen": false, "closingParen": true},
+         {"name": "Last Inventory Update", "priority": 0, "andOr": "and",
+          "searchType": "more than x days ago", "value": "7"}]
+        """)
+        XCTAssertEqual(
+            row.criteriaSummary,
+            "Last Inventory Update more than x days ago 7 AND (Model like iPad "
+                + "OR Model like iPhone)")
+    }
+
+    func testCriteriaSummaryWithNoCriteria() throws {
+        XCTAssertEqual(try search("[]").criteriaSummary, AdvancedMobileSearchRow.noCriteriaText)
+        let missing = try JSONDecoder().decode(
+            AdvancedMobileSearchRow.self, from: Data(#"{"id": "1"}"#.utf8))
+        XCTAssertEqual(missing.criteriaSummary, AdvancedMobileSearchRow.noCriteriaText)
+    }
+
+    func testCriteriaSummaryDefaultsMissingConnectorAndValue() throws {
+        let row = try search("""
+        [{"name": "Passcode Status", "searchType": "is", "value": "Not Present"},
+         {"name": "Supervised", "searchType": "is"}]
+        """)
+        XCTAssertEqual(row.criteriaSummary, "Passcode Status is Not Present AND Supervised is")
+    }
 }

@@ -237,52 +237,122 @@ extension DemoData {
 
     // MARK: - Groups & Searches
 
-    /// 14 computer groups (9 smart, 5 static), 4 mobile device groups and 2
-    /// advanced mobile searches, named for the demo fleet.
-    static let groupInventory = GroupInventoryService.Snapshot(
-        advancedMobileSearches: [
-            AdvancedMobileSearchRow(
-                id: "3", name: "iPads Not Inventoried in 7 Days",
-                criteria: [
-                    searchCriterion("Last Inventory Update", 0, "more than x days ago", "7"),
-                    searchCriterion("Model", 1, "like", "iPad"),
-                ],
-                displayFields: ["Display Name", "Serial Number", "Username",
-                                "Last Inventory Update"],
-                siteId: "-1"),
-            AdvancedMobileSearchRow(
-                id: "5", name: "User-Enrolled Devices",
-                criteria: [searchCriterion("Device Ownership Type", 0, "is", "User Enrollment")],
-                displayFields: ["Display Name", "Username", "OS Version"],
-                siteId: "-1"),
-        ],
-        classicComputerGroups: [
-            ClassicGroupRow(demoID: 1, name: "All Managed Macs", isSmart: true),
-            ClassicGroupRow(demoID: 2, name: "macOS Below 15.3.2", isSmart: true),
-            ClassicGroupRow(demoID: 4, name: "FileVault Not Enabled", isSmart: true),
-            ClassicGroupRow(demoID: 5, name: "Stale - No Check-in 30 Days", isSmart: true),
-            ClassicGroupRow(demoID: 7, name: "CrowdStrike Falcon Not Running", isSmart: true),
-            ClassicGroupRow(demoID: 9, name: "\(complianceBaseline) - Failing Rules",
-                            isSmart: true),
-            ClassicGroupRow(demoID: 11, name: "Google Chrome Not on Latest", isSmart: true),
-            ClassicGroupRow(demoID: 14, name: "Clinical Department Macs", isSmart: true),
-            ClassicGroupRow(demoID: 16, name: "Apple Silicon Macs", isSmart: true),
-            ClassicGroupRow(demoID: 18, name: "Pilot - macOS Updates", isSmart: false),
-            ClassicGroupRow(demoID: 21, name: "Executive Leadership", isSmart: false),
-            ClassicGroupRow(demoID: 23, name: "Loaner Pool", isSmart: false),
-            ClassicGroupRow(demoID: 26, name: "Lab Macs - Meridian East", isSmart: false),
-            ClassicGroupRow(demoID: 29, name: "Exclusions - Patch Deferral", isSmart: false),
-        ],
-        classicMobileGroups: [
-            ClassicGroupRow(demoID: 3, name: "All Managed iPads", isSmart: true),
-            ClassicGroupRow(demoID: 6, name: "Clinical iPads", isSmart: true),
-            ClassicGroupRow(demoID: 8, name: "iOS Below 18.2", isSmart: true),
-            ClassicGroupRow(demoID: 12, name: "Loaner iPhones", isSmart: false),
-        ],
-        decodedAnySource: true,
-        sourceFile: nil,
-        snapshotDate: referenceDate
-    )
+    /// 18 computer groups (11 smart, 7 static), 4 mobile device groups and 2
+    /// advanced mobile searches, named for the demo fleet. Member counts follow the
+    /// fleet facts, and the four groups the Health Audit's analysis calls unused are
+    /// `unusedGroups`.
+    static let groupInventory: GroupInventoryService.Snapshot = {
+        let computerSpecs = computerGroupSpecs
+        let mobileSpecs = mobileGroupSpecs
+        let unusedIDs = Set(unusedGroups.map(\.id))
+        return GroupInventoryService.Snapshot(
+            advancedMobileSearches: demoMobileSearches,
+            classicComputerGroups: computerSpecs.map {
+                ClassicGroupRow(demoID: $0.id, name: $0.name, isSmart: $0.smart)
+            },
+            classicMobileGroups: mobileSpecs.map {
+                ClassicGroupRow(demoID: $0.id, name: $0.name, isSmart: $0.smart)
+            },
+            decodedAnySource: true,
+            sourceFile: nil,
+            snapshotDate: referenceDate,
+            computerDetails: Dictionary(uniqueKeysWithValues: computerSpecs.map {
+                ($0.id, GroupInventoryService.GroupDetail(
+                    memberCount: $0.members, description: $0.description,
+                    unused: unusedIDs.contains(String($0.id))))
+            }),
+            mobileDetails: Dictionary(uniqueKeysWithValues: mobileSpecs.map {
+                ($0.id, GroupInventoryService.GroupDetail(
+                    memberCount: $0.members, description: $0.description, unused: nil))
+            }),
+            analysisDate: groupAnalysisRunDate,
+            unscopedPolicyCount: policyHealth.findings.filter { $0.check == "no_scope" }.count
+        )
+    }()
+
+    private struct GroupSpec {
+        let id: Int
+        let name: String
+        let smart: Bool
+        let members: Int
+        let description: String?
+    }
+
+    private static var computerGroupSpecs: [GroupSpec] {
+        let stale = totalDevices - Int((activeDevicesTrend.last ?? 0).rounded())
+        let unfileVaulted = securityControls.total - securityControls.fileVault
+        let unused = Dictionary(uniqueKeysWithValues: unusedGroups.map { ($0.id, $0) })
+        func unusedSpec(_ id: Int, _ description: String) -> GroupSpec {
+            let group = unused[String(id)]
+            return GroupSpec(
+                id: id, name: group?.name ?? "", smart: group?.type == "smart",
+                members: group?.memberCount ?? 0, description: description)
+        }
+        return [
+            GroupSpec(id: 1, name: "All Managed Macs", smart: true,
+                      members: totalDevices, description: "Every enrolled, managed Mac"),
+            GroupSpec(id: 2, name: "macOS Below 15.3.2", smart: true,
+                      members: 41, description: "Scope for the update nudge policy"),
+            GroupSpec(id: 4, name: "FileVault Not Enabled", smart: true,
+                      members: unfileVaulted, description: nil),
+            GroupSpec(id: 5, name: "Stale - No Check-in 30 Days", smart: true,
+                      members: stale, description: "Feeds Offline Outreach"),
+            GroupSpec(id: 7, name: "CrowdStrike Falcon Not Running", smart: true,
+                      members: 9, description: nil),
+            GroupSpec(id: 9, name: "\(complianceBaseline) - Failing Rules", smart: true,
+                      members: 62, description: "Macs failing one or more baseline rules"),
+            GroupSpec(id: 11, name: "Google Chrome Not on Latest", smart: true,
+                      members: 57, description: nil),
+            GroupSpec(id: 14, name: "Clinical Department Macs", smart: true,
+                      members: 138, description: "Department equals Clinical"),
+            GroupSpec(id: 16, name: "Apple Silicon Macs", smart: true,
+                      members: 447, description: nil),
+            GroupSpec(id: 18, name: "Pilot - macOS Updates", smart: false,
+                      members: 24, description: "Early ring for OS updates"),
+            GroupSpec(id: 21, name: "Executive Leadership", smart: false,
+                      members: 11, description: nil),
+            GroupSpec(id: 23, name: "Loaner Pool", smart: false,
+                      members: 14, description: "Spare Macs at the help desk"),
+            GroupSpec(id: 26, name: "Lab Macs - Meridian East", smart: false,
+                      members: 32, description: nil),
+            GroupSpec(id: 29, name: "Exclusions - Patch Deferral", smart: false,
+                      members: 6, description: "Excluded from automatic patching"),
+            unusedSpec(118, "Superseded by the Pilot - macOS Updates group"),
+            unusedSpec(164, "Beta cohort from last spring"),
+            unusedSpec(207, "Kiosks retired in the Q1 refresh"),
+            unusedSpec(231, "Used for the Chrome 118 rollout"),
+        ]
+    }
+
+    private static var mobileGroupSpecs: [GroupSpec] {
+        [
+            GroupSpec(id: 3, name: "All Managed iPads", smart: true,
+                      members: 19, description: "Every managed iPad"),
+            GroupSpec(id: 6, name: "Clinical iPads", smart: true,
+                      members: 11, description: nil),
+            GroupSpec(id: 8, name: "iOS Below 18.2", smart: true,
+                      members: 3, description: nil),
+            GroupSpec(id: 12, name: "Loaner iPhones", smart: false,
+                      members: 0, description: "Filled when phones are issued"),
+        ]
+    }
+
+    private static let demoMobileSearches = [
+        AdvancedMobileSearchRow(
+            id: "3", name: "iPads Not Inventoried in 7 Days",
+            criteria: [
+                searchCriterion("Last Inventory Update", 0, "more than x days ago", "7"),
+                searchCriterion("Model", 1, "like", "iPad"),
+            ],
+            displayFields: ["Display Name", "Serial Number", "Username",
+                            "Last Inventory Update"],
+            siteId: "-1"),
+        AdvancedMobileSearchRow(
+            id: "5", name: "User-Enrolled Devices",
+            criteria: [searchCriterion("Device Ownership Type", 0, "is", "User Enrollment")],
+            displayFields: ["Display Name", "Username", "OS Version"],
+            siteId: "-1"),
+    ]
 
     private static func searchCriterion(
         _ name: String, _ priority: Int, _ searchType: String, _ value: String

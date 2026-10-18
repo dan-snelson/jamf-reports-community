@@ -58,7 +58,7 @@ final class AccentColourTests: XCTestCase {
                       locateJamfCLI: { nil })
         let school = scratch.appendingPathComponent("school-\(UUID().uuidString).xlsx")
         try await ReportEngine.schoolGenerate(
-            config: config, csvURL: nil, dataDir: scratch, outputURL: school)
+            config: config, dataDir: scratch, outputURL: school)
         return try [pro, school].map { url in
             let archive = try Archive(url: url, accessMode: .read)
             let entry = try XCTUnwrap(archive["xl/styles.xml"])

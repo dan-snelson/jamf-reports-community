@@ -117,26 +117,6 @@ final class SchoolDashboardTests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, "No unexpected failures expected for valid fixture data")
     }
 
-    // MARK: - SchoolCSVDashboard nil-init on empty data
-
-    func testSchoolCSVDashboardNilOnEmpty() {
-        let result = SchoolCSVDashboard(
-            config: ReportConfig(),
-            csvData: Data(),
-            workbook: Workbook()
-        )
-        XCTAssertNil(result)
-    }
-
-    func testSchoolCSVDashboardNonNilOnData() {
-        let result = SchoolCSVDashboard(
-            config: ReportConfig(),
-            csvData: Data("name,serial\nfoo,bar".utf8),
-            workbook: Workbook()
-        )
-        XCTAssertNotNil(result)
-    }
-
     // MARK: - iBeacons fixture data validates expected columns
 
     func testIBeaconsFixtureDecodesExpectedFields() throws {

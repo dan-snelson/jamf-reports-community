@@ -541,32 +541,6 @@ struct SchoolDashboard: Sendable {
     }
 }
 
-// MARK: - SchoolCSVDashboard
-
-/// Writes School CSV-derived sheets (Device Inventory from CSV, Stale Devices, etc.).
-/// Currently a stub that writes nothing: the school-devices snapshot already produces the
-/// Device Inventory sheet through `SchoolDashboard`, and no School CSV column mapping exists.
-struct SchoolCSVDashboard: Sendable {
-    let config: ReportConfig
-    let csvData: Data
-    let workbook: Workbook
-
-    init?(config: ReportConfig, csvData: Data, workbook: Workbook) {
-        guard !csvData.isEmpty else { return nil }
-        self.config = config
-        self.csvData = csvData
-        self.workbook = workbook
-    }
-
-    @discardableResult
-    func writeAll() -> [String] {
-        // CSV-driven school sheets use the same CSVParser as the Jamf Pro side.
-        // For now this stub writes nothing additional — the bridge-driven
-        // school-devices snapshot already produces Device Inventory via SchoolDashboard.
-        return []
-    }
-}
-
 // MARK: - Errors
 
 enum SchoolDashboardError: Error, LocalizedError, SheetSkippable {

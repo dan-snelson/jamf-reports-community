@@ -205,7 +205,7 @@ final class ReportEngineTests: XCTestCase {
 
         do {
             _ = try await ReportEngine.schoolGenerate(
-                config: config, csvURL: nil, dataDir: dataDir, outputURL: outURL
+                config: config, dataDir: dataDir, outputURL: outURL
             )
             XCTFail("Expected snapshotIntegrityViolation, schoolGenerate returned cleanly")
         } catch ReportEngineError.snapshotIntegrityViolation { /* expected */ }

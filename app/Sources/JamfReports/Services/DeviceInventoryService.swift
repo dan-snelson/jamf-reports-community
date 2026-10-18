@@ -1245,6 +1245,21 @@ extension DeviceInventoryRecord {
 
 extension DeviceInventoryService {
 
+    /// The Macs in the newest `computers` snapshot alone, unmerged, for the Protect match; nil
+    /// when the workspace has no such snapshot. The merged Devices load reads far more.
+    static func cachedComputerRecords(profile: String) -> [DeviceInventoryRecord]? {
+        guard let root = validatedWorkspaceRoot(profile: profile) else { return nil }
+        var warnings: [String] = []
+        let config = loadConfigHints(root: root, warnings: &warnings)
+        guard let url = latestCachedJSON(
+            dataDir: config.jamfCLIDataDir,
+            names: ["computers-list", "computers_list", "computers"],
+            root: root
+        ) else { return nil }
+        return jsonArray(from: url, root: root, warnings: &warnings)
+            .map { recordFromComputer($0, source: url.lastPathComponent) }
+    }
+
     /// The most rows read from one inventory CSV.
     static let maxCSVRows = 10_000
 

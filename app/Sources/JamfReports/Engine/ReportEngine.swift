@@ -212,15 +212,16 @@ struct ReportEngine: Sendable {
         let outputDir = outputURL.deletingLastPathComponent()
         let stem = stemFromURL(outputURL)
         if config.output?.isArchiveEnabled == true {
-            let archiveDir = resolvedArchiveDir(profile: profile, outputDir: outputDir, onLine: onLine)
-            let keep = config.output?.resolvedKeepLatestRuns ?? 10
-            archiveOldRuns(
-                outputDir: outputDir,
-                archiveDir: archiveDir,
-                stem: stem,
-                keep: keep,
-                onLine: onLine
-            )
+            if let archiveDir = resolvedArchiveDir(profile: profile, onLine: onLine) {
+                let keep = config.output?.resolvedKeepLatestRuns ?? 10
+                archiveOldRuns(
+                    outputDir: outputDir,
+                    archiveDir: archiveDir,
+                    stem: stem,
+                    keep: keep,
+                    onLine: onLine
+                )
+            }
         }
 
         if let summariesDir = resolvedSummariesDir(profile: profile, onLine: onLine) {
@@ -1406,22 +1407,20 @@ struct ReportEngine: Sendable {
 
     /// Routes through `WorkspacePaths.archiveDir(for:)` so that config-supplied
     /// absolute archive paths are subject to the workspace containment check.
-    /// Falls back to `<outputDir>/archive` on failure and logs a warning — archive
-    /// rotation is a non-fatal post-write side effect.
+    /// Nil, with one `[warn]`, when the folder is refused: rotation is skipped rather than
+    /// moving reports into a folder the path rules did not confine.
     private func resolvedArchiveDir(
         profile: String,
-        outputDir: URL,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
-    ) -> URL {
+    ) -> URL? {
         do {
             return try WorkspacePaths.archiveDir(for: profile)
         } catch {
-            let fallback = outputDir.appendingPathComponent("archive", isDirectory: true)
             let msg = "[warn] could not resolve archive_dir for '\(profile)': " +
-                      "\(error.localizedDescription) — using \(fallback.lastPathComponent)"
+                      "\(error.localizedDescription) — run rotation skipped"
             AppLogger.report.warning("\(msg, privacy: .public)")
             onLine?(.init(timestamp: Date(), level: .warn, text: msg))
-            return fallback
+            return nil
         }
     }
 
@@ -3536,8 +3535,8 @@ struct ReportEngine: Sendable {
     func resolveOutputURL(
         stem: String, profile: String? = nil,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
-    ) -> URL {
-        let outDir = outputDirectory(profile: profile, onLine: onLine)
+    ) throws -> URL {
+        let outDir = try outputDirectory(profile: profile, onLine: onLine)
 
         // Include the profile in the filename so reports remain attributable
         // to their tenant once moved out of the workspace folder.
@@ -3568,12 +3567,15 @@ struct ReportEngine: Sendable {
     }
 
     /// The report folder from `WorkspacePaths.reportsDir`, so every report writer agrees on it.
-    /// With no workspace to resolve against, the value is used as typed (relative to the
-    /// working directory), as before.
+    /// With no profile, the value is used as typed (relative to the working directory), as
+    /// before; a profile whose folder cannot be resolved throws.
     private func outputDirectory(
         profile: String?, onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
-    ) -> URL {
-        if let profile, let dir = WorkspacePaths.reportsDir(for: profile, onLine: onLine) {
+    ) throws -> URL {
+        if let profile {
+            guard let dir = WorkspacePaths.reportsDir(for: profile, onLine: onLine) else {
+                throw ReportEngineError.reportFolderUnavailable(profile)
+            }
             return dir
         }
         let rawDir = config.output?.resolvedOutputDir ?? WorkspacePaths.generatedReportsDirName
@@ -4211,6 +4213,9 @@ struct ReportEngine: Sendable {
 
 enum ReportEngineError: Error, LocalizedError {
     case noCachedData(URL)
+    /// No report folder for `profile`: its workspace is missing, or `Generated Reports` in it is a
+    /// link or otherwise refused.
+    case reportFolderUnavailable(String)
     case jamfCLINotFound
     case invalidProfile(String)
     /// config.yaml's `jamf_cli.profile` names a profile other than the one the run is for.
@@ -4253,6 +4258,10 @@ enum ReportEngineError: Error, LocalizedError {
         switch self {
         case .noCachedData(let dir):
             return "No cached jamf-cli data found in \(dir.path). Run 'collect' first."
+        case .reportFolderUnavailable(let profile):
+            return "No usable report folder for profile '\(ConfigSchema.displayText(profile))': "
+                + "output.output_dir was refused and \(WorkspacePaths.generatedReportsDirName) in "
+                + "the workspace is missing or is a link. Nothing was written."
         case .jamfCLINotFound:
             return "jamf-cli not found on PATH. Install it via Homebrew or from GitHub."
         case .invalidProfile(let p):

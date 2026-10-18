@@ -847,7 +847,7 @@ final class ReportEngineTests: XCTestCase {
 
     // MARK: - initializeWorkspace default config
 
-    func testInitializeWorkspaceDefaultConfigLeavesOptionalColumnsOut() throws {
+    func testInitializeWorkspaceDefaultConfigHasNoColumnsBlock() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ReportEngineTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -858,14 +858,7 @@ final class ReportEngineTests: XCTestCase {
 
         let configURL = root.appendingPathComponent("init-default/config.yaml")
         let text = try String(contentsOf: configURL, encoding: .utf8)
-        XCTAssertTrue(text.contains("computer_name: \"\""))
-        let optionalColumnKeys = [
-            "full_name", "asset_tag", "building", "position", "last_logged_in_user",
-            "recovery_lock", "battery_health", "entra_sso_status", "purchase_date", "last_inventory",
-        ]
-        for key in optionalColumnKeys {
-            XCTAssertFalse(text.contains("\(key):"), "\(key) must not be written empty")
-        }
+        XCTAssertFalse(text.contains("columns:"), "columns is retired")
         XCTAssertNoThrow(try ConfigLoader.load(from: configURL))
     }
 }

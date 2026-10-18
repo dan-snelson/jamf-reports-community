@@ -565,14 +565,11 @@ final class CLIBridge {
     }
 
     /// Fluent helper for the most common CLI flows the GUI surfaces.
-    /// `csvPath` is ignored since 2.11 (the CSV engine is gone); it goes when the last caller
-    /// that still passes it (onboarding) does.
     /// `aiNarrative` (F3) is set only by GUI-generate call sites; every other
     /// caller leaves the nil default. `htmlWithWorkbook: false` is for the one caller that
     /// writes the HTML report itself in the same run (`generateAll`), so it is written once.
     func generate(
         profile: String,
-        csvPath: String?,
         template: any ReportTemplate = FullInstanceTemplate(),
         outputDir: URL? = nil,
         aiNarrative: String? = nil,
@@ -870,7 +867,6 @@ final class CLIBridge {
     /// whole run holds the tick lock (`holdingGenerate`).
     func collectThenGenerate(
         profile: String,
-        csvPath: String?,
         narrative: (() async -> String?)? = nil,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async throws -> Int32 {
@@ -885,7 +881,7 @@ final class CLIBridge {
             generate: { aiNarrative in
                 onLine(.init(timestamp: Date(), level: .info,
                              text: "[info] generating report from cached snapshots"))
-                return try await self.generate(profile: profile, csvPath: csvPath,
+                return try await self.generate(profile: profile,
                                                aiNarrative: aiNarrative, onLine: onLine)
             }
         )
@@ -2114,61 +2110,6 @@ final class CLIBridge {
             sizeBytes += Int64(values.fileSize ?? 0)
         }
         return (fileCount, sizeBytes)
-    }
-
-    /// `csvPath` is ignored since 2.11; it goes with the Config screen's last caller.
-    func check(profile: String, csvPath: String?, onLine: @Sendable @escaping (LogLine) -> Void) async throws -> Int32 {
-        guard ProfileService.isValid(profile) else {
-            onLine(.init(timestamp: Date(), level: .fail, text: "[error] invalid profile name: \(profile)"))
-            throw CLIBridgeError.invalidProfile(profile)
-        }
-        guard await authGuard(profile: profile, onLine: onLine) else {
-            return Self.exitCodeUnauthorized
-        }
-        guard let workspace = ProfileService.workspaceURL(for: profile) else {
-            onLine(.init(timestamp: Date(), level: .fail, text: "[error] no workspace for profile '\(profile)'"))
-            throw CLIBridgeError.workspaceMissing(profile: profile)
-        }
-        let configURL = workspace.appendingPathComponent("config.yaml")
-        guard FileManager.default.fileExists(atPath: configURL.path) else {
-            onLine(.init(timestamp: Date(), level: .fail,
-                         text: "[error] config.yaml not found — run workspace-init first"))
-            // Distinct detail: "may be corrupt" misdescribes a file that
-            // simply does not exist.
-            throw CLIBridgeError.configLoadFailed(
-                path: configURL.path,
-                detail: "file not found — initialize the workspace first"
-            )
-        }
-        do {
-            let config = try ConfigLoader.load(from: configURL)
-            let cliProfile = config.jamfCli?.resolvedProfile ?? profile
-            onLine(.init(timestamp: Date(), level: .ok,
-                         text: "[ok] config.yaml decoded successfully"))
-            onLine(.init(timestamp: Date(), level: .ok,
-                         text: "[ok] jamf_cli.profile: \(cliProfile.isEmpty ? "(not set)" : cliProfile)"))
-            let resolvedDataDir = try? WorkspacePaths.dataDir(for: profile)
-            let dataDir = resolvedDataDir ?? workspace.appendingPathComponent("jamf-cli-data")
-            if resolvedDataDir == nil {
-                onLine(.init(timestamp: Date(), level: .warn,
-                             text: "[warn] data_dir path resolution failed — using fallback jamf-cli-data/"))
-            }
-            let snapshotCount = (try? FileManager.default.contentsOfDirectory(
-                atPath: dataDir.path))?.count ?? 0
-            let dataDirLevel: LogLevel = resolvedDataDir != nil ? .ok : .warn
-            onLine(.init(timestamp: Date(), level: dataDirLevel,
-                         text: "[\(dataDirLevel == .ok ? "ok" : "warn")] cached snapshots in data_dir: \(snapshotCount)"))
-
-            return 0
-        } catch {
-            onLine(.init(timestamp: Date(), level: .fail,
-                         text: "[error] \(error.localizedDescription)"))
-            throw CLIBridgeError.configLoadFailed(
-                path: workspace.appendingPathComponent("config.yaml").path,
-                detail: (error as? ConfigLoader.LoadError)?.keyPathDetail
-                    ?? ConfigLoader.describeDecodingFailure(error)
-            )
-        }
     }
 
     func initializeWorkspace(

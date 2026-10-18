@@ -167,7 +167,7 @@ final class RiskScoringServiceTests: XCTestCase {
             lastInventory: "2026-05-10T12:00:00Z", daysSinceContact: 2,
             stale: false, fileVault: "Encrypted", sip: "Enabled",
             firewall: "Enabled", gatekeeper: "Enabled",
-            bootstrapToken: "Escrowed", failedRules: 0,
+            bootstrapToken: "Escrowed",
             patchFailures: [], source: "jamf-cli"
         )
         let disconnectedInput = RiskScoringService.Input.from(
@@ -237,7 +237,6 @@ final class RiskScoringServiceTests: XCTestCase {
             firewall: "Disabled",   // <- only failing one
             gatekeeper: "Enabled",
             bootstrapToken: "Escrowed",
-            failedRules: 0,
             patchFailures: [],
             source: "jamf-cli"
         )
@@ -312,7 +311,7 @@ final class RiskScoringServiceTests: XCTestCase {
             lastInventory: "2026-05-10T12:00:00Z", daysSinceContact: 1,
             stale: false, fileVault: fileVault, sip: sip,
             firewall: firewall, gatekeeper: gatekeeper,
-            bootstrapToken: "Escrowed", failedRules: 0,
+            bootstrapToken: "Escrowed",
             patchFailures: [], source: "jamf-cli"
         )
     }

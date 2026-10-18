@@ -280,13 +280,13 @@ final class HTMLWithWorkbookGUITests: XCTestCase {
             try fixture.writeConfig(withWorkbookOn)
             let bridge = CLIBridge()
             let first = try await bridge.generate(
-                profile: fixture.profile, csvPath: nil, onLine: CLIBridge.noOpOnLine)
+                profile: fixture.profile, onLine: CLIBridge.noOpOnLine)
             XCTAssertEqual(first, 0)
             XCTAssertEqual(fixture.files(ending: ".html").count, 1)
 
             let other = fixture.root.appendingPathComponent("other", isDirectory: true)
             let second = try await bridge.generate(
-                profile: fixture.profile, csvPath: nil, outputDir: other,
+                profile: fixture.profile, outputDir: other,
                 htmlWithWorkbook: false, onLine: CLIBridge.noOpOnLine)
             XCTAssertEqual(second, 0)
             XCTAssertEqual(fixture.files(in: other, ending: ".xlsx").count, 1)

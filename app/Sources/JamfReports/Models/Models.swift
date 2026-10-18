@@ -484,7 +484,6 @@ struct DeviceInventoryRecord: Identifiable, Sendable, Hashable {
     var firewall: String
     var gatekeeper: String
     var bootstrapToken: String
-    var failedRules: Int
     var patchFailures: [DevicePatchFailure]
     var source: String
     /// Whether the internal volume is hardware-encrypted (`HardwareEncryption`); nil unknown.
@@ -569,7 +568,6 @@ struct DeviceInventoryRecord: Identifiable, Sendable, Hashable {
         firewall = firstNonEmpty(firewall, other.firewall)
         gatekeeper = firstNonEmpty(gatekeeper, other.gatekeeper)
         bootstrapToken = firstNonEmpty(bootstrapToken, other.bootstrapToken)
-        failedRules = max(failedRules, other.failedRules)
         // Sources that disagree are not a guess either way (the hardware index's rule).
         if let mine = hardwareEncrypted, let theirs = other.hardwareEncrypted {
             hardwareEncrypted = mine == theirs ? mine : nil
@@ -612,7 +610,6 @@ struct DeviceInventoryRecord: Identifiable, Sendable, Hashable {
             firewall: "",
             gatekeeper: "",
             bootstrapToken: "",
-            failedRules: 0,
             patchFailures: [],
             source: source
         )

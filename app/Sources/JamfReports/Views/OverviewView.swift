@@ -1635,7 +1635,8 @@ struct OverviewView: View {
                     }
                     Divider().background(Theme.Colors.hairline)
                     HStack {
-                        Text("Use Computers to inspect individual records and filter by OS version.")
+                        Text("Use Computers to inspect individual records and filter by OS "
+                             + "version.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                         Spacer()

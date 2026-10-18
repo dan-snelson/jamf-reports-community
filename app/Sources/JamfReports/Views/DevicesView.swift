@@ -1367,7 +1367,8 @@ struct DevicesView: View {
         }
         guard let lookup = detailLookupID(for: device) else {
             deviceDetail = nil
-            deviceDetailState = .unavailable("Computer detail needs a serial number or computer name.")
+            deviceDetailState = .unavailable(
+                "Computer detail needs a serial number or computer name.")
             return
         }
 

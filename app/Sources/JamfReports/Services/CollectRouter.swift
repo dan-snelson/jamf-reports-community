@@ -161,7 +161,7 @@ enum CollectRouter {
                              text: "[skip] protect: \(reason) — Protect not collected"))
                 return
             }
-            // Protect augments Pro; failure is non-fatal — Pro run already succeeded.
+            // Protect augments Pro: a failure does not fail the run, but reads as Partial.
             let protectProfile = config?.protect?.resolvedProfile ?? profile
             guard let dataDir = try? workspacePaths.dataDir(for: profile) else {
                 onLine(.init(timestamp: Date(), level: .warn,
@@ -174,7 +174,7 @@ enum CollectRouter {
                 try await protectCollect(protectProfile, dataDir, onLine)
             } catch {
                 onLine(.init(timestamp: Date(), level: .warn,
-                    text: "[warn] protect collect failed (non-fatal): \(error.localizedDescription)"))
+                    text: "[partial] protect collect failed: \(error.localizedDescription)"))
             }
         }
     }

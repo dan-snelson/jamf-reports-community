@@ -51,6 +51,8 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
+  in Run History instead of reading as a clean run.
 - A scheduled run's same-day retry after a partial run now collects again instead of reporting
   "already collected today" and counting as a success.
 - A Jamf Protect or Jamf School source that fails to collect now makes the run read as Partial,

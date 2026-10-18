@@ -295,7 +295,9 @@ final class CollectRouterTests: XCTestCase {
             schoolCollect: { _, _, _ in },
             protectCollect: { _, _, _ in throw NSError(domain: "test", code: 42) },
             onLine: { line in
-                if line.level == .warn { warnEmitted.set(true) }
+                if line.level == .warn, line.text.hasPrefix("[partial] protect collect failed") {
+                    warnEmitted.set(true)
+                }
             }
         )
 

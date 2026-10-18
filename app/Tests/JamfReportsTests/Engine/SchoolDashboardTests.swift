@@ -469,6 +469,23 @@ final class SchoolDashboardTests: XCTestCase {
                        "days-since-checkin parses jamf-cli's \"yyyy-MM-dd HH:mm:ss\" format")
     }
 
+    func testStaleDevicesLeavesOutACheckinThatDoesNotRead() throws {
+        let json = """
+        [{"name": "Odd-1", "serialNumber": "S1", "lastCheckin": "yesterday-ish"},
+         {"name": "Blank-2", "serialNumber": "S2", "lastCheckin": ""},
+         {"name": "Old-3", "serialNumber": "S3", "lastCheckin": "\(schoolCheckinString(daysAgo: 60))"}]
+        """
+        let dataDir = try tempDataDir(writing: json, kind: "school-devices")
+        let workbook = Workbook()
+        let dash = SchoolDashboard(config: ReportConfig(), dataDir: dataDir, workbook: workbook)
+        XCTAssertNoThrow(try dash.writeSchoolStaleDevices())
+        let cells = strings(in: "Stale Devices", of: workbook)
+        XCTAssertTrue(cells.contains("Old-3"))
+        XCTAssertFalse(cells.contains("Odd-1"), "an unknown age is not 0 days or stale")
+        XCTAssertFalse(cells.contains("Blank-2"))
+        XCTAssertEqual(ints(in: "Stale Devices", of: workbook).filter { $0 == 0 }, [])
+    }
+
     func testClassesCountOutsideIntRangeReadsAsZero() throws {
         let json = #"[{"name": "A", "studentCount": 1e30, "teacherCount": 2.9}]"#
         let dataDir = try tempDataDir(writing: json, kind: "school-classes")

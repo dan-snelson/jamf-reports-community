@@ -97,6 +97,15 @@ final class EASheetsTests: XCTestCase {
         XCTAssertEqual(try row(grid, "50")[2], "OK")
     }
 
+    func testVersionTabOrdersASuffixedPatchAndAPreReleaseLikeTheInstaller() throws {
+        try results([("A", "OS", "15.7.2"), ("B", "OS", "15.7.3b"), ("C", "OS", "15.8-rc1"),
+                     ("D", "OS", "15.8")])
+        let (wb, _) = try write([CustomEAConfig(name: "OS", column: "OS", type: .version)])
+        let grid = try grid(wb, "OS")
+        let versions = grid.compactMap { $0[0] }.filter { $0.first?.isNumber == true }
+        XCTAssertEqual(versions, ["15.8", "15.8-rc1", "15.7.3b", "15.7.2"])
+    }
+
     func testVersionTabMarksCurrentAndSortsNewestFirst() throws {
         try results([("A", "OS", "15.7"), ("B", "OS", "26.1"), ("C", "OS", "26.1")])
         let (wb, _) = try write([

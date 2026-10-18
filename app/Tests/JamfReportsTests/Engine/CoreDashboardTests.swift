@@ -413,6 +413,38 @@ final class CoreDashboardTests: XCTestCase {
         XCTAssertNoThrow(try dash.writePackageLifecycle())
     }
 
+    func testPackageAgeIsUnknownForADateThatDoesNotRead() throws {
+        let dataDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-test-\(UUID().uuidString)")
+        let dir = dataDir.appendingPathComponent("packages", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        createdTempDirs.append(dataDir)
+        let slash = DateFormatter()
+        slash.locale = Locale(identifier: "en_US_POSIX")
+        slash.dateFormat = "MM/dd/yyyy HH:mm:ss"
+        let recent = slash.string(from: Date().addingTimeInterval(-5 * 86_400 - 3_600))
+        let rows: [[String: Any]] = [
+            ["packageName": "Reads", "fileName": "a.pkg", "size": 1_048_576, "uploadDate": recent],
+            ["packageName": "Garbled", "fileName": "b.pkg", "size": 1_048_576,
+             "uploadDate": "sometime in May"],
+        ]
+        try JSONSerialization.data(withJSONObject: rows)
+            .write(to: dir.appendingPathComponent("packages_20261004T100000.json"))
+        let workbook = Workbook()
+        let dash = CoreDashboard(config: ReportConfig(), dataDir: dataDir, workbook: workbook)
+        try dash.writePackageLifecycle()
+        let cells = (workbook.sheet(named: "Package Lifecycle")?.dedupedCells ?? [])
+        let strings = cells.compactMap { cell -> String? in
+            if case let .string(s) = cell.value { return s } else { return nil }
+        }
+        let ints = cells.compactMap { cell -> Int? in
+            if case let .int(i) = cell.value { return i } else { return nil }
+        }
+        XCTAssertTrue(strings.contains("0-30 days"), "the slash form reads")
+        XCTAssertTrue(strings.contains("Unknown"), "a garbled date has no age bucket")
+        XCTAssertTrue(ints.contains(5))
+    }
+
     // MARK: - Patch Velocity note row (2.6 Fix 2)
 
     /// Seed one dated `patch-status` snapshot into `dataDir/patch-status/`.

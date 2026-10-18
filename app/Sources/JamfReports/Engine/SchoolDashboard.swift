@@ -422,10 +422,11 @@ struct SchoolDashboard: Sendable {
     func writeSchoolStaleDevices() throws {
         let raw = try loadSchoolJSON(names: ["school-devices", "school_devices"])
         let items = flattenSchoolList(raw)
-        let stale = items.filter { item -> Bool in
+        // A check-in that does not read is unknown, not stale, so the device is left out.
+        let stale = items.compactMap { item -> (item: [String: Any], days: Int)? in
             let checkin = stringField(item, ["lastCheckin", "last_checkin", "lastContactTime"])
-            let days = daysSince(checkin)
-            return days > staleThreshold
+            guard let days = daysSince(checkin), days > staleThreshold else { return nil }
+            return (item, days)
         }
         let ws = workbook.addSheet("Stale Devices")
         ws.setColumnWidth(0, 0, 28)
@@ -440,12 +441,12 @@ struct SchoolDashboard: Sendable {
         let hdrs = ["Device Name", "Serial", "Last Checkin", "Days Since Checkin"]
         for (col, h) in hdrs.enumerated() { ws.write(h, row: row, col: col, format: .header) }
         row += 1
-        for item in stale {
+        for (item, days) in stale {
             let checkin = stringField(item, ["lastCheckin", "last_checkin", "lastContactTime"])
             ws.write(stringField(item, ["name", "deviceName"]), row: row, col: 0, format: .cell)
             ws.write(stringField(item, ["serialNumber", "serial"]), row: row, col: 1, format: .cell)
             ws.write(checkin, row: row, col: 2, format: .cell)
-            ws.write(daysSince(checkin), row: row, col: 3, format: .red)
+            ws.write(days, row: row, col: 3, format: .red)
             row += 1
         }
     }
@@ -523,10 +524,8 @@ struct SchoolDashboard: Sendable {
     }
 
     /// jamf-cli's `lastCheckin` is "yyyy-MM-dd HH:mm:ss", which `DateParser` reads.
-    private func daysSince(_ dateString: String) -> Int {
-        guard !dateString.isEmpty else { return 0 }
-        guard let date = DateParser().parse(dateString) else { return 0 }
-        return Int(Date().timeIntervalSince(date) / 86400)
+    private func daysSince(_ dateString: String) -> Int? {
+        DateParser().parse(dateString).map { Int(Date().timeIntervalSince($0) / 86400) }
     }
 
     /// The platform and major version in jamf-cli's `os`, which reads "Prefix Version": "macOS

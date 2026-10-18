@@ -918,7 +918,11 @@ final class ReportEngineTests: XCTestCase {
         let configURL = root.appendingPathComponent("init-default/config.yaml")
         let text = try String(contentsOf: configURL, encoding: .utf8)
         XCTAssertTrue(text.contains("computer_name: \"\""))
-        for key in ConfigState.optionalColumnKeys {
+        let optionalColumnKeys = [
+            "full_name", "asset_tag", "building", "position", "last_logged_in_user",
+            "recovery_lock", "battery_health", "entra_sso_status", "purchase_date", "last_inventory",
+        ]
+        for key in optionalColumnKeys {
             XCTAssertFalse(text.contains("\(key):"), "\(key) must not be written empty")
         }
         XCTAssertNoThrow(try ConfigLoader.load(from: configURL))

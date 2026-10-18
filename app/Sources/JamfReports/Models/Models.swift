@@ -381,18 +381,6 @@ struct BackupRecord: Identifiable, Sendable, Hashable {
     }
 }
 
-// MARK: - Column mappings (Config screen)
-
-struct ColumnMapping: Identifiable, Sendable {
-    enum Status: String, Sendable { case ok, warn, fail, skip }
-    var id: String { key }
-    let key: String
-    let label: String
-    var value: String
-    var required: Bool
-    var status: Status
-}
-
 // MARK: - Custom EAs
 
 struct CustomEA: Identifiable, Sendable {

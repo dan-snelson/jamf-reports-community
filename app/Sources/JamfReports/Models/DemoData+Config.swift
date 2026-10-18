@@ -11,9 +11,6 @@ extension DemoData {
     /// this is the only config a demo shows.
     static let configState: ConfigState = {
         var state = ConfigState.defaultState
-        for mapping in columnMappings {
-            state.columns[mapping.key] = mapping.value
-        }
         state.securityAgents = securityAgents.map { agent in
             ConfigSecurityAgent(
                 name: agent.name, column: agent.column,

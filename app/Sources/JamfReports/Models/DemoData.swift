@@ -248,23 +248,6 @@ enum DemoData {
         max(totalDevices - index * 37, 0)
     }
 
-    static let columnMappings: [ColumnMapping] = [
-        .init(key: "computer_name",     label: "Computer Name",      value: "Computer Name", required: true, status: .ok),
-        .init(key: "serial_number",     label: "Serial Number",      value: "Serial Number", required: true, status: .ok),
-        .init(key: "operating_system",  label: "macOS Version",      value: "Operating System Version", required: false, status: .ok),
-        .init(key: "last_checkin",      label: "Last Check-in",      value: "Last Inventory Update",    required: false, status: .ok),
-        .init(key: "department",        label: "Department",         value: "Department",               required: false, status: .ok),
-        .init(key: "email",             label: "Primary Email",      value: "Email Address",            required: false, status: .ok),
-        .init(key: "filevault",         label: "FileVault Status",   value: "FileVault 2 Status",     required: false, status: .ok),
-        .init(key: "sip",               label: "SIP",                value: "System Integrity Protection", required: false, status: .ok),
-        .init(key: "firewall",          label: "Firewall",           value: "Firewall Enabled",          required: false, status: .ok),
-        .init(key: "gatekeeper",        label: "Gatekeeper",         value: "Gatekeeper",                required: false, status: .ok),
-        .init(key: "secure_boot",       label: "Secure Boot Level",  value: "Secure Boot Level",         required: false, status: .ok),
-        .init(key: "bootstrap_token",   label: "Bootstrap Token",    value: "Bootstrap Token Escrowed",  required: false, status: .warn),
-        .init(key: "disk_percent_full", label: "Disk Usage %",       value: "Boot Drive Percentage Full", required: false, status: .ok),
-        .init(key: "manager",           label: "Manager (EA)",       value: "",                          required: false, status: .skip),
-    ]
-
     static let customEAs: [CustomEA] = [
         .init(name: "Disk Usage", column: "Boot Drive Percentage Full", type: .percentage, warn: 80, crit: 90),
         .init(name: "macOS Version", column: "Operating System Version", type: .version, currentVersions: ["15.4", "15.3.2"]),

@@ -79,7 +79,7 @@ final class CSVEAAdoptionTests: XCTestCase {
         let root = try temporaryWorkspaceRoot()
         let profile = "ea-adopt-map-\(UUID().uuidString.lowercased())"
         try writeConfig(
-            "columns:\n  # names\n  computer_name: Name\n"
+            "output:\n  # names\n  output_dir: Reports\n"
                 + "custom_eas:\n  Battery:\n    column: Battery\nsecurity_agents: []\n",
             profile: profile, root: root)
         let proposal = ProposedEA(

@@ -8,9 +8,6 @@ final class ConfigServiceTests: XCTestCase {
         let profile = "config-test-\(UUID().uuidString.lowercased())"
         try writeConfig(
             """
-            columns:
-              computer_name: Computer Name
-              serial_number: Serial Number
             security_agents:
               - name: Falcon
                 column: Falcon Status
@@ -47,7 +44,6 @@ final class ConfigServiceTests: XCTestCase {
         state.keepLatestRuns = "3"
         state.jamfCLIUseCachedData = false
         state.outputDir = "Updated Reports"
-        state.columns["computer_name"] = "Updated Computer Name"
 
         _ = try ConfigService.save(
             profile: profile,
@@ -61,7 +57,6 @@ final class ConfigServiceTests: XCTestCase {
         XCTAssertEqual(reloaded.state.keepLatestRuns, "3")
         XCTAssertFalse(reloaded.state.jamfCLIUseCachedData)
         XCTAssertEqual(reloaded.state.outputDir, "Updated Reports")
-        XCTAssertEqual(reloaded.state.columns["computer_name"], "Updated Computer Name")
         XCTAssertFalse(reloaded.state.timestampOutputs)
         XCTAssertEqual(reloaded.state.securityAgents.first?.name, "Falcon")
         XCTAssertEqual(reloaded.state.customEAs.first?.trueValue, "Encrypted")
@@ -269,67 +264,84 @@ final class ConfigServiceTests: XCTestCase {
         XCTAssertTrue(text.contains(eas.dropLast()), text)
     }
 
-    func testMobileColumnsPersistAndPreserveSiblings() throws {
+    /// `columns` and `mobile_columns` are retired blocks (2.11): a save removes both whole,
+    /// copies the file as it was first, says so, and keeps every other top-level key and
+    /// comment. The second save has nothing left to remove.
+    func testASaveRemovesTheRetiredColumnBlocksAndKeepsEverythingElse() throws {
         let root = try temporaryWorkspaceRoot()
-        let profile = "mobile-cols-\(UUID().uuidString.lowercased())"
+        let profile = "retired-columns-\(UUID().uuidString.lowercased())"
         try writeConfig(
             """
+            # kept: a comment above the blocks
             columns:
-              computer_name: Computer Name
+              computer_name: Computer Name # dropped with its block
               serial_number: Serial Number
+            custom_label: keep me
             mobile_columns:
               device_name: Display Name
-            custom_label: keep me
+            thresholds:
+              stale_device_days: 45
             """,
             profile: profile,
             root: root
         )
 
         let loaded = try ConfigService.load(profile: profile, workspaceRoot: root)
-        XCTAssertEqual(loaded.state.mobileColumns["device_name"], "Display Name")
-
         var state = loaded.state
-        state.mobileColumns["device_name"] = "Mobile Display Name"
-        state.mobileColumns["operating_system"] = "OS Version"
-        state.columns["computer_name"] = "Updated Computer Name"
+        state.staleDeviceDays = "61"
+        let saved = try ConfigService.save(
+            profile: profile, state: state, existingDocument: loaded.document,
+            workspaceRoot: root)
 
-        _ = try ConfigService.save(
-            profile: profile,
-            state: state,
-            existingDocument: loaded.document,
-            workspaceRoot: root
-        )
+        XCTAssertEqual(saved.report.removedRetiredKeys, ["columns", "mobile_columns"])
+        let text = try savedText(profile: profile, root: root)
+        for gone in ["columns", "computer_name", "device_name", "dropped with its block"] {
+            XCTAssertFalse(text.contains(gone), gone)
+        }
+        for kept in ["# kept: a comment above the blocks", "custom_label: keep me",
+                     "stale_device_days: 61"] {
+            XCTAssertTrue(text.contains(kept), kept)
+        }
 
-        let reloaded = try ConfigService.load(profile: profile, workspaceRoot: root)
-        XCTAssertEqual(reloaded.state.mobileColumns["device_name"], "Mobile Display Name")
-        XCTAssertEqual(reloaded.state.mobileColumns["operating_system"], "OS Version")
-        XCTAssertEqual(reloaded.state.columns["computer_name"], "Updated Computer Name")
+        let copy = try XCTUnwrap(saved.report.backupName, "the blocks are backed up first")
+        let backup = try String(
+            contentsOf: ConfigService.configURL(for: profile, workspaceRoot: root)
+                .deletingLastPathComponent().appendingPathComponent(copy),
+            encoding: .utf8)
+        XCTAssertTrue(backup.contains("computer_name: Computer Name"))
+        XCTAssertTrue(backup.contains("device_name: Display Name"))
+        XCTAssertEqual(saved.report.notes, [
+            "Settings the app no longer reads were removed from config.yaml: "
+                + "columns (since 2.11), mobile_columns (since 2.11). "
+                + "A copy of the file as it was is at \(copy).",
+        ])
 
-        // The unmanaged top-level key must survive the round-trip.
-        let savedText = try String(
-            contentsOf: ConfigService.configURL(for: profile, workspaceRoot: root),
-            encoding: .utf8
-        )
-        XCTAssertTrue(savedText.contains("custom_label: keep me"))
-        XCTAssertTrue(savedText.contains("mobile_columns:"))
-        XCTAssertTrue(savedText.contains("device_name: Mobile Display Name"))
+        let again = try ConfigService.save(
+            profile: profile, state: saved.state, existingDocument: saved.document,
+            workspaceRoot: root)
+        XCTAssertEqual(again.report.removedRetiredKeys, [])
+        XCTAssertNil(again.report.backupName)
+        XCTAssertEqual(ConfigService.retiredKeyRemover(inBlock: "columns"), "Config save",
+                       "Config Doctor names the save that removes it")
     }
 
-    // MARK: - Extra column keys (listed on the Config screen after the base columns)
+    /// A one-segment retired path is the whole top-level block; it used to be read as a key
+    /// named `columns` inside `columns`.
+    func testDropRetiredKeysRemovesAWholeTopLevelBlockOnlyWhenListed() throws {
+        var mapping = try XCTUnwrap(YAMLCodec.decode("""
+            columns:
+              columns: nested
+              serial_number: Serial Number
+            thresholds:
+              stale_device_days: 45
+            """).root.mapping)
+        XCTAssertEqual(ConfigService.dropRetiredKeys(from: &mapping, inBlocks: ["thresholds"]), [])
+        XCTAssertNotNil(mapping.value(for: "columns"), "a block not passed in stays")
 
-    private static let extraColumnMappings: [(key: String, header: String)] = [
-        ("full_name", "Full Name"), ("asset_tag", "Asset Tag"), ("building", "Building"),
-        ("position", "Job Title"), ("last_logged_in_user", "Last Logged In"),
-        ("recovery_lock", "Recovery Lock"), ("battery_health", "Battery Health"),
-        ("entra_sso_status", "Entra SSO"), ("purchase_date", "Purchase Date"),
-        ("last_inventory", "Last Inventory Update"),
-    ]
-
-    private func extraColumnsConfig(only keys: Set<String>? = nil) -> String {
-        let lines = Self.extraColumnMappings
-            .filter { keys?.contains($0.key) ?? true }
-            .map { "  \($0.key): \"\($0.header)\"" }
-        return (["columns:", "  computer_name: Computer Name"] + lines).joined(separator: "\n")
+        let removed = ConfigService.dropRetiredKeys(from: &mapping, inBlocks: ["columns"])
+        XCTAssertEqual(removed, ["columns"])
+        XCTAssertNil(mapping.value(for: "columns"))
+        XCTAssertNotNil(mapping.value(for: "thresholds"))
     }
 
     private func savedText(profile: String, root: URL) throws -> String {
@@ -339,150 +351,11 @@ final class ConfigServiceTests: XCTestCase {
         )
     }
 
-    func testExtraColumnKeysAreListedAfterTheBaseColumns() {
-        let extras = Self.extraColumnMappings.map(\.key)
-        XCTAssertEqual(ConfigState.baseColumnKeys.count, 19)
-        XCTAssertEqual(ConfigState.columnKeys.count, 19 + extras.count)
-        XCTAssertEqual(Array(ConfigState.columnKeys.suffix(extras.count)), extras)
-        // Every column the engine decodes has a row: writing each listed key reaches every field.
-        let keyLines = ConfigState.columnKeys.map { "  \($0): X" }
-        let yaml = (["columns:"] + keyLines).joined(separator: "\n")
-        let columns = try? XCTUnwrap(ConfigLoader.loadFromString(yaml).columns)
-        XCTAssertEqual(ConfigState.columnKeys.count, ColumnField.allCases.count)
-        for field in ColumnField.allCases {
-            XCTAssertNotNil(columns?.columnName(for: field), "\(field) has no key in columnKeys")
-        }
-    }
-
-    func testExtraColumnMappingsLoadAndSurviveSaveUnchanged() throws {
-        let root = try temporaryWorkspaceRoot()
-        let profile = "extra-cols-\(UUID().uuidString.lowercased())"
-        try writeConfig(extraColumnsConfig(), profile: profile, root: root)
-
-        let loaded = try ConfigService.load(profile: profile, workspaceRoot: root)
-        for (key, header) in Self.extraColumnMappings {
-            XCTAssertEqual(loaded.state.columns[key], header, "\(key) must load into the state")
-        }
-
-        var state = loaded.state
-        state.columns["computer_name"] = "Device Name"
-        _ = try ConfigService.save(
-            profile: profile, state: state, existingDocument: loaded.document, workspaceRoot: root)
-
-        let url = try ConfigService.configURL(for: profile, workspaceRoot: root)
-        let columns = try XCTUnwrap(ConfigLoader.load(from: url).columns)
-        XCTAssertEqual(columns.computerName, "Device Name")
-        XCTAssertEqual(columns.fullName, "Full Name")
-        XCTAssertEqual(columns.assetTag, "Asset Tag")
-        XCTAssertEqual(columns.building, "Building")
-        XCTAssertEqual(columns.position, "Job Title")
-        XCTAssertEqual(columns.lastLoggedInUser, "Last Logged In")
-        XCTAssertEqual(columns.recoveryLock, "Recovery Lock")
-        XCTAssertEqual(columns.batteryHealth, "Battery Health")
-        XCTAssertEqual(columns.entraSSOStatus, "Entra SSO")
-        XCTAssertEqual(columns.purchaseDate, "Purchase Date")
-    }
-
-    func testClearingAnExtraColumnRemovesItsKeyFromTheFile() throws {
-        let root = try temporaryWorkspaceRoot()
-        let profile = "clear-extra-\(UUID().uuidString.lowercased())"
-        try writeConfig(
-            extraColumnsConfig(only: ["building", "position", "asset_tag"]),
-            profile: profile, root: root)
-
-        let loaded = try ConfigService.load(profile: profile, workspaceRoot: root)
-        var state = loaded.state
-        state.columns["building"] = ""
-        state.columns["asset_tag"] = "   "
-        _ = try ConfigService.save(
-            profile: profile, state: state, existingDocument: loaded.document, workspaceRoot: root)
-
-        let text = try savedText(profile: profile, root: root)
-        XCTAssertFalse(text.contains("building:"), "a cleared mapping leaves the file")
-        XCTAssertFalse(text.contains("asset_tag:"), "a blank mapping leaves the file")
-        XCTAssertTrue(text.contains("position: Job Title"))
-    }
-
-    func testExtraColumnsNeverTypedStayOutOfTheFile() throws {
-        let root = try temporaryWorkspaceRoot()
-        let profile = "untyped-extra-\(UUID().uuidString.lowercased())"
-        // full_name is a `key: ""` placeholder, as an older scaffold or the example wrote it.
-        try writeConfig(
-            "columns:\n  computer_name: Computer Name\n  full_name: \"\"\n",
-            profile: profile, root: root)
-
-        let loaded = try ConfigService.load(profile: profile, workspaceRoot: root)
-        var state = loaded.state
-        state.columns["manager"] = ""
-        _ = try ConfigService.save(
-            profile: profile, state: state, existingDocument: loaded.document, workspaceRoot: root)
-
-        let text = try savedText(profile: profile, root: root)
-        for (key, _) in Self.extraColumnMappings {
-            XCTAssertFalse(text.contains("\(key):"), "\(key) was never typed and must stay absent")
-        }
-        // The original 18 keep their `key: ""` form.
-        XCTAssertTrue(text.contains("manager: \"\""))
-        XCTAssertTrue(text.contains("department: \"\""))
-    }
-
-    func testTypingAnExtraColumnWritesIt() throws {
-        let root = try temporaryWorkspaceRoot()
-        let profile = "type-extra-\(UUID().uuidString.lowercased())"
-        try writeConfig("columns:\n  computer_name: Computer Name\n", profile: profile, root: root)
-
-        let loaded = try ConfigService.load(profile: profile, workspaceRoot: root)
-        var state = loaded.state
-        state.columns["purchase_date"] = "Purchase Date"
-        _ = try ConfigService.save(
-            profile: profile, state: state, existingDocument: loaded.document, workspaceRoot: root)
-
-        let url = try ConfigService.configURL(for: profile, workspaceRoot: root)
-        XCTAssertEqual(try ConfigLoader.load(from: url).columns?.purchaseDate, "Purchase Date")
-        XCTAssertFalse(try savedText(profile: profile, root: root).contains("building:"))
-    }
-
-    /// `model` is the marketing name; hardware detection reads `model_identifier` and the
-    /// architecture column under the header Jamf Pro's computer export uses.
-    func testDefaultStateMapsTheHardwareColumnsToJamfsExportHeaders() throws {
-        let columns = ConfigState.defaultState.columns
-        XCTAssertEqual(columns["model"], "Model")
-        XCTAssertEqual(columns["model_identifier"], "Model Identifier")
-        XCTAssertEqual(columns["architecture"], "Architecture Type")
-        let keys = ConfigState.baseColumnKeys
-        let model = try XCTUnwrap(keys.firstIndex(of: "model"))
-        XCTAssertEqual(keys[model + 1], "model_identifier")
-    }
-
-    /// A saved config.yaml that lacks the key loads it as unmapped, not as the default header:
-    /// a header the export may not have must not be written back on the next Save.
-    func testLoadingAColumnsBlockWithoutModelIdentifierLeavesItUnmapped() throws {
-        let root = try temporaryWorkspaceRoot()
-        let profile = "no-model-id-\(UUID().uuidString.lowercased())"
-        try writeConfig(
-            "columns:\n  computer_name: Computer Name\n  model: Model\n",
-            profile: profile, root: root)
-        let loaded = try ConfigService.load(profile: profile, workspaceRoot: root)
-        XCTAssertEqual(loaded.state.columns["model"], "Model")
-        XCTAssertEqual(loaded.state.columns["model_identifier"], "")
-    }
-
-    func testDefaultStateFileVaultColumnAndEmptyMobileColumns() {
-        XCTAssertEqual(ConfigState.defaultState.columns["filevault"], "FileVault 2 Status")
-        for key in ConfigState.mobileColumnKeys {
-            XCTAssertEqual(
-                ConfigState.defaultState.mobileColumns[key], "",
-                "mobile column \(key) should default empty (opt-in)"
-            )
-        }
-    }
-
     func testNewConfigFieldsUseDefaultsWhenMissing() throws {
         let root = try temporaryWorkspaceRoot()
         let profile = "config-test-\(UUID().uuidString.lowercased())"
         try writeConfig(
             """
-            columns: {}
             thresholds: {}
             output:
               output_dir: Generated Reports
@@ -552,18 +425,7 @@ final class ConfigServiceTests: XCTestCase {
     }
 
     private func fullState() -> ConfigState {
-        var columns: [String: String] = [:]
-        for key in ConfigState.columnKeys {
-            columns[key] = "Mapped \(key)"
-        }
-        var mobileColumns: [String: String] = [:]
-        for key in ConfigState.mobileColumnKeys {
-            mobileColumns[key] = "Mobile \(key)"
-        }
-
         return ConfigState(
-            columns: columns,
-            mobileColumns: mobileColumns,
             securityAgents: [
                 ConfigSecurityAgent(
                     name: "Endpoint Agent",

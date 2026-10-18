@@ -17,21 +17,6 @@ enum ScaffoldService {
         let mobileColumns: [String: String]
     }
 
-    /// A candidate Extension Attribute column the walkthrough proposes adopting
-    /// into `custom_eas`. The user selects which proposals to adopt — nothing is
-    /// written automatically.
-    struct ProposedEA: Identifiable, Sendable, Equatable {
-        /// Human label derived from the column header.
-        let name: String
-        /// Exact CSV header.
-        let column: String
-        /// Guessed EA type — one of `boolean|date|percentage|version|text`.
-        let type: String
-        /// First non-empty sample value across the parsed rows, for the UI preview.
-        let sampleValue: String
-        var id: String { column }
-    }
-
     /// Header + sample rows parsed from a CSV, for EA proposal previewing.
     struct CSVSample: Sendable {
         let headers: [String]
@@ -669,13 +654,6 @@ enum ScaffoldService {
         "device ownership type", "battery level",
     ]
 
-    /// Sample values (lowercased) that read as a boolean for the EA type guess.
-    static let booleanSampleValues: Set<String> = [
-        "yes", "no", "true", "false", "enabled", "disabled", "installed",
-        "not installed", "encrypted", "not encrypted", "compliant",
-        "non-compliant", "on", "off",
-    ]
-
     /// Propose `custom_eas` candidates from a CSV's headers and sample rows.
     ///
     /// Pure (no I/O) so it is unit-testable. Skips headers already mapped to a
@@ -704,7 +682,7 @@ enum ScaffoldService {
 
             let samples = columnSamples(at: index, rows: sampleRows)
             let sampleValue = samples.first(where: { !$0.isEmpty }) ?? ""
-            let type = guessEAType(header: norm, sampleValue: sampleValue, samples: samples)
+            let type = EATypeGuess.guess(header: norm, sampleValue: sampleValue, samples: samples)
             proposals.append(
                 ProposedEA(
                     name: titleCased(header),
@@ -724,50 +702,6 @@ enum ScaffoldService {
             guard index < row.count else { return nil }
             return row[index].trimmingCharacters(in: .whitespaces)
         }
-    }
-
-    /// Guess the EA type from a normalized header and its sample values.
-    private static func guessEAType(
-        header: String,
-        sampleValue: String,
-        samples: [String]
-    ) -> String {
-        if headerSuggestsDate(header) || sampleParsesAsDate(sampleValue) { return "date" }
-        if header.contains("version") || sampleLooksLikeVersion(sampleValue) { return "version" }
-        if header.contains("percent") || header.contains("%") || sampleValue.hasSuffix("%") {
-            return "percentage"
-        }
-        if booleanSampleValues.contains(sampleValue.lowercased()) || samplesLookBoolean(samples) {
-            return "boolean"
-        }
-        return "text"
-    }
-
-    private static func headerSuggestsDate(_ header: String) -> Bool {
-        ["date", "expire", "expiry", "enrolled", "checkin"].contains { header.contains($0) }
-    }
-
-    private static func sampleParsesAsDate(_ value: String) -> Bool {
-        guard !value.isEmpty else { return false }
-        // Match common Jamf date shapes: YYYY-MM-DD or YYYY/MM/DD, optionally with
-        // a time and timezone — but NOT a date followed by free text (e.g.
-        // "2026-04-07 12:58:59 -0600: Completed: …"), which is a status string,
-        // not a date EA. The anchor after the optional time/tz prevents that.
-        let pattern = "^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}"
-            + "([ T]\\d{1,2}:\\d{2}(:\\d{2})?( ?([-+]\\d{2}:?\\d{2}|Z|[A-Za-z]{2,4}))?)?$"
-        return value.range(of: pattern, options: .regularExpression) != nil
-    }
-
-    private static func sampleLooksLikeVersion(_ value: String) -> Bool {
-        guard !value.isEmpty else { return false }
-        return value.range(of: "^\\d+(\\.\\d+)+$", options: .regularExpression) != nil
-    }
-
-    /// True when the distinct non-empty samples are <= 2 and look boolean-ish.
-    private static func samplesLookBoolean(_ samples: [String]) -> Bool {
-        let distinct = Set(samples.filter { !$0.isEmpty }.map { $0.lowercased() })
-        guard !distinct.isEmpty, distinct.count <= 2 else { return false }
-        return distinct.allSatisfy { booleanSampleValues.contains($0) }
     }
 
     /// Title-case a CSV header into a readable EA name (collapse whitespace,

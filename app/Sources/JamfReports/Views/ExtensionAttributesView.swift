@@ -13,6 +13,7 @@ struct ExtensionAttributesView: View {
     @State private var selectedEA: String?
     @State private var sortOrder: SortOrder = .devices
     @State private var coverageDrift: [EAParseHealthService.CoverageDrift] = []
+    @State private var showingAdopt = false
 
     /// Only EAs whose fleet coverage dropped sharply since the previous collect.
     private static let driftAlertThresholdPP: Double = -15
@@ -43,7 +44,18 @@ struct ExtensionAttributesView: View {
                 // The demo dataset is fixed; an age measured from today would grow
                 // for as long as the demo stays open.
                 lastModified: workspace.demoMode ? nil : snapshot.snapshotDate
-            )
+            ) {
+                AnyView(
+                    PNPButton(
+                        title: "Adopt EAs…", icon: "plus.circle", style: .ghost, size: .sm
+                    ) { showingAdopt = true }
+                    // Demo mode never writes a workspace.
+                    .disabled(workspace.demoMode)
+                    .help(workspace.demoMode
+                          ? DemoData.liveOnlyHelp
+                          : "Pick collected Extension Attributes to track in config.yaml.")
+                )
+            }
             if !workspace.demoMode {
                 CollectNowBanner(source: snapshot.cacheSource, tiers: [.inventory])
                 // Per-kind file dates are the honest per-screen signal here;
@@ -66,6 +78,9 @@ struct ExtensionAttributesView: View {
             }
         }
         .tint(Theme.Colors.goldBright)
+        .sheet(isPresented: $showingAdopt) {
+            CSVEAWalkthroughSheet(profile: workspace.profile)
+        }
         .onAppear(perform: loadIfNeeded)
         .onChange(of: dataSource) { _, _ in
             // The picked attribute belongs to the old source; reload picks the new default.

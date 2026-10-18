@@ -9,6 +9,11 @@ versions in this repository map to git tags.
 
 ### Added
 
+- **Adopt EAs** on the Extension Attributes screen (and Data Sources) lists the Extension
+  Attributes jamf-cli already collected, with a guessed type for each, and adds the ones you
+  pick to `config.yaml` as tracked EAs or Security Agents. No CSV is needed. Importing a CSV
+  export is now a one-time option inside the same sheet: you pick the file, and it is read
+  once rather than from `csv-inbox`.
 - **Groups & Searches** now shows how many members each group has, its description, and flags
   empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
   Groups**), with a summary row that also counts policies with no scope. Saved mobile

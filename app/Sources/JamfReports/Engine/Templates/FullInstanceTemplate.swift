@@ -44,6 +44,7 @@ struct FullInstanceTemplate: ReportTemplate {
             // Device health
             .checkinHealth,
             .activeDevices,
+            .fleetDrift,
             .groupHygiene,
             // Update & patch details
             .patchFailures,

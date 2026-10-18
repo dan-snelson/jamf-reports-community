@@ -23,6 +23,7 @@ struct AssetTemplate: ReportTemplate {
             .hardwareModels,
             .checkinHealth,
             .activeDevices,
+            .fleetDrift,
             .mobileFleetSummary,
             .mobileInventory,
             .softwareInstalls,

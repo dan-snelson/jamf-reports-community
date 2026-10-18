@@ -12,11 +12,17 @@ struct ComputerDates: Sendable, Equatable {
     /// `general.lastContact`: any contact, MDM included. Nil before Jamf Pro 11.30 and for a
     /// Mac with no contact since it was first recorded.
     var contact: Date?
+    /// `general.name` and `operatingSystem.version`, for the sheets that list a Mac.
+    var name: String?
+    var osVersion: String?
 
     init(
         jamfID: String? = nil, serial: String? = nil,
-        checkIn: Date? = nil, inventory: Date? = nil, contact: Date? = nil
+        checkIn: Date? = nil, inventory: Date? = nil, contact: Date? = nil,
+        name: String? = nil, osVersion: String? = nil
     ) {
+        self.name = name
+        self.osVersion = osVersion
         self.jamfID = jamfID
         self.serial = serial
         self.checkIn = checkIn
@@ -48,7 +54,10 @@ struct ComputerDates: Sendable, Equatable {
             checkIn: checkIn,
             inventory: date(general, ["reportDate", "lastReportDate"])
                 ?? date(item, ["lastReportDate"]),
-            contact: date(general, ["lastContact"]))
+            contact: date(general, ["lastContact"]),
+            name: text(general, ["name"]) ?? text(item, ["name"]),
+            osVersion: text(item["operatingSystem"] as? [String: Any] ?? [:], ["version"])
+                ?? text(item, ["operatingSystemVersion"]) ?? text(general, ["osVersion"]))
     }
 
     private static func numericID(_ value: Any?) -> String? {

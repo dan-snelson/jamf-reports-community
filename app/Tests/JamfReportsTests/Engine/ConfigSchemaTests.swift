@@ -45,9 +45,8 @@ final class ConfigSchemaTests: XCTestCase {
 
     func testACorrectFileHasNoUnknownKeys() throws {
         let keys = try unknownKeys("""
-        columns:
-          computer_name: "Computer Name"
-          purchase_date: "Purchase Date"
+        jamf_cli:
+          profile: "example"
         output:
           output_dir: "Reports"
           allow_absolute_paths: false
@@ -185,17 +184,18 @@ final class ConfigSchemaTests: XCTestCase {
         let keys = try unknownKeys("""
         jamf-cli:
           profile: "example"
-        Columns:
-          email: "Email"
-        columns:
-          fierwall: "Firewall"
-          asset_number: "Asset"
+        Output:
+          output_dir: "Reports"
+        security_policy:
+          controls:
+            fierwall: warning
+            asset_number: warning
         """)
         XCTAssertEqual(keys, [
-            UnknownKey(keyPath: "Columns", suggestion: "columns"),
-            UnknownKey(keyPath: "columns.asset_number", suggestion: nil),
-            UnknownKey(keyPath: "columns.fierwall", suggestion: "firewall"),
+            UnknownKey(keyPath: "Output", suggestion: "output"),
             UnknownKey(keyPath: "jamf-cli", suggestion: "jamf_cli"),
+            UnknownKey(keyPath: "security_policy.controls.asset_number", suggestion: nil),
+            UnknownKey(keyPath: "security_policy.controls.fierwall", suggestion: "firewall"),
         ], "keys are compared as written; a dash for an underscore is one edit")
     }
 
@@ -277,7 +277,7 @@ final class ConfigSchemaTests: XCTestCase {
         collect_cadence:
           preset: cloud
         columns:
-          warranty_expires: "Warranty"
+          computer_name: "Name"
         output:
           export_pptx: true
         protect:
@@ -286,11 +286,11 @@ final class ConfigSchemaTests: XCTestCase {
           device_name: "Name"
         """)
         XCTAssertEqual(keys.map(\.keyPath), [
-            "ai.external", "ai.lock_on_device", "collect_cadence", "columns.warranty_expires",
+            "ai.external", "ai.lock_on_device", "collect_cadence", "columns",
             "output.export_pptx", "protect.data_dir", "school_columns",
         ])
         XCTAssertEqual(keys.map(\.retiredSince), [
-            "2.9", "2.7.0", "2.3.0", "2.6.1", "2.4.0", "2.8.1", "2.8.1",
+            "2.9", "2.7.0", "2.3.0", "2.11", "2.4.0", "2.8.1", "2.8.1",
         ])
         XCTAssertEqual(Set(keys.map(\.suggestion)), [nil], "a retired key has no spelling hint")
     }
@@ -317,10 +317,6 @@ final class ConfigSchemaTests: XCTestCase {
     /// The wrong names CLAUDE.md's "Actual key names" table lists, each with its right key.
     func testEachKnownMisnameSuggestsTheKeyItMeans() throws {
         let keys = try unknownKeys("""
-        columns:
-          os_version: "OS"
-          last_contact: "Last Contact"
-          assigned_user_email: "Email"
         jamf_cli:
           jamf_profile: "example"
         security_agents:
@@ -351,13 +347,9 @@ final class ConfigSchemaTests: XCTestCase {
           max_runs: 5
         charts:
           snapshot_dir: "snapshots"
-          auto_archive: true
         """)
         let suggested = Dictionary(uniqueKeysWithValues: keys.map { ($0.keyPath, $0.suggestion) })
-        XCTAssertEqual(keys.count, 16)
-        XCTAssertEqual(suggested["columns.os_version"], "operating_system")
-        XCTAssertEqual(suggested["columns.last_contact"], "last_checkin")
-        XCTAssertEqual(suggested["columns.assigned_user_email"], "email")
+        XCTAssertEqual(keys.count, 12)
         XCTAssertEqual(suggested["jamf_cli.jamf_profile"], "profile")
         XCTAssertEqual(suggested["security_agents[0].installed_value"], "connected_value")
         XCTAssertEqual(suggested["compliance.failed_count_column"], "failures_count_column")
@@ -370,7 +362,6 @@ final class ConfigSchemaTests: XCTestCase {
         XCTAssertEqual(suggested["output.directory"], "output_dir")
         XCTAssertEqual(suggested["output.max_runs"], "keep_latest_runs")
         XCTAssertEqual(suggested["charts.snapshot_dir"], "historical_csv_dir")
-        XCTAssertEqual(suggested["charts.auto_archive"], "archive_current_csv")
     }
 
     /// A misname must point at a key the schema knows there, and must not itself be known.
@@ -391,10 +382,10 @@ final class ConfigSchemaTests: XCTestCase {
     func testAnUnknownKeyIsShownWithoutControlCharactersAndCapped() throws {
         let long = String(repeating: "k", count: 70)
         let keys = try unknownKeys(
-            "columns:\n  bad\u{1B}[31m\u{202E}key: \"x\"\n  \(long): \"y\"\n")
+            "sheets:\n  bad\u{1B}[31m\u{202E}key: \"x\"\n  \(long): \"y\"\n")
         XCTAssertEqual(keys.map(\.keyPath), [
-            "columns.bad[31mkey",
-            "columns." + String(repeating: "k", count: 59) + "…",
+            "sheets.bad[31mkey",
+            "sheets." + String(repeating: "k", count: 59) + "…",
         ])
     }
 
@@ -427,14 +418,14 @@ final class ConfigSchemaTests: XCTestCase {
 
     func testKnownKeysAtTheRootAreTheTopLevelBlocks() {
         let top = ConfigSchema.knownKeys(at: [])
-        XCTAssertEqual(top?.contains("columns"), true)
+        XCTAssertEqual(top?.contains("columns"), false, "retired in 2.11")
         XCTAssertEqual(top?.contains("security_policy"), true)
         XCTAssertEqual(ConfigSchema.knownKeys(at: ["custom_eas"])?.contains("true_value"), true,
                        "a list of mappings is addressed by its key")
     }
 
     func testKnownKeysIsNilWhereNoMappingIsRead() {
-        XCTAssertNil(ConfigSchema.knownKeys(at: ["columns", "computer_name"]), "a scalar")
+        XCTAssertNil(ConfigSchema.knownKeys(at: ["jamf_cli", "profile"]), "a scalar")
         XCTAssertNil(ConfigSchema.knownKeys(at: ["sheets", "only"]), "a list of names")
         XCTAssertNil(ConfigSchema.knownKeys(at: ["not_a_block"]), "an unknown key")
     }
@@ -455,8 +446,6 @@ final class ConfigSchemaTests: XCTestCase {
         }
         let decoded: [([String], Set<String>)] = [
             ([], keys(ReportConfig.CodingKeys.self)),
-            (["columns"], keys(ColumnConfig.CodingKeys.self)),
-            (["mobile_columns"], keys(MobileColumnConfig.CodingKeys.self)),
             (["security_agents"], keys(SecurityAgentConfig.CodingKeys.self)),
             (["jamf_cli"], keys(JamfCLIConfig.CodingKeys.self)),
             (["compliance"], keys(ComplianceConfig.CodingKeys.self)),

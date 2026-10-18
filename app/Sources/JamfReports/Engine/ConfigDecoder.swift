@@ -8,8 +8,6 @@ import Foundation
 /// by `scaffold` or hand-edited by users. `ReportConfig.merged(with:)` folds in
 /// defaults before any sheet-generation logic runs.
 struct ReportConfig: Decodable, Sendable {
-    var columns: ColumnConfig?
-    var mobileColumns: MobileColumnConfig?
     var securityAgents: [SecurityAgentConfig]?
     var jamfCli: JamfCLIConfig?
     var compliance: ComplianceConfig?
@@ -32,8 +30,6 @@ struct ReportConfig: Decodable, Sendable {
     var securityPolicy: SecurityControlPolicy?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case columns
-        case mobileColumns = "mobile_columns"
         case securityAgents = "security_agents"
         case jamfCli = "jamf_cli"
         case compliance
@@ -71,194 +67,6 @@ struct ReportConfig: Decodable, Sendable {
         if r.branding == nil { r.branding = BrandingConfig() }
         if r.platform == nil { r.platform = PlatformConfig() }
         return r
-    }
-}
-
-// MARK: - columns
-
-/// Retired in 2.11: no report reads these. Kept, with `ColumnField`, until the Config screen,
-/// `ConfigService` and `ConfigSchema` stop writing and listing `columns`.
-struct ColumnConfig: Decodable, Sendable {
-    var computerName: String?
-    var serialNumber: String?
-    var operatingSystem: String?       // key is `operating_system`, NOT `os_version`
-    var lastCheckin: String?            // key is `last_checkin`, NOT `last_contact`
-    var department: String?
-    var manager: String?
-    var email: String?                  // key is `email`, NOT `assigned_user_email`
-    var filevault: String?
-    var sip: String?
-    var firewall: String?
-    var gatekeeper: String?
-    var secureBoot: String?
-    var bootstrapToken: String?
-    var diskPercentFull: String?
-    var architecture: String?
-    var model: String?
-    /// Hardware model identifier column (`Mac16,6`), as opposed to `model`'s marketing name.
-    /// YAML key: `model_identifier`.
-    var modelIdentifier: String?
-    var lastEnrollment: String?
-    var mdmExpiry: String?
-    var fullName: String?
-    var assetTag: String?
-    var building: String?
-    var position: String?
-    var lastLoggedInUser: String?
-    var recoveryLock: String?
-    var batteryHealth: String?
-    var entraSSOStatus: String?
-    /// Device purchase or acquisition date column. YAML key: `purchase_date`.
-    var purchaseDate: String?
-    /// Last Inventory Update column (Jamf's export header). YAML key: `last_inventory`. Read
-    /// only for `thresholds.stale_basis: [inventory]`; a CSV without it has no inventory date.
-    var lastInventory: String?
-
-    enum CodingKeys: String, CodingKey, CaseIterable {
-        case computerName = "computer_name"
-        case serialNumber = "serial_number"
-        case operatingSystem = "operating_system"
-        case lastCheckin = "last_checkin"
-        case department
-        case manager
-        case email
-        case filevault
-        case sip
-        case firewall
-        case gatekeeper
-        case secureBoot = "secure_boot"
-        case bootstrapToken = "bootstrap_token"
-        case diskPercentFull = "disk_percent_full"
-        case architecture
-        case model
-        case modelIdentifier = "model_identifier"
-        case lastEnrollment = "last_enrollment"
-        case mdmExpiry = "mdm_expiry"
-        case fullName = "full_name"
-        case assetTag = "asset_tag"
-        case building
-        case position
-        case lastLoggedInUser = "last_logged_in_user"
-        case recoveryLock = "recovery_lock"
-        case batteryHealth = "battery_health"
-        case entraSSOStatus = "entra_sso_status"
-        case purchaseDate = "purchase_date"
-        case lastInventory = "last_inventory"
-    }
-
-    /// Return the configured column name for the given logical field, or nil if unset.
-    func columnName(for field: ColumnField) -> String? {
-        let value: String?
-        switch field {
-        case .computerName: value = computerName
-        case .serialNumber: value = serialNumber
-        case .operatingSystem: value = operatingSystem
-        case .lastCheckin: value = lastCheckin
-        case .department: value = department
-        case .manager: value = manager
-        case .email: value = email
-        case .filevault: value = filevault
-        case .sip: value = sip
-        case .firewall: value = firewall
-        case .gatekeeper: value = gatekeeper
-        case .secureBoot: value = secureBoot
-        case .bootstrapToken: value = bootstrapToken
-        case .diskPercentFull: value = diskPercentFull
-        case .architecture: value = architecture
-        case .model: value = model
-        case .modelIdentifier: value = modelIdentifier
-        case .lastEnrollment: value = lastEnrollment
-        case .mdmExpiry: value = mdmExpiry
-        case .fullName: value = fullName
-        case .assetTag: value = assetTag
-        case .building: value = building
-        case .position: value = position
-        case .lastLoggedInUser: value = lastLoggedInUser
-        case .recoveryLock: value = recoveryLock
-        case .batteryHealth: value = batteryHealth
-        case .entraSSOStatus: value = entraSSOStatus
-        case .purchaseDate: value = purchaseDate
-        case .lastInventory: value = lastInventory
-        }
-        let trimmed = value?.trimmingCharacters(in: .whitespaces) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-/// Logical column field identifiers (the `columns` keys in `config.example.yaml`).
-///
-/// Retired in 2.11 with `ColumnConfig`.
-enum ColumnField: String, CaseIterable, Sendable {
-    case computerName, serialNumber, operatingSystem, lastCheckin
-    case department, manager, email
-    case filevault, sip, firewall, gatekeeper, secureBoot, bootstrapToken
-    case diskPercentFull, architecture, model, modelIdentifier, lastEnrollment, mdmExpiry
-    case fullName, assetTag, building, position
-    case lastLoggedInUser, recoveryLock, batteryHealth, entraSSOStatus
-    /// Device purchase or acquisition date. YAML key: `purchase_date`.
-    case purchaseDate
-    /// Last Inventory Update. YAML key: `last_inventory`.
-    case lastInventory
-
-    /// The `columns:` key in config.yaml, taken from the decoder rather than spelled from the
-    /// case name (which would read `entraSSOStatus` as `entra_s_s_o_status`).
-    var configKey: String {
-        let key: ColumnConfig.CodingKeys = switch self {
-        case .computerName: .computerName
-        case .serialNumber: .serialNumber
-        case .operatingSystem: .operatingSystem
-        case .lastCheckin: .lastCheckin
-        case .department: .department
-        case .manager: .manager
-        case .email: .email
-        case .filevault: .filevault
-        case .sip: .sip
-        case .firewall: .firewall
-        case .gatekeeper: .gatekeeper
-        case .secureBoot: .secureBoot
-        case .bootstrapToken: .bootstrapToken
-        case .diskPercentFull: .diskPercentFull
-        case .architecture: .architecture
-        case .model: .model
-        case .modelIdentifier: .modelIdentifier
-        case .lastEnrollment: .lastEnrollment
-        case .mdmExpiry: .mdmExpiry
-        case .fullName: .fullName
-        case .assetTag: .assetTag
-        case .building: .building
-        case .position: .position
-        case .lastLoggedInUser: .lastLoggedInUser
-        case .recoveryLock: .recoveryLock
-        case .batteryHealth: .batteryHealth
-        case .entraSSOStatus: .entraSSOStatus
-        case .purchaseDate: .purchaseDate
-        case .lastInventory: .lastInventory
-        }
-        return key.rawValue
-    }
-}
-
-// MARK: - mobile_columns
-
-struct MobileColumnConfig: Decodable, Sendable {
-    var deviceName: String?
-    var serialNumber: String?
-    var operatingSystem: String?
-    var lastCheckin: String?
-    var email: String?
-    var model: String?
-    var deviceFamily: String?
-    var managed: String?
-    var supervised: String?
-
-    enum CodingKeys: String, CodingKey, CaseIterable {
-        case deviceName = "device_name"
-        case serialNumber = "serial_number"
-        case operatingSystem = "operating_system"
-        case lastCheckin = "last_checkin"
-        case email, model
-        case deviceFamily = "device_family"
-        case managed, supervised
     }
 }
 
@@ -811,8 +619,6 @@ struct ChartsConfig: Decodable, Sendable {
     var savePng: Bool?
     var embedInXlsx: Bool?
     var historicalCsvDir: String?   // key is `historical_csv_dir`
-    /// Retired in 2.11: no reader. Goes with the key's `ConfigSchema` retired entry.
-    var archiveCurrentCsv: Bool?    // key is `archive_current_csv`
     var osAdoption: OSAdoptionConfig?
     var complianceTrend: ComplianceTrendConfig?
     var deviceStateTrend: DeviceStateTrendConfig?
@@ -822,7 +628,6 @@ struct ChartsConfig: Decodable, Sendable {
         case savePng = "save_png"
         case embedInXlsx = "embed_in_xlsx"
         case historicalCsvDir = "historical_csv_dir"
-        case archiveCurrentCsv = "archive_current_csv"
         case osAdoption = "os_adoption"
         case complianceTrend = "compliance_trend"
         case deviceStateTrend = "device_state_trend"

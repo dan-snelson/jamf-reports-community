@@ -1,191 +1,10 @@
 # jamf-reports community edition — example configuration
 #
 # Copy this file to config.yaml and edit to match your Jamf Pro instance.
-# The app creates and edits config.yaml for you: onboarding scaffolds a starter
-# config, and the Config screen re-scaffolds against a CSV export to auto-detect
-# the column mappings below.
-#
-# The scaffold reads your actual CSV headers and maps them to the logical field
-# names below. You only need to hand-edit fields it could not detect
-# automatically.
-#
-# Column names in this file must exactly match your Jamf Pro CSV headers,
-# including capitalization and spaces. The Config screen's Health Audit flags
-# any mapping that no longer matches a CSV header. Config Doctor also lists keys
-# the app does not read, with the nearest known key, and lines it skipped; the
-# Config screen's From config.yaml tab shows them.
-
-
-# =============================================================================
-# COLUMN MAPPING
-# =============================================================================
-# Maps logical field names (used internally by the report tool) to the actual
-# column headers in your Jamf Pro CSV export.
-#
-# Required fields (marked below) must be present for core functionality.
-# Optional fields can be omitted or left blank — those sheets or calculations
-# will be skipped gracefully.
-#
-# Tip: Open your CSV in a spreadsheet app, copy the exact header text, and
-# paste it here as the value.
-
-columns:
-
-  # --- Core identity fields (required) ---
-
-  # The computer's display name in Jamf Pro.
-  computer_name: "Computer Name"
-
-  # The hardware serial number. Used as a stable unique key across reports.
-  serial_number: "Serial Number"
-
-  # The macOS version string as reported by Jamf inventory.
-  # Common values: "macOS 15.3.2", "15.3.2", "Sequoia 15.3.2"
-  # The tool normalises these automatically.
-  operating_system: "Operating System Version"
-
-  # Timestamp of the computer's last Jamf check-in.
-  # Accepted formats: "YYYY-MM-DD", "YYYY-MM-DD HH:MM:SS", ISO 8601.
-  last_checkin: "Last Check-in"
-
-  # --- User assignment (optional) ---
-
-  # The department the computer is assigned to.
-  department: "Department"
-
-  # The manager field (plain name or AD Distinguished Name — both are handled).
-  # There is no universal Jamf "Manager" column — it is typically an Extension
-  # Attribute, so this is unset by default. Point it at your EA's column name to
-  # enable it. Do not point it at Jamf's built-in "Managed"/"Unmanaged" status.
-  manager: ""
-
-  # The assigned user's email address.
-  email: "Email Address"
-
-  # --- Security controls (optional — each drives a row in Security Controls sheet) ---
-
-  # FileVault 2 encryption status. Prefer the detailed FileVault 2 status column;
-  # a count column such as "FileVault Status" ("1/1", "0/1") also works.
-  filevault: "FileVault 2 Status"
-
-  # System Integrity Protection status. Typical values: "Enabled", "Disabled".
-  sip: "System Integrity Protection"
-
-  # macOS Firewall status. Typical values: "Enabled", "Disabled", "On", "Off".
-  firewall: "Firewall Enabled"
-
-  # Gatekeeper status. Typical values: "Enabled", "Disabled", "On", "Off".
-  gatekeeper: "Gatekeeper"
-
-  # Secure Boot level. Typical values: "Full Security", "Medium Security", "No Security".
-  secure_boot: "Secure Boot Level"
-
-  # Whether a Bootstrap Token is escrowed in Jamf. Prefer the escrowed column over
-  # "Bootstrap Token Allowed" when tracking compliance.
-  bootstrap_token: "Bootstrap Token Escrowed"
-
-  # Boot volume percentage used. The tool reads this as a plain number (0-100).
-  disk_percent_full: "Boot Drive Percentage Full"
-
-  # --- Hardware info (optional) ---
-
-  # security_policy's hardware rule on a CSV needs architecture (Apple silicon) and
-  # model_identifier (T2 Macs); without them hardware is unknown and FileVault off keeps the
-  # control's own level.
-
-  # Processor architecture, as Jamf exports it. Typical values: "arm64", "x86_64".
-  architecture: "Architecture Type"
-
-  # The human-readable model name (e.g., "MacBook Pro (16-inch, 2021)").
-  model: "Model"
-
-  # The hardware model identifier (e.g., "Mac16,6", "MacBookPro16,1"). Used with architecture
-  # to tell Apple silicon and T2 Macs apart for security_policy.filevault_off_hardware_encrypted.
-  model_identifier: "Model Identifier"
-
-  # --- Enrollment / MDM (optional) ---
-
-  # Date the computer was last enrolled in Jamf.
-  last_enrollment: "Last Enrollment"
-
-  # MDM configuration profile expiration date.
-  # Used with custom_eas type: date to flag expiring/expired profiles.
-  mdm_expiry: "MDM Profile Expiration Date"
-
-  # --- Extra inventory columns (optional) ---
-  #
-  # Each key you map adds one column to the Device Inventory and Stale Devices
-  # sheets, in the order listed here. A key left empty adds nothing. The Config
-  # screen lists these after the columns above; clearing one there removes its key.
-
-  # The assigned user's full name.
-  full_name: ""
-
-  # The computer's asset tag.
-  asset_tag: ""
-
-  # The building the computer is assigned to.
-  building: ""
-
-  # The assigned user's position or job title.
-  position: ""
-
-  # The user who last logged in to the computer.
-  last_logged_in_user: ""
-
-  # Recovery Lock status.
-  recovery_lock: ""
-
-  # Battery health or condition.
-  battery_health: ""
-
-  # Microsoft Entra SSO registration status.
-  entra_sso_status: ""
-
-  # Purchase date. Read; no report uses it yet (adds no column).
-  # purchase_date: ""
-
-  # Last Inventory Update (Jamf's export header). Read only when
-  # thresholds.stale_basis lists inventory: it is a CSV row's inventory date. A CSV
-  # without it has no inventory date, so inventory does not apply to its rows; a blank
-  # cell in a mapped column counts as never inventoried.
-  # last_inventory: "Last Inventory Update"
-
-
-# =============================================================================
-# MOBILE CSV COLUMN MAPPING
-# =============================================================================
-# Used when you want workbook CSV sheets from a mobile-device export instead of
-# a computer export. This is separate from `columns` because a computer CSV and
-# a mobile CSV use different header schemas.
-#
-# The first mobile CSV release writes dedicated Mobile Device Inventory and
-# Mobile Stale Devices sheets plus custom_eas sheets. Trend charts still remain
-# jamf-cli-driven or computer-CSV-driven.
-
-mobile_columns:
-
-  # --- Core identity fields (required for mobile CSV sheets) ---
-
-  # Device display name in the mobile-device export.
-  device_name: "Display Name"
-
-  # Hardware serial number.
-  serial_number: "Serial Number"
-
-  # iOS / iPadOS / tvOS version string.
-  operating_system: "OS Version"
-
-  # Last inventory update / check-in timestamp.
-  last_checkin: "Last Inventory Update"
-
-  # --- Useful optional fields ---
-
-  email: "Email Address"
-  model: "Model"
-  device_family: "Device Family"
-  managed: "Managed"
-  supervised: "Supervised"
+# The app creates and edits config.yaml for you: onboarding writes a starter
+# config, and the Config screen edits it. Config Doctor lists keys the app does
+# not read, with the nearest known key, and lines it skipped; the Config
+# screen's From config.yaml tab shows them.
 
 
 # =============================================================================
@@ -855,12 +674,6 @@ thresholds:
   # A Mac is stale when any date listed in stale_basis (below) is MORE than this many
   # whole days old: a Mac at exactly this many days is not stale. Stale Macs are treated
   # as inactive and excluded from compliance/security agent counts.
-  #
-  # Also bounds how old a dropped csv-inbox/ export may be before the Devices
-  # and Outreach screens stop treating it as current inventory: a CSV cannot
-  # report a check-in newer than the day it ran, so past this age it reports
-  # live devices as stale and re-adds retired ones. Raise it if you deliberately
-  # report over a longer window.
   stale_device_days: 30
 
   # Which of the three dates Jamf Pro keeps for a Mac count toward stale. A list of:
@@ -876,8 +689,7 @@ thresholds:
   # computers snapshot), counts as never: stale. A Mac with no Last Contact is not
   # judged by it. A Mac with none of the listed dates falls back to jamf-cli's stale
   # flag. device-compliance rows carry only the check-in, so inventory and contact are
-  # read from the computers snapshot (matched by Jamf ID, then serial). A CSV has the
-  # inventory date only through columns.last_inventory. Absent means [check_in].
+  # read from the computers snapshot (matched by Jamf ID, then serial). Absent means [check_in].
   stale_basis: [check_in]
 
   # A Mac whose Last Contact is current while its Last Check-in, or its Last Inventory
@@ -994,12 +806,6 @@ charts:
   # trend charts keep the largest same-day snapshot for that schema and ignore
   # smaller duplicate candidates.
   historical_csv_dir: "snapshots"
-
-  # When true, generate automatically copies the current --csv into
-  # historical_csv_dir using a date/time-stamped filename.
-  # Re-running generate with the same unchanged CSV reuses the existing
-  # identical snapshot instead of copying another duplicate.
-  archive_current_csv: true
 
   # macOS adoption charts: device counts per OS version over time.
   # Uses CSV snapshots when available and falls back to jamf-cli

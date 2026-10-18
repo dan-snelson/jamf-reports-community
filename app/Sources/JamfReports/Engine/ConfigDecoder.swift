@@ -1280,9 +1280,7 @@ struct ConfigException: Decodable, Sendable, Equatable {
     let signedOffDate: String
     var expiresDate: String?
     var linkedFinding: String?
-    /// Optional NIST/STIG/CIS control identifier (e.g. `"AC-2"`, `"AC-2(1).a"`).
-    /// Validated by `ControlID.parse(_:)` for canonical form when surfaced via
-    /// `ConfigException.typedControlID` (`ConfigSchema+ControlID.swift`).
+    /// Optional NIST/STIG/CIS control identifier (e.g. `"AC-2"`, `"AC-2(1).a"`), kept as typed.
     var controlID: String?
 
     enum CodingKeys: String, CodingKey, CaseIterable {

@@ -38,18 +38,6 @@ struct ComplianceBandingService: Sendable {
             }
         }
 
-        /// Inclusive failure-count range, or nil for `.noData`.
-        var failureRange: ClosedRange<Int>? {
-            switch self {
-            case .pass:   return 0...0
-            case .low:    return 1...10
-            case .medLow: return 11...30
-            case .medium: return 31...50
-            case .high:   return 51...Int.max
-            case .noData: return nil
-            }
-        }
-
         /// Aligned to existing Theme tokens (green/info/gold/warn/danger/gray)
         /// so the donut reads consistently with the rest of the app's bands.
         var colorHex: UInt32 {

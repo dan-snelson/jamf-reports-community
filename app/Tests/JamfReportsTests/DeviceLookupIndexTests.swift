@@ -111,6 +111,28 @@ final class DeviceLookupIndexTests: XCTestCase {
         XCTAssertNil(index.lastError, "No error expected when newest snapshot decodes cleanly")
     }
 
+    /// The stamp in the filename wins over a restamped mtime, and a sync-conflict copy
+    /// (`… 2.json`) is never picked, however fresh.
+    func testFilenameStampWinsAndConflictCopyIsSkipped() throws {
+        func mac(_ id: String) -> [[String: Any]] {
+            [["id": id, "general": ["name": "Mac-\(id)"], "hardware": ["serialNumber": "S\(id)"]]]
+        }
+        let older = try writeSnapshot(
+            subdir: "computers", filename: "computers_20260101T000000.json", json: mac("1"))
+        let newer = try writeSnapshot(
+            subdir: "computers", filename: "computers_20260501T000000.json", json: mac("2"))
+        let conflict = try writeSnapshot(
+            subdir: "computers", filename: "computers_20260601T000000 2.json", json: mac("3"))
+        try setModificationDate(newer, Date(timeIntervalSince1970: 1_700_000_000))
+        try setModificationDate(older, Date(timeIntervalSince1970: 1_750_000_000))
+        try setModificationDate(conflict, Date(timeIntervalSince1970: 1_800_000_000))
+
+        let index = DeviceLookupIndex()
+        index.load(profile: profileSlug)
+
+        XCTAssertEqual(Set(index.candidates.map(\.id)), ["2"])
+    }
+
     // MARK: - `.partial` filtering
 
     func testPartialFilesAreExcludedFromIndex() throws {

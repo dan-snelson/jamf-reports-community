@@ -285,12 +285,9 @@ enum SnapshotManifest {
             ["json", "html"].contains($0.pathExtension.lowercased())
             && !$0.lastPathComponent.hasSuffix(fileName)
         }
-        // Order by FILENAME timestamp, matching loadLatestSnapshotData — mtime
-        // lies on synced storage, so it could verify a file generate won't read.
-        return candidates.max { lhs, rhs in
-            MSCPChartDataBuilder.dateFromSnapshotFilename(lhs)
-                < MSCPChartDataBuilder.dateFromSnapshotFilename(rhs)
-        }
+        // The app's one picker: filename stamp over mtime, sync-conflict copies dropped, so
+        // this verifies the file generate reads.
+        return FileManager.newestSnapshot(among: candidates)
     }
 
     // MARK: - Manifest payload

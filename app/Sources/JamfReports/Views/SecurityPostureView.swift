@@ -174,10 +174,16 @@ struct SecurityPostureView: View {
                         Text("Security Score")
                             .font(.headline)
                             .foregroundStyle(Theme.Colors.fg)
-                        Pill(text: score.grade.rawValue,
-                             tone: pillTone(for: score.grade))
+                        if !score.parts.isEmpty {
+                            Pill(text: score.grade.rawValue,
+                                 tone: pillTone(for: score.grade))
+                        }
                     }
-                    if !score.parts.isEmpty {
+                    if score.parts.isEmpty {
+                        Text(Self.noScoreCaption)
+                            .font(.caption)
+                            .foregroundStyle(Theme.Text.tertiary(contrast))
+                    } else {
                         ScoreBreakdownList(
                             score: score, staleDays: snapshot.staleDays,
                             staleBasis: snapshot.staleBasis)
@@ -194,6 +200,14 @@ struct SecurityPostureView: View {
                 Spacer()
             }
         }
+    }
+
+    static let noScoreCaption = "No factor had data"
+
+    /// The ring's number: a dash when nothing was scored, never a 0.0 that reads as grade F.
+    static func scoreText(_ score: SecurityScore) -> String {
+        guard !score.parts.isEmpty, score.value.isFinite else { return "—" }
+        return String(format: "%.1f", score.value)
     }
 
     /// The hero card's line for metrics the ring does not score. FileVault, when the report
@@ -476,18 +490,17 @@ private struct ScoreRing: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Security score \(displayValue) of 100, grade \(score.grade.rawValue)")
+        .accessibilityLabel(score.parts.isEmpty
+            ? "Security score: \(SecurityPostureView.noScoreCaption)"
+            : "Security score \(displayValue) of 100, grade \(score.grade.rawValue)")
     }
 
     private var clamped: Double {
-        guard score.value.isFinite else { return 0 }
+        guard !score.parts.isEmpty, score.value.isFinite else { return 0 }
         return min(max(score.value / 100, 0), 1)
     }
 
-    private var displayValue: String {
-        guard score.value.isFinite else { return "—" }
-        return String(format: "%.1f", score.value)
-    }
+    private var displayValue: String { SecurityPostureView.scoreText(score) }
 }
 
 // MARK: - Export-only chart

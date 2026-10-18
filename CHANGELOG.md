@@ -34,6 +34,10 @@ versions in this repository map to git tags.
 - **Check now** and the daily update check give up after 30 seconds instead of showing
   "Checking…" for as long as GitHub keeps trickling an answer, and turning the check off with a
   configuration profile takes effect without a relaunch.
+- The fleet report's Security Score no longer shows a change against an earlier period when the
+  score factors changed in between, since the two scores were measured differently.
+- Security Posture shows a dash, no grade and "No factor had data" when no score factor had
+  data, instead of 0.0 and a grade F.
 
 ### Security
 

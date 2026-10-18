@@ -54,7 +54,9 @@ struct FleetRollup: Sendable, Equatable {
             weightedMetric("patch", "Patch %", current,
                            samePatchBasis(current + previous) ? previous : [], \.patchPct),
             weightedMetric("osCurrent", "OS Current %", current, previous, \.osCurrentPct),
-            weightedMetric("securityScore", "Security Score", current, previous, \.securityScore),
+            // A changed `score_factors` list moves the score without the fleet changing.
+            weightedMetric("securityScore", "Security Score", current,
+                           sameScoreBasis(current + previous) ? previous : [], \.securityScore),
         ]
         return FleetRollup(
             groupName: groupName,
@@ -104,6 +106,11 @@ struct FleetRollup: Sendable, Equatable {
     /// (`patchPctBasis`): the per-title mean before it, device-weighted after.
     static func samePatchBasis(_ summaries: [DailySummary]) -> Bool {
         Set(summaries.filter { $0.patchPct != nil }.map(\.patchPctBasis)).count <= 1
+    }
+
+    /// Whether every summary with a security score recorded it on one `securityScoreBasis`.
+    static func sameScoreBasis(_ summaries: [DailySummary]) -> Bool {
+        Set(summaries.filter { $0.securityScore != nil }.map(\.securityScoreBasis)).count <= 1
     }
 
     /// Device-weighted average of a percent KPI: Σ(pct × devices) / Σ(devices)

@@ -125,13 +125,6 @@ enum ConnectionCheck {
 }
 
 extension ConnectionCheck.Verdict {
-    var blocksContinue: Bool {
-        switch self {
-        case .rejectedID, .noJamfPro: true
-        case .accepted, .missingPermission, .undecided: false
-        }
-    }
-
     /// The verdict that points the user at a Jamf School workspace instead.
     var suggestsJamfSchool: Bool {
         if case .noJamfPro = self { return true }

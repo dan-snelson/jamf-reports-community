@@ -250,9 +250,14 @@ extension DemoData {
         return failures
     }()
 
+    /// mSCP rules failed by the `deviceInventory` Macs that fail any, by record id.
+    private static let inventoryFailedRules = [
+        "FVFXK7H8Q6L4": 3, "FVFYK2N5P8R3": 12, "FVFXJ8L2R4M7": 47, "C02YK1N6P3Q8": 18,
+    ]
+
     private static func inventoryBenchmarkFailures(_ record: DeviceInventoryRecord) -> Set<String> {
-        let topCount = record.failedRules == 0
-            ? 0 : min(topFailingRules.count, (record.failedRules + 4) / 5)
+        let failedRules = inventoryFailedRules[record.id] ?? 0
+        let topCount = failedRules == 0 ? 0 : min(topFailingRules.count, (failedRules + 4) / 5)
         var failing = Set(topFailingRules.prefix(topCount).map(\.ruleID))
         if record.fileVault != "Encrypted" {
             failing.insert(fileVaultBenchmarkRule)

@@ -1453,7 +1453,7 @@ struct TrendsView: View {
         workspaceStore.globalStatus = "collect + generate · profile=\(profile)"
         // Status-bar race guard — see AuditView.runAudit comment.
         do {
-            let exit = try await bridge.collectThenGenerate(profile: profile, csvPath: nil) { [weak workspaceStore] line in
+            let exit = try await bridge.collectThenGenerate(profile: profile) { [weak workspaceStore] line in
                 Task { @MainActor in
                     guard let workspaceStore, self.isArchiving else { return }
                     workspaceStore.globalStatus = line.text

@@ -2,8 +2,8 @@ import Foundation
 
 typealias CSVRow = [String: String]
 
-/// Minimal RFC-4180-compliant CSV parser that handles quoted fields, escaped quotes,
-/// and UTF-8-sig BOM stripping. Replaces pandas for the sheet-generation path.
+/// RFC-4180 CSV reader for test fixtures (quoted fields, escaped quotes, UTF-8 BOM). The app
+/// reads a CSV only through `ScaffoldService.readSample`.
 enum CSVParser {
 
     enum ParseError: Error { case empty, encodingFailed }
@@ -29,23 +29,6 @@ enum CSVParser {
             return dict
         }
         return (columns, records)
-    }
-
-    /// Parse only the header row, skipping the full O(rows) scan in `parseText`.
-    /// ponytail: splits on the first raw CR or LF, so a header containing a
-    /// quoted embedded newline would truncate — no Jamf export emits one.
-    static func parseHeader(_ data: Data) -> [String]? {
-        var raw = data
-        let bom: [UInt8] = [0xEF, 0xBB, 0xBF]
-        if raw.prefix(3).elementsEqual(bom) { raw = raw.dropFirst(3) }
-        let headerBytes: Data
-        if let newlineIndex = raw.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
-            headerBytes = raw[..<newlineIndex]
-        } else {
-            headerBytes = raw
-        }
-        guard let text = String(data: headerBytes, encoding: .utf8) else { return nil }
-        return parseText(text).first
     }
 
     /// Walks Unicode scalars, not Characters: "\r\n" is ONE Character that equals neither

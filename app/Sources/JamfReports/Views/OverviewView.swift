@@ -664,7 +664,7 @@ struct OverviewView: View {
                 exit = try await CLIBridge.holdingGenerate {
                     let narrative = await makeNarrative()
                     return try await bridge.generate(
-                        profile: profile, csvPath: nil, aiNarrative: narrative
+                        profile: profile, aiNarrative: narrative
                     ) { [weak workspace] line in
                         Task { @MainActor in
                             guard let workspace, self.isRunning else { return }
@@ -677,7 +677,7 @@ struct OverviewView: View {
                 }
             } else {
                 exit = try await bridge.collectThenGenerate(
-                    profile: profile, csvPath: nil, narrative: makeNarrative
+                    profile: profile, narrative: makeNarrative
                 ) { [weak workspace] line in
                     Task { @MainActor in
                         guard let workspace, self.isRunning else { return }

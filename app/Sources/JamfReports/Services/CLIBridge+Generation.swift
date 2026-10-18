@@ -162,7 +162,7 @@ extension CLIBridge {
                     // A chosen HTML format is the run's one HTML report; `html.with_workbook`
                     // would write a second.
                     return try await self.generate(
-                        profile: profile, csvPath: nil, template: template,
+                        profile: profile, template: template,
                         outputDir: outputDir, aiNarrative: aiNarrative,
                         htmlWithWorkbook: !types.contains(.html), onLine: onLine
                     )

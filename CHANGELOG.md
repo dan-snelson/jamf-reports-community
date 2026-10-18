@@ -101,9 +101,11 @@ versions in this repository map to git tags.
   the same sheet or with `jamf-reports scaffold --csv`, which now writes only
   `custom_eas`. New workspaces no longer get a `csv-inbox` folder; files already in one are
   left alone.
-- `columns`, `mobile_columns` and `charts.archive_current_csv` are retired settings. Config
+- `columns`, `mobile_columns` and `charts.archive_current_csv` are no longer read. Config
   Doctor lists them as no longer read, and the next Config save removes `columns` and
-  `mobile_columns` from `config.yaml` after keeping a dated copy of the file.
+  `mobile_columns` (and the next Customize apply removes `charts.archive_current_csv`) from
+  `config.yaml` after keeping a dated copy of the file. A `config.yaml` that still has them
+  loads as before.
 - The **CSV Assisted** schedule mode is retired. A schedule that used it runs as
   **Refresh + Generate** (`jamf-cli-full`) from now on, and Run History notes that on each run.
   `jamf-reports schedules add --mode csv-assisted` is refused and names `jamf-cli-full`.

@@ -107,7 +107,6 @@ final class NotifyConfigStoreTests: XCTestCase {
 
         let reloaded = try ConfigLoader.load(from: configURL)
         XCTAssertEqual(reloaded.notify?.isEnabled, true)
-        XCTAssertEqual(reloaded.columns?.computerName, "Computer Name")
         XCTAssertEqual(reloaded.thresholds?.staleDeviceDays, 30)
     }
 

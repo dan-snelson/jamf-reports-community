@@ -72,23 +72,6 @@ final class ConfigDecoderTests: XCTestCase {
         XCTAssertEqual(filled.thresholds?.staleDeviceDays, 60)
     }
 
-    // MARK: - ColumnConfig field resolution
-
-    func testColumnConfigResolvesKnownField() {
-        var columns = ColumnConfig()
-        columns.computerName = "Computer Name"
-        columns.operatingSystem = "Operating System"
-
-        XCTAssertEqual(columns.columnName(for: .computerName), "Computer Name")
-        XCTAssertEqual(columns.columnName(for: .operatingSystem), "Operating System")
-    }
-
-    func testColumnConfigNilForUnsetField() {
-        let columns = ColumnConfig()
-        // department is unset by default.
-        XCTAssertNil(columns.columnName(for: .department))
-    }
-
     // MARK: - ConfigLoader from fixture YAML
 
     func testLoadDummyFixtureYAML() throws {
@@ -100,12 +83,7 @@ final class ConfigDecoderTests: XCTestCase {
 
         let config = try ConfigLoader.load(from: fixtureURL)
 
-        // dummy.yaml maps "Computer Name" → computer_name.
-        XCTAssertEqual(config.columns?.computerName, "Computer Name")
-        // dummy.yaml maps "Operating System" → operating_system.
-        XCTAssertEqual(config.columns?.operatingSystem, "Operating System")
-        // dummy.yaml maps "Last Check-in" → last_checkin.
-        XCTAssertEqual(config.columns?.lastCheckin, "Last Check-in")
+        XCTAssertNotNil(config.thresholds, "withDefaults() must have run")
     }
 
     func testLoadReturnsEmptyConfigForMissingFile() {
@@ -114,20 +92,6 @@ final class ConfigDecoderTests: XCTestCase {
     }
 
     // MARK: - Key name invariants (critical — do not rename these)
-
-    func testOperatingSystemKeyNotOsVersion() {
-        // The config key must be `operating_system`, never `os_version`.
-        var c = ColumnConfig()
-        c.operatingSystem = "Operating System"
-        XCTAssertNotNil(c.operatingSystem)
-        XCTAssertEqual(c.columnName(for: .operatingSystem), "Operating System")
-    }
-
-    func testLastCheckinKeyNotLastContact() {
-        var c = ColumnConfig()
-        c.lastCheckin = "Last Check-in"
-        XCTAssertEqual(c.columnName(for: .lastCheckin), "Last Check-in")
-    }
 
     func testCustomEATrueValueKeyNotCompliantValue() throws {
         // `true_value` — not `compliant_value`.
@@ -228,9 +192,9 @@ final class ConfigDecoderTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("config.yaml")
-        try "columns:\n  computer_name: \"Mac Name\"\n".write(to: url, atomically: true, encoding: .utf8)
+        try "jamf_cli:\n  profile: example\n".write(to: url, atomically: true, encoding: .utf8)
         let config = try ConfigLoader.load(from: url)
-        XCTAssertEqual(config.columns?.computerName, "Mac Name")
+        XCTAssertEqual(config.jamfCli?.profile, "example")
         // withDefaults() must have run — thresholds should be non-nil.
         XCTAssertNotNil(config.thresholds)
     }

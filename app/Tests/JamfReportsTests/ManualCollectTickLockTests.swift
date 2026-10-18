@@ -321,7 +321,7 @@ final class ManualCollectTickLockTests: XCTestCase {
         try await whileAnotherProcessHolds(lock) {
             do {
                 _ = try await CLIBridge().collectThenGenerate(
-                    profile: profile, csvPath: nil, onLine: CLIBridge.noOpOnLine)
+                    profile: profile, onLine: CLIBridge.noOpOnLine)
                 XCTFail("the collect must be refused")
             } catch {
                 XCTAssertEqual(error as? CLIBridgeError, .tickLockHeld)

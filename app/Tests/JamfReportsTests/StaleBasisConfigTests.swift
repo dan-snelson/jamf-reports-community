@@ -136,15 +136,13 @@ final class StaleBasisConfigTests: XCTestCase {
         XCTAssertEqual(try doctorRows("thresholds:\n  stale_device_days: 30\n"), [])
     }
 
-    // MARK: - Schema and columns
+    // MARK: - Schema and retired columns
 
     func testTheNewKeysAreKnownToTheSchema() throws {
         let keys = try ConfigSchema.unknownKeys(in: ConfigLoader.rawMapping(fromYAML: """
         thresholds:
           stale_basis: [check_in, inventory]
           contact_gap_days: 14
-        columns:
-          last_inventory: Last Inventory Update
         """))
         XCTAssertEqual(keys, [])
         let typo = try ConfigSchema.unknownKeys(in: ConfigLoader.rawMapping(
@@ -153,12 +151,22 @@ final class StaleBasisConfigTests: XCTestCase {
                                          suggestion: "stale_basis")])
     }
 
-    func testLastInventoryIsAColumnField() throws {
-        let columns = try XCTUnwrap(try config(
-            "columns:\n  last_inventory: Last Inventory Update\n").columns)
-        XCTAssertEqual(columns.columnName(for: .lastInventory), "Last Inventory Update")
-        XCTAssertEqual(ColumnField.lastInventory.configKey, "last_inventory")
-        XCTAssertNil(ColumnConfig().columnName(for: .lastInventory))
+    /// 2.11 retired `columns`, `mobile_columns` and `charts.archive_current_csv`: a file that
+    /// still holds them decodes, and the rest of it reads as before.
+    func testAConfigStillHoldingRetiredColumnKeysDecodes() throws {
+        let decoded = try config("""
+        columns:
+          last_inventory: Last Inventory Update
+        mobile_columns:
+          device_name: Name
+        charts:
+          archive_current_csv: true
+          save_png: false
+        thresholds:
+          stale_device_days: 21
+        """)
+        XCTAssertEqual(decoded.thresholds?.staleDeviceDays, 21)
+        XCTAssertEqual(decoded.charts?.savePng, false)
     }
 
     // MARK: - The Config screen's save

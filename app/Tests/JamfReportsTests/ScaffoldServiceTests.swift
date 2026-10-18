@@ -121,22 +121,4 @@ final class ScaffoldServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         XCTAssertTrue(try ScaffoldService.readSample(from: url).headers.isEmpty)
     }
-
-    // MARK: - Config Doctor's per-field scorer
-
-    /// The per-field scorer (Config Doctor) has no exclusivity, so `model` carries an exclude of
-    /// its own for the identifier header.
-    func test_bestColumnMatch_modelIgnoresTheIdentifierHeader() {
-        let headers = ["Computer Name", "Model Identifier"]
-        XCTAssertNil(ScaffoldService.bestColumnMatch(
-            headers: headers, logical: "model", family: .computers))
-        XCTAssertEqual(
-            ScaffoldService.bestColumnMatch(
-                headers: headers, logical: "model_identifier", family: .computers)?.header,
-            "Model Identifier")
-        XCTAssertEqual(
-            ScaffoldService.bestColumnMatch(
-                headers: headers + ["Model"], logical: "model", family: .computers)?.header,
-            "Model")
-    }
 }

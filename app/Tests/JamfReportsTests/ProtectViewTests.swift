@@ -119,4 +119,51 @@ final class ProtectViewTests: XCTestCase {
         XCTAssertEqual(
             ProtectView.spokenState(false, trueWord: "granted", falseWord: "denied"), "denied")
     }
+
+    // MARK: - Jamf Pro match text
+
+    private func protectRows(_ count: Int) throws -> [ProtectComputerRow] {
+        let data = try JSONSerialization.data(
+            withJSONObject: (0..<count).map { ["uuid": "u\($0)", "hostname": "h\($0)"] })
+        return try JSONDecoder().decode([ProtectComputerRow].self, from: data)
+    }
+
+    private func proMac(_ serial: String) -> DeviceInventoryRecord {
+        var record = DeviceInventoryRecord.empty(id: serial, source: "test")
+        record.serial = serial
+        return record
+    }
+
+    func testMatchTextOmitsZeroCounts() {
+        let match = ProtectProCorrelation(protectCount: 12, matched: 12)
+        XCTAssertEqual(ProtectView.matchSummary(match),
+                       "12 of 12 Protect computers match a Jamf Pro computer.")
+        XCTAssertEqual(ProtectView.matchNotes(match), [])
+    }
+
+    func testMatchTextPlural() throws {
+        let match = ProtectProCorrelation(
+            protectCount: 10, matched: 3, ambiguous: 2, noIdentifier: 2,
+            notInPro: try protectRows(3), proWithoutProtect: [proMac("A"), proMac("B")])
+        XCTAssertEqual(ProtectView.matchNotes(match), [
+            "3 Protect computers have no Jamf Pro record.",
+            "2 Jamf Pro Macs have no Protect record.",
+            "2 Protect computers match more than one Jamf Pro computer and are not counted.",
+            "2 Protect computers report no UUID or serial.",
+        ])
+    }
+
+    func testMatchTextSingular() throws {
+        let match = ProtectProCorrelation(
+            protectCount: 1, matched: 0, ambiguous: 1, noIdentifier: 1,
+            notInPro: try protectRows(1), proWithoutProtect: [proMac("A")])
+        XCTAssertEqual(ProtectView.matchSummary(match),
+                       "0 of 1 Protect computer matches a Jamf Pro computer.")
+        XCTAssertEqual(ProtectView.matchNotes(match), [
+            "1 Protect computer has no Jamf Pro record.",
+            "1 Jamf Pro Mac has no Protect record.",
+            "1 Protect computer matches more than one Jamf Pro computer and is not counted.",
+            "1 Protect computer reports no UUID or serial.",
+        ])
+    }
 }

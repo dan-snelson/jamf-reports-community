@@ -305,6 +305,21 @@ final class DemoDataSecurityTests: XCTestCase {
         }
     }
 
+    /// The Protect screen's "Jamf Pro match" card: the pilot's 12 Macs are 12 of the fleet's
+    /// 524, matched by serial, and the rest of the fleet has no Protect record.
+    func testProtectPilotMatchesTheFleetBySerial() {
+        let match = ProtectProCorrelation.build(
+            protect: DemoData.protectSnapshot.computers, pro: DemoData.outreachRecords)
+        XCTAssertEqual(Set(DemoData.fleetMacs.map(\.serial)).count, DemoData.totalDevices)
+        XCTAssertEqual(match.protectCount, 12)
+        XCTAssertEqual(match.matched, 12)
+        XCTAssertTrue(match.notInPro.isEmpty)
+        XCTAssertEqual(match.ambiguous + match.noIdentifier, 0)
+        XCTAssertEqual(match.proWithoutProtect.count, DemoData.totalDevices - 12)
+        XCTAssertEqual(ProtectView.matchSummary(match),
+                       "12 of 12 Protect computers match a Jamf Pro computer.")
+    }
+
     // MARK: - Security Posture
 
     func testSecurityPostureCountsTheFleetsControls() {

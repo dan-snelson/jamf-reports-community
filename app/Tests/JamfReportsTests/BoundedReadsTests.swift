@@ -362,4 +362,40 @@ final class BoundedReadsTests: XCTestCase {
         let oversize = await detail(live: nil)
         XCTAssertNil(oversize)
     }
+
+    // MARK: - 2.11 snapshot and manifest readers
+
+    func testGroupSnapshotsAreNotReadFromAFIFOOrALink() throws {
+        let dir = root.appendingPathComponent("groups", isDirectory: true)
+        let pipe = dir.appendingPathComponent("searches.json")
+        try fifo(at: pipe)
+        let real = dir.appendingPathComponent("real.json")
+        try Data("[]".utf8).write(to: real)
+        let linked = dir.appendingPathComponent("linked.json")
+        try link(linked, to: real)
+        let snapshot = within {
+            GroupInventoryService.load(
+                searchesURL: pipe, computerGroupsURL: linked, mobileGroupsURL: nil)
+        }
+        XCTAssertEqual(snapshot?.decodedAnySource, false)
+    }
+
+    func testBackupManifestFIFOIsNotReadByTheProtectOrPruneReaders() throws {
+        let backup = root.appendingPathComponent("backup", isDirectory: true)
+        try fifo(at: backup.appendingPathComponent("manifest.json"))
+        let finished = within { BackupProductResult.protect(inBackup: backup) == nil }
+        XCTAssertEqual(finished, true)
+    }
+
+    func testLatestSnapshotAndEACandidatesRefuseAPlantedFIFO() throws {
+        let kind = root.appendingPathComponent("ea-results", isDirectory: true)
+        try fifo(at: kind.appendingPathComponent("ea-results_20991231T000000.json"))
+        let dataDir: URL = root
+        let threw = within {
+            (try? ReportEngine.loadLatestSnapshotData(kind: "ea-results", dataDir: dataDir)) == nil
+        }
+        XCTAssertEqual(threw, true)
+        let candidates = within { CollectedEACandidates.load(dataDir: dataDir, tracked: []) }
+        XCTAssertEqual(candidates?.isEmpty, true)
+    }
 }

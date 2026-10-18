@@ -33,7 +33,10 @@ enum CollectedEACandidates {
     static func load(dataDir: URL, tracked: Set<String>) -> [CollectedEACandidate] {
         func newest(_ kind: String) -> Data? {
             FileManager.newestJSONFile(in: dataDir.appendingPathComponent(kind, isDirectory: true))
-                .flatMap { try? Data(contentsOf: $0) }
+                .flatMap {
+                    try? BoundedFile.read(
+                        $0, limit: BoundedFile.snapshotLimit, followSymlinks: false)
+                }
         }
         let rows = newest("ea-results").flatMap { EAResultRow.decodeSnapshot($0).rows } ?? []
         let definitions = newest("computer-extension-attributes")

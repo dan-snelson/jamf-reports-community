@@ -97,7 +97,9 @@ struct BackupProductResult: Sendable, Hashable {
 
     /// The Protect result recorded in `backupDir`'s manifest, or nil.
     static func protect(inBackup backupDir: URL) -> BackupProductResult? {
-        guard let data = try? Data(contentsOf: backupDir.appendingPathComponent("manifest.json")),
+        guard let data = try? BoundedFile.read(
+                backupDir.appendingPathComponent("manifest.json"),
+                limit: BoundedFile.documentLimit, followSymlinks: false),
               let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         return protect(inManifest: manifest)

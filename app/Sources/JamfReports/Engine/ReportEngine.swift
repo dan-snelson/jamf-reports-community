@@ -4042,7 +4042,7 @@ struct ReportEngine: Sendable {
                 throw SnapshotCacheExpired(kind: kind, ageHours: ageHours, limitHours: maxCacheAgeHours)
             }
         }
-        return try Data(contentsOf: url)
+        return try BoundedFile.read(url, limit: BoundedFile.snapshotLimit, followSymlinks: false)
     }
 
     /// Merge `ea-results` snapshot into computer rows.

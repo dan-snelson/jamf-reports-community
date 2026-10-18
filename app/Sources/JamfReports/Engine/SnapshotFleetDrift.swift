@@ -83,8 +83,11 @@ extension CoreDashboard {
         guard let pair = driftSnapshots() else {
             throw CoreDashboardError.noCachedData(names: ["computers (two different days)"])
         }
-        guard let current = ComputerDates.decodeSnapshot(try Data(contentsOf: pair.current.url)),
-              let prior = ComputerDates.decodeSnapshot(try Data(contentsOf: pair.prior.url)) else {
+        func read(_ url: URL) throws -> Data {
+            try BoundedFile.read(url, limit: BoundedFile.snapshotLimit, followSymlinks: false)
+        }
+        guard let current = ComputerDates.decodeSnapshot(try read(pair.current.url)),
+              let prior = ComputerDates.decodeSnapshot(try read(pair.prior.url)) else {
             throw CoreDashboardError.noCachedData(names: ["computers"])
         }
         let rule = config.staleRule

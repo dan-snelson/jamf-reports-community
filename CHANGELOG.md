@@ -133,6 +133,10 @@ versions in this repository map to git tags.
   used, instead of writing to the working directory or the temporary folder. A refused
   `archive_dir` skips archiving old runs, with one warning, instead of moving them into a folder
   beside the reports. (#284)
+- Cached snapshots used by reports and the daily summary, Fleet Drift, Adopt EAs, group
+  inventory and backup manifests are read with a size limit and refuse a link or a named pipe at
+  the file's name. Before, a pipe planted in a shared folder could freeze a report, a scheduled
+  run or the backup prune. (#284)
 - A backup manifest with an out-of-range Jamf Protect object count no longer crashes the Backups
   screen. A count that is not a whole number from 0 to 2,147,483,647 is ignored. (#284)
 

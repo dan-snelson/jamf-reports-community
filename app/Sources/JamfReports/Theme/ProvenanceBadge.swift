@@ -50,7 +50,7 @@ struct ProvenanceBadge: View {
 
     private var helpText: String {
         var text = "This screen renders the once-a-day summary digest, not live inventory. "
-            + "Per-device truth lives on the Devices, Patch, Updates, and posture screens."
+            + "Per-device truth lives on the Computers, Patch, Updates, and posture screens."
         if let sources, !sources.isEmpty {
             let detail = sources.sorted { $0.key < $1.key }
                 .map { "\($0.key): \($0.value)" }

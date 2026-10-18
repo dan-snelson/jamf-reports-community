@@ -130,7 +130,7 @@ struct EmptyStateAction {
     Card(padding: 32) {
         EmptyStateView(
             systemImage: "desktopcomputer.and.arrow.down",
-            title: "No device inventory yet",
+            title: "No computer inventory yet",
             message: "run Generate Report to populate"
         )
     }

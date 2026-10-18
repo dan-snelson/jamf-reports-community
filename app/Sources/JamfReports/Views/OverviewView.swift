@@ -1635,11 +1635,11 @@ struct OverviewView: View {
                     }
                     Divider().background(Theme.Colors.hairline)
                     HStack {
-                        Text("Use Devices to inspect individual records and filter by OS version.")
+                        Text("Use Computers to inspect individual records and filter by OS version.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                         Spacer()
-                        PNPButton(title: "Open Devices", icon: Tab.devices.sfSymbol, size: .sm) {
+                        PNPButton(title: "Open Computers", icon: Tab.devices.sfSymbol, size: .sm) {
                             navigate(to: .devices)
                         }
                     }
@@ -1721,11 +1721,11 @@ struct OverviewView: View {
                     )
                     Divider().background(Theme.Colors.hairline)
                     HStack {
-                        Text("Open Devices for host-level status, or Config to adjust tracked agent columns.")
+                        Text("Open Computers for host-level status, or Config to adjust tracked agent columns.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                         Spacer()
-                        PNPButton(title: "Devices", icon: Tab.devices.sfSymbol, size: .sm) {
+                        PNPButton(title: "Computers", icon: Tab.devices.sfSymbol, size: .sm) {
                             navigate(to: .devices)
                         }
                         PNPButton(title: "Config", icon: Tab.config.sfSymbol, size: .sm) {
@@ -1750,7 +1750,7 @@ struct OverviewView: View {
             }
             HStack {
                 Spacer()
-                PNPButton(title: "Open Full Device Inventory", icon: Tab.devices.sfSymbol) {
+                PNPButton(title: "Open Full Computer Inventory", icon: Tab.devices.sfSymbol) {
                     navigate(to: .devices)
                 }
             }
@@ -1800,27 +1800,27 @@ struct OverviewView: View {
             "Excludes devices stale beyond \(workspace.configState.staleRule.days)d"
             + (workspace.configState.staleRule.usesDefaultBasis
                 ? "" : " (\(workspace.configState.staleRule.basisPhrase))")
-            + ". Open Devices to inspect records contributing to this count."
+            + ". Open Computers to inspect records contributing to this count."
         case .compliance:
             latest?.complianceIsProxy == true
                 ? "Control-gap proxy (FileVault/SIP/Firewall/Gatekeeper). Configure a Compliance EA for true mSCP banding."
                 : "Open Health Audit for controls, findings, and recommendations."
         case .fileVault:
-            "Open Devices to inspect FileVault state on individual Macs."
+            "Open Computers to inspect FileVault state on individual Macs."
         case .osCurrent:
-            "Open Devices to inspect macOS versions and filter inventory."
+            "Open Computers to inspect macOS versions and filter inventory."
         case .edrAgent, .agent:
-            "Open Devices or Config to review security-agent tracking."
+            "Open Computers or Config to review security-agent tracking."
         case .stale:
-            "Open Devices to focus on stale inventory records."
+            "Open Computers to focus on stale inventory records."
         case .patch:
-            "Open Devices to review devices with patch failures."
+            "Open Computers to review computers with patch failures."
         case .securityScore:
             "Weighted composite from Security Posture. Open that tab to see the breakdown."
         case .mscpBandTrend:
             "Per-baseline mSCP compliance band trends over time. Open Compliance Posture for current distribution."
         case .managedDevices:
-            "Historical computers-vs-mobile split. Open Devices or Mobile Fleet to inspect current records."
+            "Historical computers-vs-mobile split. Open Computers or Mobile Fleet to inspect current records."
         case .sip, .firewall, .gatekeeper:
             "Open Security Posture for the per-control breakdown."
         }

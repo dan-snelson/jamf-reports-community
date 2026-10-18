@@ -403,10 +403,10 @@ struct FleetOverviewView: View {
                                 open(row.profile, tab: .overview)
                             }
                             .help("Switch to `\(row.profile)` and open the Overview tab.")
-                            PNPButton(title: "Devices", icon: Tab.devices.sfSymbol, size: .sm) {
+                            PNPButton(title: "Computers", icon: Tab.devices.sfSymbol, size: .sm) {
                                 open(row.profile, tab: .devices)
                             }
-                            .help("Switch to `\(row.profile)` and open the Devices tab.")
+                            .help("Switch to `\(row.profile)` and open the Computers tab.")
                             PNPButton(title: "Runs", icon: Tab.runs.sfSymbol, size: .sm) {
                                 open(row.profile, tab: .runs)
                             }

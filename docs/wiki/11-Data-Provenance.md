@@ -28,7 +28,7 @@ Tier 1 kinds include:
 
 Feeds these screens:
 
-- **Devices** table and detail panel
+- **Computers** table and detail panel
 - **Device Lookup**
 - Failure drawers in **Patch Compliance** and **OS Updates**
 - **Extension Attributes** coverage and value distributions
@@ -86,7 +86,7 @@ most recent collection run, which may be hours or days old depending on your sch
 
 None of the three tiers above populate without a jamf-cli connection. A workspace running
 on a CSV export alone (no jamf-cli, or jamf-cli installed but never authenticated) only
-populates **Devices** and **Offline Outreach** — both render from CSV columns plus
+populates **Computers** and **Offline Outreach** — both render from CSV columns plus
 `custom_eas` / `security_agents`, not from any jamf-cli tier. Every other screen in this
 document stays empty until jamf-cli is connected and collecting. See
 [App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding) for how a CSV-only setup
@@ -136,7 +136,7 @@ screen that reads it. Per-source success and failure counts are kept in the work
 state files. See
 [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).
 
-**Patch Compliance, Security Posture, OS Updates, and Devices** each show a row of
+**Patch Compliance, Security Posture, OS Updates, and Computers** each show a row of
 per-kind freshness chips — one per raw jamf-cli kind that screen reads, showing the age of
 the newest on-disk snapshot for that kind. A kind the screen expects but has never
 collected renders a distinct red "never" chip rather than silently omitting it, so a

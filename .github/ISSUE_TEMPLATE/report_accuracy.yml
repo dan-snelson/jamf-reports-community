@@ -46,7 +46,7 @@ body:
       options:
         - Overview / score cards
         - Fleet Overview
-        - Devices
+        - Computers
         - Security Posture or Compliance Posture
         - Patch, Updates, or Policies & Profiles
         - Historical Trends

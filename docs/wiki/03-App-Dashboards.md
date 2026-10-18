@@ -2,7 +2,7 @@
 
 The app organizes its screens into sidebar groups. This page is a tour of each group.
 Every non-core screen can be hidden from **Settings → Sidebar Visibility**; the core
-screens (Overview, Devices, Data Sources, Settings) cannot be hidden.
+screens (Overview, Computers, Data Sources, Settings) cannot be hidden.
 
 Most dashboards read cached `jamf-cli` snapshots already on disk — opening a dashboard
 does not issue new API calls. Data is refreshed by collection (see
@@ -15,7 +15,7 @@ not have to be on Security Posture to learn that security data stopped landing. 
 [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).
 
 With no jamf-cli connection at all — a CSV-only workspace — most of these screens have
-nothing to show: Devices and Offline Outreach render from CSV columns (plus
+nothing to show: Computers and Offline Outreach render from CSV columns (plus
 `custom_eas` / `security_agents`) and stay populated; everything else on this page needs
 jamf-cli data. See [App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding) for how a
 CSV-only or Jamf School-only setup gets through onboarding. Jamf School data doesn't feed
@@ -39,7 +39,7 @@ these interactive dashboards either — it produces a separate generated workboo
 - **Fleet Overview** — a multi-profile roll-up: one card per workspace with per-profile
   health signals, so MSPs and teams can scan every tenant at once.
   Data source: daily summary digest (tier 3) aggregated across profiles.
-- **Devices** — the device inventory table with search, sort, and a Priority Action
+- **Computers** — the computer inventory table with search, sort, and a Priority Action
   filter. The detail panel shows a per-device risk breakdown. Freshness chips show the
   age of each underlying data source (a red "never" chip flags a kind that's never been
   collected), and a "Collect now" banner appears when the cache is stale.
@@ -71,7 +71,7 @@ these interactive dashboards either — it produces a separate generated workboo
   [Period Reports](https://github.com/tonyyo11/jamf-reports-community/wiki/06c-Period-Reports).
   Data source: generated report catalog (no single tier; see [Data Provenance](https://github.com/tonyyo11/jamf-reports-community/wiki/11-Data-Provenance) for report composition).
 
-![Devices](images/devices.png)
+![Computers](images/devices.png)
 
 ## Posture
 
@@ -129,7 +129,7 @@ these interactive dashboards either — it produces a separate generated workboo
   identifier with the Macs where each is inactive or invalid, and pending or
   failed DDM software updates — all from the weekly per-device scan. On a
   Platform API profile the blueprint deployment sections appear as well. Per-Mac
-  detail is in Devices; failed and stuck MDM commands are in Health Audit →
+  detail is in Computers; failed and stuck MDM commands are in Health Audit →
   Command health.
   Data source: per-device `pro declarative-device-management status-items` (`pro ddm-status`
   before jamf-cli 1.29) (tier 1); Jamf Platform API

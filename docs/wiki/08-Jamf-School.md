@@ -50,7 +50,7 @@ again and the School profile is not used; Config Doctor warns about it. Set
 `school_cli.enabled: false` there and set Jamf School up as its own workspace.
 
 Jamf School data feeds the standalone workbook described above — it does not appear in
-the interactive dashboards (Overview, Devices, Security Posture, and the rest), which are
+the interactive dashboards (Overview, Computers, Security Posture, and the rest), which are
 Jamf Pro/jamf-cli surfaces; see [Dashboards](https://github.com/tonyyo11/jamf-reports-community/wiki/03-App-Dashboards).
 
 From 2.10, a Jamf School workspace shows only the screens that apply to it: Overview, Fleet

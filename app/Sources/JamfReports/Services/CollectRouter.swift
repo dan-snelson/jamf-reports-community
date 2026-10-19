@@ -246,6 +246,22 @@ enum CollectRouter {
         return ProfileAuthMethod.refusal(profile: profile, operation: operation)
     }
 
+    /// Why `pro backup` has nothing to do for a Jamf School workspace; the scheduled skip, the
+    /// CLI `backup` and `schedules add --mode backup` all say this.
+    static func schoolBackupReason(profile: String) -> String {
+        "`pro backup` is a Jamf Pro command and '\(profile)' is configured for Jamf School "
+            + "(school_cli.enabled in config.yaml)"
+    }
+
+    /// Why a backup of `profile` must not run, or nil: a Jamf School workspace (decided from
+    /// config.yaml, so it holds without a readable jamf-cli) or any `proRunRefusal`.
+    static func backupRefusal(profile: String, config: ReportConfig?) -> String? {
+        if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
+            return schoolBackupReason(profile: profile)
+        }
+        return proRunRefusal(profile: profile, operation: "Backup", config: config)
+    }
+
     /// `proRunRefusal` for a schedule, the rule `scheduledRunSingleBody` applies: a per-profile
     /// schedule that sends commands. A multi schedule and `jamf-cli-only` are never refused here.
     static func scheduleRunRefusal(_ schedule: Schedule) -> String? {

@@ -65,7 +65,7 @@ final class CLIParsingTests: XCTestCase {
         XCTAssertThrowsError(try Generate.parse([]))
     }
 
-    func testScaffoldRequiresCsvAndOut() throws {
+    func testScaffoldParsesCsvAndOut() throws {
         let cmd = try Scaffold.parse(["--csv", "/tmp/x.csv", "--out", "/tmp/config.yaml"])
         XCTAssertEqual(cmd.csv, "/tmp/x.csv")
         XCTAssertEqual(cmd.out, "/tmp/config.yaml")
@@ -152,5 +152,12 @@ final class CLIParsingTests: XCTestCase {
             XCTAssertEqual(CLIBridge.backupOutputIsPrunable(exit: code), expected,
                             "exit \(code)")
         }
+    }
+
+    /// An error thrown out of `run()` reaches ArgumentParser, which exits 1: the shell never
+    /// sees 3 for expired credentials from `collect` (docs/wiki/07-Command-Line.md says so).
+    func testAnEngineErrorExitsOneNotThree() {
+        let expired = ReportEngineError.authExpired(profile: "p", failedCount: 2)
+        XCTAssertEqual(JamfReportsCLI.exitCode(for: expired), ExitCode(1))
     }
 }

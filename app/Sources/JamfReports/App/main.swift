@@ -341,10 +341,10 @@ private func scheduledRunSingleBody(
         // schedule — log why and return success.
         let backupDetected = ProfileProductType.detect(from: routingConfig, profile: profile)
         guard backupDetected.type == .jamfPro else {
-            let message = "[skip] scheduled backup skipped for '\(profile)': `pro backup` is a "
-                + "Jamf Pro command and this profile is configured for Jamf School "
-                + "(school_cli.enabled in config.yaml). Nothing to back up — not a failure. "
-                + "Exclude this profile from the backup schedule to stop scheduling it."
+            let message = "[skip] scheduled backup skipped for '\(profile)': "
+                + "\(CollectRouter.schoolBackupReason(profile: profile)). Nothing to back up — "
+                + "not a failure. Exclude this profile from the backup schedule to stop "
+                + "scheduling it."
             print(message)
             recorder?.record(message)
             recorder?.finish(exitCode: 0)
@@ -832,7 +832,13 @@ func runSchoolCheck(profile: String) -> Int32 {
         return 1
     }
     do {
-        _ = try ConfigLoader.load(from: configURL)
+        let config = try ConfigLoader.load(from: configURL)
+        // Without this a Jamf Pro workspace prints a [miss] line per School kind and exits 0.
+        guard ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool else {
+            fputs("[error] '\(profile)' is not a Jamf School workspace (school_cli.enabled is "
+                + "not set in its config.yaml); use `jamf-reports check` instead\n", stderr)
+            return 1
+        }
         print("[ok] config.yaml decoded successfully")
         let schoolSnapshotKinds = ReportEngine.schoolCommandMatrix(profile: profile).map(\.kind)
         if let dataDir = try? WorkspacePaths.dataDir(for: profile) {

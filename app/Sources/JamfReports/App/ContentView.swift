@@ -263,6 +263,7 @@ struct ContentView: View {
         case .protectDashboard:  ProtectView()
         case .mobileFleet:       MobileFleetView()
         case .groupInventory:    GroupsView()
+        case .schoolDevices:     SchoolDevicesView()
         }
     }
 
@@ -298,6 +299,7 @@ struct ContentView: View {
         case .protectDashboard:  "ALERTS & AGENTS"
         case .mobileFleet:       "IOS · IPADOS"
         case .groupInventory:    "CLASSIC API"
+        case .schoolDevices:     "JAMF SCHOOL"
         }
     }
 

@@ -9,6 +9,10 @@ versions in this repository map to git tags.
 
 ### Added
 
+- **Devices** on a Jamf School workspace lists the devices Jamf School manages: name, serial,
+  model, OS, managed, supervised and last check-in, with counts by platform, filters for
+  managed, unmanaged and stale devices, and a search. Devices waiting in Automated Device
+  Enrollment are listed below them.
 - **Groups & Searches** now shows how many members each group has, its description, and flags
   empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
   Groups**), with a summary row that also counts policies with no scope. Saved mobile

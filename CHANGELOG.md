@@ -56,6 +56,10 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- On a Jamf School workspace the weekly scan schedule no longer collects School a second time,
+  and a School collect skips sources it fetched in the last 12 hours unless you click Collect
+  now, so a morning no longer leaves ten copies of each snapshot. jamf-cli's "hint:" lines no
+  longer fill School run logs, and `jamf-reports school-check` lists all ten School sources.
 - Jamf Reports no longer runs a Jamf Pro (`pro`) command against a Jamf School profile.
   Generate with Include Health Audit ticked skips the audit for the School template, and the
   health audit, group analysis, backup, backup diff and device lookup refuse a School profile

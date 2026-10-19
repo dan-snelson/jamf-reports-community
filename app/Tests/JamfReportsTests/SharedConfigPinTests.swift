@@ -787,7 +787,7 @@ final class SharedConfigPinTests: XCTestCase {
             try await CollectRouter.run(
                 profile: profile, config: config,
                 proCollect: { _, _, _, _, _, _ in .collected },
-                schoolCollect: { _, _, _ in },
+                schoolCollect: { _, _, _, _, _ in },
                 onLine: { lines.add($0.text) })
             XCTAssertEqual(
                 lines.all.first,

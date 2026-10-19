@@ -293,7 +293,7 @@ final class CollectRouterTests: XCTestCase {
             config: config,
             workspacePaths: WorkspacePaths.self,
             proCollect: { _, _, _, _, _, _ in .collected },
-            schoolCollect: { _, _, _ in },
+            schoolCollect: { _, _, _, _, _ in },
             protectCollect: { _, _, _ in throw NSError(domain: "test", code: 42) },
             onLine: { line in
                 watcher.observe(line.text)
@@ -346,7 +346,7 @@ final class CollectRouterTests: XCTestCase {
                 capturedForce.set(force)
                 return .collected
             },
-            schoolCollect: { _, _, _ in },
+            schoolCollect: { _, _, _, _, _ in },
             protectCollect: { _, _, _ in },
             onLine: { _ in }
         )
@@ -473,7 +473,7 @@ private struct RouterSpy {
 
     var schoolCollect: CollectRouter.SchoolCollect {
         let counter = schoolCounter
-        return { _, _, _ in counter.increment() }
+        return { _, _, _, _, _ in counter.increment() }
     }
 
     var protectCollect: CollectRouter.ProtectCollect {

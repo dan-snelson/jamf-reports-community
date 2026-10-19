@@ -816,11 +816,7 @@ func runSchoolCheck(profile: String) -> Int32 {
     do {
         _ = try ConfigLoader.load(from: configURL)
         print("[ok] config.yaml decoded successfully")
-        let schoolSnapshotKinds = [
-            "school-overview", "school-devices", "school-device-groups",
-            "school-users", "school-classes", "school-apps",
-            "school-profiles", "school-locations",
-        ]
+        let schoolSnapshotKinds = ReportEngine.schoolCommandMatrix(profile: profile).map(\.kind)
         if let dataDir = try? WorkspacePaths.dataDir(for: profile) {
             let fm = FileManager.default
             for kind in schoolSnapshotKinds {

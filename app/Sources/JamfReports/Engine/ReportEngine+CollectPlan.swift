@@ -236,6 +236,44 @@ extension ReportEngine {
         ) + ["[plan] \(deviceScan.planText)"]
     }
 
+    /// The School matrix with this run's skips. School has no per-device scan, so its sources
+    /// go with the refresh or inventory tier (a scan-only run collects nothing) at the refresh
+    /// cadence; `force` (Collect now) ignores the cadence.
+    static func planSchoolCollect(
+        profile: String, tiers: Set<CollectionTier>, force: Bool, now: Date = Date(),
+        lastRun: (String) -> Date?
+    ) -> [PlannedKind] {
+        let cadence = Cadence.seconds(CollectionTier.refresh.intervalSeconds)
+        return schoolCommandMatrix(profile: profile).map { args, kind in
+            let skip: CollectSkipReason?
+            if tiers.isDisjoint(with: [.refresh, .inventory]) {
+                skip = .tierNotSelected(.inventory)
+            } else if !force, !CadenceResolver.isDue(
+                lastRun: lastRun(kind), cadence: cadence, now: now) {
+                skip = .notDue(lastRun: lastRun(kind), cadence: cadence)
+            } else {
+                skip = nil
+            }
+            return PlannedKind(args: args, kind: kind, skip: skip)
+        }
+    }
+
+    /// The `[plan]` lines for a fixed-list plan (Jamf School): what runs, then what is skipped
+    /// under its reason.
+    static func collectPlanLines(profile: String, fixedPlan plan: [PlannedKind]) -> [String] {
+        var groups: [(label: String, kinds: [String])] = []
+        for item in plan {
+            guard let skip = item.skip else { continue }
+            if let index = groups.firstIndex(where: { $0.label == skip.planLabel }) {
+                groups[index].kinds.append(item.kind)
+            } else {
+                groups.append((skip.planLabel, [item.kind]))
+            }
+        }
+        return collectPlanLines(
+            profile: profile, running: plan.filter { $0.skip == nil }.map(\.kind), skipped: groups)
+    }
+
     /// The `[plan]` lines for a collect with a fixed list (Jamf School, Protect): `running`
     /// kinds, and `skipped` kinds grouped under their reason.
     static func collectPlanLines(

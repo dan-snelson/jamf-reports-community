@@ -129,6 +129,9 @@ versions in this repository map to git tags.
 
 ### Security
 
+- The saved mobile device inventory no longer keeps Lost Mode text (the phone number, location,
+  message and footnote shown on a lost device). Nothing in the app read it, and the snapshot can
+  sit in a shared folder. Whether Lost Mode is on is still kept.
 - A link another Mac plants on a shared folder at `Generated Reports` or at the default
   `archive` folder no longer redirects where reports and archived runs are written. The app
   refuses the link, logs one warning naming the folder and writes nothing through it. (#284)

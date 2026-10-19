@@ -999,11 +999,13 @@ final class OnboardingFlow {
     /// cached data to render — `generate` alone throws `noCachedData` on a
     /// brand-new workspace. The per-device scan tier is skipped here so a
     /// large fleet's first report doesn't wait on it; it runs later on
-    /// schedule or via Collect now. The Jamf School path is unchanged:
-    /// `schoolGenerate` fetches its own data at generate time.
+    /// schedule or via Collect now. The Jamf School path collects too (the
+    /// collect routes it to the School loop) and then writes the School
+    /// workbook: `schoolGenerate` only reads snapshots, so without the collect
+    /// the first School workbook had no sheets.
     ///
-    /// `collect` / `generate` default to the real `CLIBridge` calls; tests
-    /// inject spies to prove ordering without spawning jamf-cli.
+    /// `collect` / `generate` / `schoolGenerate` default to the real `CLIBridge`
+    /// calls; tests inject spies to prove ordering without spawning jamf-cli.
     func runFirstReport(
         workspaceStore: WorkspaceStore,
         collect: @escaping FirstReportStep = { profile, onLine in
@@ -1014,6 +1016,11 @@ final class OnboardingFlow {
         generate: @escaping FirstReportStep = { profile, onLine in
             try await CLIBridge.holdingGenerate {
                 try await CLIBridge().generate(profile: profile, onLine: onLine)
+            }
+        },
+        schoolGenerate: @escaping FirstReportStep = { profile, onLine in
+            try await CLIBridge.holdingGenerate {
+                try await CLIBridge().schoolGenerate(profile: profile, onLine: onLine)
             }
         }
     ) async {
@@ -1027,20 +1034,6 @@ final class OnboardingFlow {
         let profile = profileName.trimmed
         let onLine: @Sendable (CLIBridge.LogLine) -> Void = { [weak self] line in
             Task { @MainActor in self?.firstReportOutput.append(line) }
-        }
-
-        if productPath == .school {
-            let exit: Int32
-            do {
-                exit = try await CLIBridge().schoolGenerate(
-                    profile: profile, onLine: onLine)
-            } catch {
-                firstReportExitCode = -1
-                lastError = error.localizedDescription
-                return
-            }
-            finishFirstReport(exit: exit, workspaceStore: workspaceStore)
-            return
         }
 
         let collectExit: Int32
@@ -1059,7 +1052,8 @@ final class OnboardingFlow {
 
         let exit: Int32
         do {
-            exit = try await generate(profile, onLine)
+            let step = productPath == .school ? schoolGenerate : generate
+            exit = try await step(profile, onLine)
         } catch {
             firstReportExitCode = -1
             lastError = error.localizedDescription

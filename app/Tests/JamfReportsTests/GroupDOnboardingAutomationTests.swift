@@ -87,11 +87,48 @@ final class GroupDOnboardingAutomationTests: XCTestCase {
         }
     }
 
-    // The Jamf School path is deliberately left unchanged (per D1) and so is
-    // not given an injectable seam here — it calls the real, un-mocked
-    // `CLIBridge().schoolGenerate`, which would spawn a real jamf-cli
-    // process. It is exercised by the existing School-path onboarding tests,
-    // not this group.
+    /// `schoolGenerate` only reads snapshots: a first School report with no collect
+    /// before it was a workbook with no sheets.
+    func test_runFirstReport_schoolPath_collectsBeforeSchoolGenerate() async throws {
+        await withIsolatedWorkspacesRoot {
+            let flow = OnboardingFlow()
+            flow.productPath = .school
+            flow.profileName = "grpd\(Int.random(in: 1000...9999))"
+            let workspace = WorkspaceStore(demoMode: true)
+            let recorder = CallRecorder()
+
+            await flow.runFirstReport(
+                workspaceStore: workspace,
+                collect: { _, _ in recorder.calls.append("collect"); return 0 },
+                generate: { _, _ in recorder.calls.append("generate"); return 0 },
+                schoolGenerate: { _, _ in recorder.calls.append("schoolGenerate"); return 0 }
+            )
+
+            XCTAssertEqual(recorder.calls, ["collect", "schoolGenerate"])
+            XCTAssertEqual(flow.firstReportExitCode, 0)
+        }
+    }
+
+    func test_runFirstReport_schoolPath_stopsBeforeGenerateOnCollectFailure() async throws {
+        await withIsolatedWorkspacesRoot {
+            let flow = OnboardingFlow()
+            flow.productPath = .school
+            flow.profileName = "grpd\(Int.random(in: 1000...9999))"
+            let workspace = WorkspaceStore(demoMode: true)
+            let recorder = CallRecorder()
+
+            await flow.runFirstReport(
+                workspaceStore: workspace,
+                collect: { _, _ in recorder.calls.append("collect"); return 1 },
+                generate: { _, _ in recorder.calls.append("generate"); return 0 },
+                schoolGenerate: { _, _ in recorder.calls.append("schoolGenerate"); return 0 }
+            )
+
+            XCTAssertEqual(recorder.calls, ["collect"])
+            XCTAssertEqual(flow.firstReportExitCode, 1)
+            XCTAssertNotNil(flow.lastError)
+        }
+    }
 
     // MARK: - D5: the optional "Track your Extension Attributes" row doesn't block completion
 

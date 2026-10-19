@@ -56,6 +56,8 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- A new Jamf School workspace's first report now collects before it writes the workbook. It
+  used to write a workbook with no sheets.
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
 - A schedule whose last success was recorded while the Mac's clock was set ahead is retried

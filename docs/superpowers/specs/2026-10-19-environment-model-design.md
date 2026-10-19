@@ -356,7 +356,7 @@ absent, never 0:
 | `products` (list: `jamf_pro`, `jamf_school`, `platform`, `protect`, `security_cloud`) | the slots that collected that day |
 | `protectComputerCount`, `protectMatchedPct`, `protectAlertCounts` (by severity) | Protect snapshots, `DeviceCorrelation` |
 | `securityRiskCounts` (by category), `securityCoveredPct` | Security Cloud, once collected |
-| `mobileEncryptedPct`, `mobilePasscodePct`, `mobileSupervisedPct` | `mobile-devices-list` |
+| The `mobile` object (replaces `mobileEncryptedPct`, `mobilePasscodePct`, `mobileSupervisedPct`; see the mobile spec, section 4.2) | `mobile-devices-list` |
 | `lastSeenBuckets` (computers and mobile: under 1 day, under 7 days, 7 days or more) | the stale-basis dates, mobile last inventory |
 | `modelFamilyCounts`, `mobileFormFactorCounts`, `osMajorCounts` (computers and mobile) | `computers`, `mobile-devices-list` |
 | `storageBuckets` (computers and mobile: under 80%, 80% or more, 90% or more, and the mean) | new collection (8.1) |
@@ -394,6 +394,12 @@ one Jamf Account credential, for display and for Update credentials for all. Wha
   `jamf_pro` hosts are equal.
 
 ## 10. Multi-environment view (Jamf Insights reference)
+
+Superseded on 2026-10-19 by
+[2026-10-19-mobile-first-class-design.md](2026-10-19-mobile-first-class-design.md) section 6.
+Fleet Overview shows the active environment only, with no selector. Cross-environment figures
+exist only in report-group exports. The tiles below now describe one environment. Kept as
+written for the record.
 
 Jamf Insights' unit is the instance (one Jamf Pro server). A selector at the top picks several,
 and the dashboard updates as instances are selected. Its documentation does not say how figures
@@ -489,7 +495,7 @@ golden command-line test from 3.3 runs in every phase from P1.
 | P8 | `EnvironmentProducts`, `TabVisibility.limited(to:)`, product-aware Overview, Config and report sections. Protect-only environment (L3). School per-kind state and summary (L6) | Tab sets per product mix. A Protect-only collect writes a summary with Mac figures nil. A School summary is written |
 | P9 | Daily summary product and composition fields, Trends and alert keys, `environment.protect_match` Doctor row | Nil when absent. Alert on an absent product never fires. Match-rate row thresholds |
 | P10 | New collection: `computer-storage` reduced kind, mobile storage and battery readers, the App Installers kind | Fixtures taken from real jamf-cli output, never written by hand from documentation. The reducer drops every field outside the allow-list |
-| P11 | Fleet view: selector, tiles, environment rows, `FleetRollup` for the new fields | Device-weighted percentages, "N of M environments", no cross-product totals, mixed-date note. Needs visual verification |
+| P11 | Replaced by the mobile spec's M6: Fleet Overview for the active environment, no selector. `FleetRollup` gains the new fields for report-group exports only. P8 and P9 lose their mobile parts to M2 to M4 (mobile spec, section 7) | See M6 |
 | P12 | Security Cloud: `security_cloud` slot setup, Radar collect, gateway half on `platform` | Blocked on a tenant (#283). Plugs into P3, P4 and P9 |
 | P13 | Docs: wiki (Data Sources, Getting Started, Automation, Security), README, CLAUDE.md/AGENTS.md, CHANGELOG | — |
 

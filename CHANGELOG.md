@@ -79,13 +79,29 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- A Mac that is on only part of the day now gets its daily summary. A daily schedule whose
+  time the Mac misses runs on the first background check of the next day the Mac was off
+  overnight, instead of waiting for a time it will be off again; an always-on Mac still runs at
+  the scheduled time, and a day never runs twice. (#284)
+- A collect that has not produced today's summary after its three retries keeps retrying
+  every hour until midnight, so a laptop that was off the VPN until the afternoon still gets its
+  day. A collect that stood down because another Mac collected recently is retried the same
+  way while today's summary is missing. (#284)
+- A scheduled run whose `config.yaml` exists but does not decode now fails with the decode error
+  in Run History, instead of a Jamf School profile being skipped as "not a Jamf Pro profile"
+  with no error. The failure card and the overdue digest can still be sent, because they read the
+  `notify:` block on its own. (#284)
+- A scheduled run stopped by a jamf-cli below the supported minimum now posts a failure card, and
+  a run skipped because the profile belongs to another Jamf product posts one a day. (#284)
+- A scheduled run that outlasts the six-hour lock limit now ends the background item, instead of
+  leaving a stuck jamf-cli call running beside the next run. (#284)
 - Jamf Pro commands no longer run against a Jamf School, Jamf Protect or Jamf Security Cloud
   login, or an organization-level Platform API profile. Collect, scheduled runs, health audit,
   group analysis, backup, backup diff and device lookup stop with one line naming the product,
   instead of a failed jamf-cli call. Generate with Include Health Audit ticked skips the audit
   for the School template. A scheduled run on such a profile is skipped rather than retried or
-  reported as a failure, shows as failing in Automation with the reason instead of overdue, and
-  `schedules add` refuses it.
+  counted as a failed run, posts one failure card a day when notifications are on, shows as
+  failing in Automation with the reason instead of overdue, and `schedules add` refuses it.
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
 - A Jamf Pro collect that fails as a whole (dead credentials, every call failing) no longer

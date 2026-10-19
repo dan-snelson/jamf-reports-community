@@ -1303,11 +1303,12 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
     var badgeIsGold: Bool { self == .trends }
 
     /// The tabs a Jamf School workspace keeps (2.10): it collects only School data, which no
-    /// Jamf Pro screen reads, so it keeps its own Devices and the screens about the workspace,
-    /// its reports and its automation. Applied by `TabVisibility.limited(toSchool:)`, never
-    /// stored.
+    /// Jamf Pro screen reads, so it keeps its own Overview and Devices and the screens about the
+    /// workspace, its reports and its automation. Fleet Overview reads the daily summary, which
+    /// School does not write yet (environment-model spec P8). Applied by
+    /// `TabVisibility.limited(toSchool:)`, never stored.
     static let schoolTabs: Set<Tab> = [
-        .overview, .fleet, .schoolDevices, .reports, .schedules, .runs, .config, .sources,
+        .overview, .schoolDevices, .reports, .schedules, .runs, .config, .sources,
         .settings, .onboarding,
     ]
 
@@ -1381,6 +1382,9 @@ struct TabVisibility: Sendable, Equatable {
         // downstream code does not need to check twice.
         self.hidden = hidden.filter { !$0.isCoreTab }
     }
+
+    /// False for a tab the workspace's product cannot fill, whatever the user chose.
+    func isAvailable(_ tab: Tab) -> Bool { !unavailable.contains(tab) }
 
     /// True when this tab should appear in the sidebar.
     func isVisible(_ tab: Tab) -> Bool {

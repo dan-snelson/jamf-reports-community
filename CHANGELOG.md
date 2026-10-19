@@ -33,6 +33,11 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- A Jamf School workspace no longer shows Jamf Pro parts it has no data for: Fleet Overview,
+  the Health Audit option and the `summary.json` line in Generate, the Agents, EAs, Platform API
+  and Scoring tabs in Config (Thresholds keeps only the stale threshold), and the Extension
+  Attributes card in Data Sources. Generate lists the School workbook's own tabs, and Settings ›
+  Sidebar Visibility lists only the tabs the workspace has.
 - The **Overview** on a Jamf School workspace now shows School's own data: device counts by
   platform, managed, supervised and stale devices, and each count Jamf School reports (users,
   classes, apps and the rest). It used to show the Jamf Pro cards with nothing in them. Its

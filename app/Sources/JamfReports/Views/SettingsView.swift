@@ -1201,10 +1201,12 @@ struct SettingsView: View {
                     }
                     .help("Restore every hidden tab to the sidebar.")
                 }
-                Text("Hide dashboards you don't use. Core tabs (Overview, Computers, Sources, Settings) cannot be hidden.")
+                Text("Hide dashboards you don't use. Core tabs (Overview, Computers, Data Sources, "
+                     + "Settings) cannot be hidden.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
-                ForEach(SettingsView.toggleableGroups, id: \.label) { group in
+                ForEach(SettingsView.toggleableGroups(school: workspace.isSchoolWorkspace),
+                        id: \.label) { group in
                     visibilityGroupRow(label: group.label, tabs: group.tabs)
                 }
             }
@@ -1213,12 +1215,14 @@ struct SettingsView: View {
         .accessibilityLabel("Sidebar visibility settings")
     }
 
-    /// The sidebar's own groups less the tabs that cannot be hidden, so a tab added to
+    /// The sidebar's own groups less the tabs that cannot be hidden and those the workspace
+    /// does not have (a Jamf School workspace's Jamf Pro tabs), so a tab added to
     /// `Tab.navGroups` gets a switch here with no second list to forget (Groups & Searches
-    /// had none). A group left with only core tabs is dropped.
-    nonisolated static var toggleableGroups: [(label: String, tabs: [Tab])] {
-        Tab.navGroups.compactMap { group in
-            let tabs = group.items.filter { !$0.isCoreTab }
+    /// had none). A group left with no tab to switch is dropped.
+    nonisolated static func toggleableGroups(school: Bool) -> [(label: String, tabs: [Tab])] {
+        let available = TabVisibility().limited(toSchool: school)
+        return Tab.navGroups.compactMap { group in
+            let tabs = group.items.filter { !$0.isCoreTab && available.isAvailable($0) }
             return tabs.isEmpty ? nil : (label: group.label, tabs: tabs)
         }
     }

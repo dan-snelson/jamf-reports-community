@@ -593,6 +593,7 @@ private struct HealthCard: View {
             // could previously only ever say "reported failure", leaving the
             // operator with nowhere to go). Falls back to the original wording
             // for status records written without a numeric code.
+            if let reason = issue.reason { return reason + managedRerunHint(issue) }
             let cause = issue.lastRunExitCode.map {
                 "\(CLIBridge.explainExit($0, operation: "Last run")) (\(last))."
             } ?? "Last run reported failure — \(last)."

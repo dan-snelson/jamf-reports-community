@@ -44,6 +44,9 @@ struct AutomationHealthIssue: Identifiable, Sendable, Equatable {
     /// `.overdue` (nothing ran, so there is no code) and for older status
     /// records written without one.
     let lastRunExitCode: Int32?
+    /// Why the schedule can never run (the product guard's refusal), for a `.failing` issue that
+    /// has no run record to explain it.
+    let reason: String?
 
     init(
         label: String,
@@ -53,7 +56,8 @@ struct AutomationHealthIssue: Identifiable, Sendable, Equatable {
         profile: String = "",
         expectedFire: Date?,
         lastRunFinishedAt: Date?,
-        lastRunExitCode: Int32? = nil
+        lastRunExitCode: Int32? = nil,
+        reason: String? = nil
     ) {
         self.label = label
         self.displayName = displayName
@@ -63,6 +67,7 @@ struct AutomationHealthIssue: Identifiable, Sendable, Equatable {
         self.expectedFire = expectedFire
         self.lastRunFinishedAt = lastRunFinishedAt
         self.lastRunExitCode = lastRunExitCode
+        self.reason = reason
     }
 
     /// True when `label` belongs to the reserved managed-automation label set
@@ -104,6 +109,7 @@ enum AutomationHealth {
     ///   fire plus the grace window has elapsed, the fire is not before the
     ///   workspace existed (`activeSince` — it never had a chance to run),
     ///   and there is no run artifact finishing at or after the expected fire.
+    /// - `.failing` with a `reason`: the product guard refuses the schedule's profile.
     /// - `.failing`: a run artifact exists and its success flag is `false`
     ///   (independent of overdue — a run that fired but failed still needs
     ///   attention). A schedule can be both; overdue takes precedence so the
@@ -130,6 +136,14 @@ enum AutomationHealth {
         }
         return inputs.compactMap { input in
             guard input.enabled else { return nil }
+
+            // Nothing will ever run, so the missing status file is not an overdue run.
+            if let refusal = input.refusal {
+                return AutomationHealthIssue(
+                    label: input.label, displayName: input.displayName, kind: .failing,
+                    isMulti: input.isMulti, profile: input.profile,
+                    expectedFire: input.expectedFire, lastRunFinishedAt: nil, reason: refusal)
+            }
 
             if let expected = input.expectedFire,
                now.timeIntervalSince(expected) >= graceSeconds,

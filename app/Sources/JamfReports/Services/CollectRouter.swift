@@ -246,6 +246,15 @@ enum CollectRouter {
         return ProfileAuthMethod.refusal(profile: profile, operation: operation)
     }
 
+    /// `proRunRefusal` for a schedule, the rule `scheduledRunSingleBody` applies: a per-profile
+    /// schedule that sends commands. A multi schedule and `jamf-cli-only` are never refused here.
+    static func scheduleRunRefusal(_ schedule: Schedule) -> String? {
+        guard !schedule.isMulti, schedule.mode != .jamfCLIOnly else { return nil }
+        return proRunRefusal(
+            profile: schedule.profile, operation: "Scheduled \(schedule.mode.rawValue) run",
+            config: collectRoutingConfig(profile: schedule.profile))
+    }
+
     // MARK: - Default closures (production)
 
     /// Default production closure wrapping `ReportEngine.collect`.

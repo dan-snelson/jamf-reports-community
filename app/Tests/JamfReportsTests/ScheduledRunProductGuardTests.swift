@@ -71,3 +71,60 @@ final class ScheduledRunProductGuardTests: XCTestCase {
             mode: "snapshot-only", cadence: "Daily 06:20", tiers: nil, disabled: false))
     }
 }
+
+/// A refused schedule writes no status file, so it must not reach the dead-man switch.
+final class ScheduledRunHealthProductGuardTests: XCTestCase {
+    nonisolated(unsafe) private var root: URL!
+    private let profile = "protect-only"
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sched-health-\(UUID().uuidString)", isDirectory: true)
+        let workspaces = root.appendingPathComponent("Jamf-Reports", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: workspaces.appendingPathComponent(profile), withIntermediateDirectories: true)
+        setenv("JRC_TEST_WORKSPACES_ROOT", workspaces.path, 1)
+        ProfileAuthMethod.invalidateCache()
+    }
+
+    override func tearDownWithError() throws {
+        ProfileAuthMethod.invalidateCache()
+        unsetenv("JRC_TEST_WORKSPACES_ROOT")
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func schedule(_ mode: Schedule.RunMode, multi: Bool = false) -> Schedule {
+        Schedule(
+            name: "guard-\(mode.rawValue)", profile: multi ? "" : profile, schedule: "Daily 06:20",
+            cadence: "custom", mode: mode, next: "—", last: "—", lastStatus: .ok, artifacts: [],
+            enabled: true, launchAgentLabel: "com.github.tonyyo11.jamf-reports-community.x.\(mode.rawValue)",
+            multiTarget: multi ? MultiTarget(scope: .all) : nil, tiers: nil, excludedProfiles: nil)
+    }
+
+    func testARefusedScheduleIsFailingWithTheReasonNeverOverdue() throws {
+        try ProductGuardSeed.seed(profile: profile, product: "protect", in: root)
+        let schedules = [
+            schedule(.jamfCLIFull), schedule(.snapshotOnly), schedule(.backup),
+            schedule(.jamfCLIOnly), schedule(.snapshotOnly, multi: true)]
+        let now = Date()
+        let inputs = LaunchAgentService.healthInputs(
+            schedules: schedules, statusProfile: nil, now: now)
+        XCTAssertEqual(inputs.count, 5)
+        XCTAssertEqual(inputs.map { $0.refusal != nil }, [true, true, true, false, false],
+                       "a cache-only and an all-profiles schedule are not refused")
+        // Two days on, with no status file anywhere: the old reading was overdue.
+        let issues = AutomationHealth.evaluate(
+            inputs: inputs, now: now.addingTimeInterval(86_400 * 2))
+        let refused = issues.filter { $0.profile == profile && $0.reason != nil }
+        XCTAssertEqual(refused.count, 3)
+        XCTAssertTrue(refused.allSatisfy { $0.kind == .failing })
+        XCTAssertTrue(refused.allSatisfy { $0.reason?.contains("'\(profile)' is a Jamf Protect profile") == true })
+        XCTAssertTrue(issues.filter { $0.kind == .overdue }.allSatisfy { $0.reason == nil })
+    }
+
+    func testAJamfProScheduleIsNotRefused() throws {
+        try ProductGuardSeed.seed(profile: profile, product: "pro", in: root)
+        XCTAssertNil(LaunchAgentService.healthInputs(
+            schedules: [schedule(.jamfCLIFull)], statusProfile: nil).first?.refusal)
+    }
+}

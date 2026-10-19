@@ -335,6 +335,7 @@ struct OverviewView: View {
         } ?? "never"
         // Name the cause when the run recorded an exit code, so the banner
         // says WHY (401 / 403 / 429 / network) rather than just "failed".
+        if let reason = firstFailing.reason { return "\(name) can't run\(more). \(reason)" }
         if let code = firstFailing.lastRunExitCode {
             return "\(name) failed \(last)\(more). "
                 + CLIBridge.explainExit(code, operation: "Last run")

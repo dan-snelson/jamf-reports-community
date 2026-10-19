@@ -11,15 +11,18 @@ struct FleetOverviewView: View {
     @State private var overview: FleetWorkspaceOverview?
     @State private var isLoading = false
 
+    /// The loaded overview, only while it is the sidebar profile's.
+    private var current: FleetWorkspaceOverview? { overview?.shown(for: workspace.profile) }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 ProvenanceBadge(
-                    asOf: overview?.summary?.date,
-                    sources: overview?.summary?.collectionSources
+                    asOf: current?.summary?.date,
+                    sources: current?.summary?.collectionSources
                 )
-                if let overview {
+                if let overview = current {
                     workspaceDetail(overview)
                 } else {
                     ProgressView()
@@ -43,7 +46,7 @@ struct FleetOverviewView: View {
             kicker: workspace.profile,
             breadcrumbs: [Breadcrumb(label: "Overview", action: { navigate(to: .overview) })],
             title: "Fleet Overview",
-            subtitle: overview?.summary.map { "Latest summary \($0.date)" }
+            subtitle: current?.summary.map { "Latest summary \($0.date)" }
                 ?? "No successful summary found for this workspace"
         ) {
             AnyView(
@@ -325,7 +328,9 @@ struct FleetOverviewView: View {
         // line (a running collect owns it) nor claims the data was refreshed.
         isLoading = true
         defer { isLoading = false }
-        overview = await workspace.loadFleetOverview()
+        let loaded = await workspace.loadFleetOverview()
+        guard !Task.isCancelled, let loaded = loaded.shown(for: workspace.profile) else { return }
+        overview = loaded
     }
 }
 

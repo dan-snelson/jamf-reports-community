@@ -12,6 +12,12 @@ struct FleetWorkspaceOverview: Sendable {
 
     var issues: [FleetProfileIssue] { isSchool ? [] : fleetProfileIssues(summary) }
     var hasIssue: Bool { !issues.isEmpty }
+
+    /// This overview when it was loaded for `profile`, else nil: a load that finished after
+    /// the sidebar moved to another workspace must not show under that workspace's name.
+    func shown(for profile: String) -> FleetWorkspaceOverview? {
+        self.profile == profile ? self : nil
+    }
 }
 
 extension WorkspaceStore {

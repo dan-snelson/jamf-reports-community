@@ -85,6 +85,7 @@ enum ConfigDoctorService {
         if let config, parseError == nil {
             rows += profileMismatchRows(profile: profile, config: config)
             rows += protectProfileFolderRows(profile: profile, config: config)
+            rows += protectProfileProductRows(config: config)
             rows += valueRows(profile: profile, config: config, workspaceRoot: workspaceRoot)
             rows += accuracyRows(config: config, profile: profile)
             rows += securityPolicyRows(profile: profile, config: config)

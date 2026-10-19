@@ -38,6 +38,38 @@ extension ConfigDoctorService {
             discovered: { ProfileService.discoverJamfCLIProfiles(scheduleCounts: [:]) })
     }
 
+    /// One `.warn` row when `protect.profile` names a login jamf-cli knows to be another product
+    /// (a Jamf Pro or School profile, say): collect, backup and the dashboard skip Protect for it
+    /// rather than send Protect commands to the wrong API. Nothing is asked when `resolved`
+    /// cannot tell.
+    static func protectProfileProductRows(
+        config: ReportConfig,
+        resolved: (String) -> ProfileAuthMethod.Resolved?
+    ) -> [DoctorRow] {
+        guard config.protect?.isEnabled == true,
+              let named = config.protect?.resolvedProfile, !named.isEmpty,
+              let product = resolved(named)?.product,
+              resolved(named)?.protectRefusal(profile: named) != nil else { return [] }
+        let shown = ConfigSchema.displayText(named)
+        return [DoctorRow(
+            id: "protect.profile_product",
+            severity: .warn,
+            title: "protect.profile is not a Jamf Protect login",
+            detail: "protect.profile names '\(shown)', a \(product.displayName) profile. Protect "
+                + "commands would go to the wrong API, so Jamf Protect is not collected, backed "
+                + "up or added to the dashboard until it names a Jamf Protect login.",
+            hint: "Set protect.profile to the profile `jamf-cli protect setup` created, or turn "
+                + "protect.enabled off."
+        )]
+    }
+
+    /// `protectProfileProductRows` for the live `config list`; it asks jamf-cli only for a
+    /// workspace that has Protect on.
+    static func protectProfileProductRows(config: ReportConfig) -> [DoctorRow] {
+        protectProfileProductRows(
+            config: config, resolved: { ProfileAuthMethod.resolve(profile: $0) })
+    }
+
     /// One `.fail` row for a workspace whose profile is an organization-level Platform
     /// integration: it reaches Jamf Account only, and `collect` stops at one `[error]` line.
     static func organizationLevelRows(

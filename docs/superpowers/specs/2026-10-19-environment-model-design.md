@@ -284,6 +284,21 @@ login preselects Add to the active environment, with a picker for another enviro
 
 Pictures are SF Symbols and the app's own product glyphs, never Jamf logos (NOTICE.md).
 
+**First slice, before P1.** The sheet can ship on today's config. It replaces Settings › Add
+connection, the sidebar's "Add workspace…" and "Add Jamf School workspace…", and the School
+button in `ConnectionCredentialsSheet`. On today's config it offers:
+
+- New workspace: Jamf Pro, Platform API or Jamf School. Each runs its existing onboarding path
+  (`OnboardingFlow` connection types, the School path) from its connection step.
+- Add to current workspace: Jamf Protect only, through today's `protect.enabled/profile`
+  writer (`ProductConnectSheetView`).
+- Re-check: profile discovery lists jamf-cli profiles no workspace names, and adopts one
+  through `ExistingCLISetupFlow`.
+
+A Platform API profile added to an existing workspace needs the `profiles` slots (P1 to P4).
+A Protect-only workspace needs 7.5 (P8). Neither appears in the sheet until its phase lands:
+no disabled placeholder cards. The stale "and CSV mapping" copy goes with the old entry points.
+
 A Jamf School environment shows only what the School API supplies: no Jamf Pro screen,
 section, Config tab or Generate option with blanks (section 8, P8). The Jamf School test found
 each place it shows today (the Overview, the Generate sheet, Config tabs, the Adopt EAs card).

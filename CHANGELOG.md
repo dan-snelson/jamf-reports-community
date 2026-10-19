@@ -195,7 +195,7 @@ versions in this repository map to git tags.
   screen. A count that is not a whole number from 0 to 2,147,483,647 is ignored. (#284)
 - A diagnostic bundle now replaces the workspace (profile) name with a placeholder in every
   file and in the file names, the zip's own name included, since the name is often the
-  organisation's.
+  organisation's. A name as short as two characters is replaced too.
 
 ## [2.10.1] - 2026-10-17
 

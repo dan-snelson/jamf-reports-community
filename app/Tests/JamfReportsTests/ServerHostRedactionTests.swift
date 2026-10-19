@@ -26,6 +26,15 @@ final class ServerHostRedactionTests: XCTestCase {
         XCTAssertFalse(out.contains("jamf"), "got: \(out)")
     }
 
+    func testAShortWorkspaceNameIsRedactedAsAWholeWord() {
+        let r = DiagnosticRedactor()
+        r.seedWorkspaceNames(["ABC"])
+        let out = r.redactText("collect for abc failed; keychain:jamf-cli/ABC/api-key; ABCD kept")
+        XCTAssertFalse(out.contains("abc "), "got: \(out)")
+        XCTAssertFalse(out.contains("/ABC/"), "got: \(out)")
+        XCTAssertTrue(out.contains("ABCD kept"), "got: \(out)")
+    }
+
     func testUnseededBareHostSurvives() {
         XCTAssertTrue(DiagnosticRedactor().redactText(line).contains("jss.example.org"))
     }

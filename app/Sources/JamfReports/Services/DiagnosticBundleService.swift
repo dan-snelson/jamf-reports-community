@@ -265,7 +265,8 @@ final class DiagnosticRedactor {
     /// label and file names. It is often the organisation's name, so it is removed wherever it
     /// appears, file names included.
     func seedWorkspaceNames(_ names: [String]) {
-        workspaceNameRegex = Self.boundedLiteralRegex(names)
+        // A workspace name is often the organisation's, and short ones ("CBP") are common.
+        workspaceNameRegex = Self.boundedLiteralRegex(names, minLength: 2)
     }
 
     func redactWorkspaceNames(in text: String) -> String {
@@ -275,10 +276,12 @@ final class DiagnosticRedactor {
         }
     }
 
-    /// Any of `literals` (4 characters or more), in any case, not inside a longer name.
-    private static func boundedLiteralRegex(_ literals: [String]) -> NSRegularExpression? {
+    /// Any of `literals` (`minLength` characters or more), in any case, not inside a longer name.
+    private static func boundedLiteralRegex(
+        _ literals: [String], minLength: Int = minSeedLen
+    ) -> NSRegularExpression? {
         let kept = Set(literals.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
-            .filter { $0.count >= minSeedLen }
+            .filter { $0.count >= minLength }
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 }
         return kept.isEmpty ? nil : mustCompile(
             "(?<![A-Za-z0-9-])(?:"

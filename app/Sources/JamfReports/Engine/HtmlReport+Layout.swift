@@ -64,7 +64,7 @@ enum HtmlDetailGroup: String, CaseIterable {
         switch self {
         case .security: "Security and compliance"
         case .patching: "Patching"
-        case .devices: "Devices needing intervention"
+        case .devices: "Computers needing intervention"
         case .policies: "Policies and profiles"
         case .trends: "Trends"
         case .failures: "Recent failures"

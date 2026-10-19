@@ -147,7 +147,7 @@ struct HtmlReport: Sendable {
         fleet: SecurityFleetCounts?
     ) -> String {
         let tiles: [(String, String, Double?, SecurityControl?)] = [
-            ("Total Devices", "\(total)", nil, nil),
+            ("Computers", "\(total)", nil, nil),
             ("FileVault", String(format: "%.1f%%", fileVaultPct), fileVaultPct, .fileVault),
             ("SIP", String(format: "%.1f%%", sipPct), sipPct, .sip),
             ("Firewall", String(format: "%.1f%%", firewallPct), firewallPct, .firewall),
@@ -263,7 +263,8 @@ struct HtmlReport: Sendable {
                        : pct >= 80 ? "compliance-hero-amber"
                        : "compliance-hero-red"
         let pctStr = String(format: "%.0f%%", pct)
-        let label = "\(pctStr) Device Compliance &middot; \(failing) of \(total) device\(total == 1 ? "" : "s") have failures"
+        let label = "\(pctStr) Computer Compliance &middot; \(failing) of \(total) "
+            + "computer\(total == 1 ? "" : "s") have failures"
         return """
         <div class="compliance-hero \(colorCls)">
           <div class="compliance-hero-value">\(pctStr)</div>
@@ -361,9 +362,9 @@ struct HtmlReport: Sendable {
 
         return HtmlSectionFormatters.block(
             id: "top-noncompliant",
-            title: "Top non-compliant devices (\(devices.count))",
+            title: "Top non-compliant computers (\(devices.count))",
             body: HtmlSectionFormatters.renderCappedTable(
-                headers: ["Device Name", "Serial", "Days Since Check-in", "Failure Count",
+                headers: ["Computer", "Serial", "Days Since Check-in", "Failure Count",
                           "Top Failure"],
                 rows: rows, maxRows: HtmlSectionFormatters.maxNonCompliantRows,
                 expanded: expandAll))

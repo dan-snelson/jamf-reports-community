@@ -87,7 +87,7 @@ extension HtmlReport {
         }
         return note(summary + " A Mac that fails two controls counts twice.")
             + "\n" + f.renderCappedTable(
-                headers: ["Device", "Serial", "Failing controls"], rows: rows,
+                headers: ["Computer", "Serial", "Failing controls"], rows: rows,
                 maxRows: f.maxInterventionRows, expanded: expandAll)
     }
 }

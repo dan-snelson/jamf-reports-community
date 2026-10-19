@@ -557,7 +557,7 @@ The template decides how much of that you get and what starts open:
 | Template | In the HTML report | Starts open |
 |---|---|---|
 | Executive | Header, figures, attention list, dashboard, appendix; no detail groups | n/a |
-| Operational | Everything it lists | Devices needing intervention, Patching, Recent failures |
+| Operational | Everything it lists | Computers needing intervention, Patching, Recent failures |
 | Compliance | Everything it lists | Security and compliance |
 | Security Posture | Everything it lists | Security and compliance |
 | Full Instance | Every section | Nothing |

@@ -628,7 +628,7 @@ final class HtmlReportLayoutTests: XCTestCase {
             XCTAssertTrue(html.contains(line), "appendix lacks: \(line)")
         }
         XCTAssertTrue(html.contains(
-            "Device inventory — full device lists are in the workbook"))
+            "Computer and mobile device inventory — the full lists are in the workbook"))
     }
 
     func testAGroupWithNothingToShowIsNotDrawn() async throws {
@@ -654,7 +654,7 @@ final class HtmlReportLayoutTests: XCTestCase {
         XCTAssertEqual(try summary("patching"), "Patching — 12 titles behind · 3 under 50%")
         XCTAssertEqual(try summary("failures"), "Recent failures — 3 patch · 2 update failures")
         XCTAssertTrue(
-            try summary("devices").hasPrefix("Devices needing intervention — 9 Macs idle"))
+            try summary("devices").hasPrefix("Computers needing intervention — 9 Macs idle"))
         XCTAssertTrue(try summary("security").hasPrefix("Security and compliance — 12 P0 gaps"))
         XCTAssertTrue(try summary("policies").contains("2 policy findings"))
         XCTAssertTrue(try summary("policies").contains("2 profiles failing"))
@@ -787,7 +787,7 @@ final class HtmlReportLayoutTests: XCTestCase {
         XCTAssertTrue(text.contains("<td>Firewall</td><td>Not counted</td>"))
         XCTAssertTrue(text.contains(
             "<td>FileVault off on a hardware-encrypted Mac</td><td>Warning</td>"))
-        XCTAssertTrue(text.contains("Device inventory — full device lists are in the workbook"))
+        XCTAssertTrue(text.contains("Computer and mobile device inventory — the full lists are in the workbook"))
     }
 
     // MARK: - Escaping

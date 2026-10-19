@@ -33,6 +33,9 @@ versions in this repository map to git tags.
   **Mobile Devices**. Your saved sidebar choices and export file names are unchanged.
 - The sidebar's **Fleet** group now sits right under Reports and holds Computers, Mobile Devices,
   Device Lookup, Jamf Protect and Groups & Searches, so computers and mobile devices sit side by side.
+- The HTML and PDF reports say **computers** where they mean Macs (the security tiles, the
+  intervention group, the non-compliant list and the computer tables) and keep **mobile devices**
+  for the mobile section. Workbook sheet names are unchanged, so tools that read them still work.
 - **Fleet Drift** now compares the collected inventory from two different days, so it no longer
   needs a CSV export. It lists Macs that joined or left, macOS changes, and Macs that became or
   stopped being stale under your stale settings. The "Compliance Changed" section is gone from this

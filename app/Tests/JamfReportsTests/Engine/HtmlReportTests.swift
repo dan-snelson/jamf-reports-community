@@ -430,13 +430,13 @@ final class HtmlReportTests: XCTestCase {
             deviceCompliance: devices,
             computersInventory: []
         )
-        XCTAssertTrue(html.contains("Top non-compliant devices (15)"))
+        XCTAssertTrue(html.contains("Top non-compliant computers (15)"))
         // Mac-15 has the highest failure count and should appear first
         XCTAssertTrue(html.contains("Mac-15"))
         // Mac-1 has the lowest: it is not among the top ten, so the report omits it.
         XCTAssertFalse(html.contains("<td>Mac-1</td>"), "Mac-1 (lowest count) is not in the top 10")
         // Table should have the 5 required columns
-        XCTAssertTrue(html.contains("Device Name"))
+        XCTAssertTrue(html.contains("<th>Computer</th>"))
         XCTAssertTrue(html.contains("Serial"))
         XCTAssertTrue(html.contains("Days Since Check-in"))
         XCTAssertTrue(html.contains("Failure Count"))
@@ -457,7 +457,7 @@ final class HtmlReportTests: XCTestCase {
         XCTAssertEqual(HtmlSectionTests.bodyRows(html), 10)
         XCTAssertFalse(html.contains("<details class=\"show-all\""))
         XCTAssertTrue(html.contains("10 more rows are in the workbook."))
-        XCTAssertTrue(html.contains("Top non-compliant devices (20)"))
+        XCTAssertTrue(html.contains("Top non-compliant computers (20)"))
     }
 
     // MARK: - Task 3: Light mode default + print CSS
@@ -715,7 +715,7 @@ final class HtmlReportTests: XCTestCase {
         for templated in [false, true] {
             let tiles = try await renderedTiles(dataDir: dir, templated: templated)
             XCTAssertEqual(tiles.map(\.label),
-                           ["Total Devices", "FileVault", "SIP", "Firewall", "Gatekeeper"])
+                           ["Computers", "FileVault", "SIP", "Firewall", "Gatekeeper"])
             XCTAssertEqual(tiles.map(\.value), ["101", "99.0%", "1.0%", "0.0%", "99.0%"])
             // SIP is NOT_COLLECTED on 100 of the 101 rows: the one Mac that reported it is on.
             XCTAssertEqual(tiles.map(\.cssClass), ["", "ok", "ok", "bad", "ok"],
@@ -736,7 +736,7 @@ final class HtmlReportTests: XCTestCase {
                 firewall: ignore
             """, dataDir: dir, templated: templated)
             XCTAssertEqual(tiles.map(\.label), [
-                "Total Devices", "FileVault", "SIP", "Firewall (not counted)", "Gatekeeper",
+                "Computers", "FileVault", "SIP", "Firewall (not counted)", "Gatekeeper",
             ])
             XCTAssertEqual(tiles.map(\.value), ["101", "99.0%", "1.0%", "0.0%", "99.0%"])
             XCTAssertEqual(tiles.map(\.cssClass), ["", "ok", "ok", "", "ok"],

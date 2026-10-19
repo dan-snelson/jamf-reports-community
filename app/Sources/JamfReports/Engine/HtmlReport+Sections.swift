@@ -264,7 +264,7 @@ extension HtmlReport {
         return .shown(f.block(
             id: "intervention-list", title: title,
             body: interventionNote(macs, rule: rule) + f.renderCappedTable(
-                headers: ["Device", "Serial", "Primary User", "Days Since \(rule.basisHeading)",
+                headers: ["Computer", "Serial", "Primary User", "Days Since \(rule.basisHeading)",
                           "Last Contact", "Reason"],
                 rows: tableRows, maxRows: f.maxInterventionRows, expanded: expandAll)))
     }
@@ -582,7 +582,7 @@ extension HtmlReport {
             <div class="audit-severity-group">
               <h4>\(f.renderSeverityPill(sev)) (\(sevAlerts.count))</h4>
               \(f.renderCappedRows(
-                  headers: ["Device", "Alert", "Date"], rowHTML: Array(alertRows),
+                  headers: ["Computer", "Alert", "Date"], rowHTML: Array(alertRows),
                   expanded: expandAll))
             </div>
             """)
@@ -733,7 +733,7 @@ extension HtmlReport {
             note += " A row marked name only carries no serial or ID; it is listed as reported."
         }
         return "<p class=\"block-note\">\(f.escapeHTML(note))</p>\n" + f.renderCappedTable(
-            headers: ["Device", "Serial", "Agent", "Value seen"], rows: rows,
+            headers: ["Computer", "Serial", "Agent", "Value seen"], rows: rows,
             maxRows: f.maxAgentGapRows, expanded: expandAll)
     }
 

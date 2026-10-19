@@ -147,6 +147,8 @@ versions in this repository map to git tags.
 - One Jamf School profile on the Mac no longer makes **Test connection**, onboarding's
   **Validate** and **Reauthenticate** fail for your other profiles. They now judge only the
   config file and the profile being checked.
+- The health banner now reports Jamf Protect data that has gone stale or keeps failing in a
+  workspace with Protect connected; before, only Jamf Pro data was checked.
 
 ### Removed
 

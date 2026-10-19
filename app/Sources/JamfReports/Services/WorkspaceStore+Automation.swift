@@ -444,6 +444,7 @@ extension WorkspaceStore {
     /// (`collectSkip` takes `ReportEngine.collectSkipKinds`' normalized set),
     /// and it skips the dashboard on a jamf-cli before 1.31.0
     /// (`dashboardSupported`, false for an unknown version, as `collect` reads it).
+    /// A workspace with Protect connected (`ConnectedProducts`) also expects the `protect-*` kinds.
     /// The Platform, tenant and skip-list rules apply regardless of the `.fail`
     /// counters on disk: a workspace that ran for months before the collect-side
     /// skip has a standing pile of them, and reading those back is exactly what
@@ -453,9 +454,11 @@ extension WorkspaceStore {
         authMethod: String?,
         tenantLevel: Bool = false,
         collectSkip: Set<String> = [],
-        dashboardSupported: Bool = false
+        dashboardSupported: Bool = false,
+        protectConnected: Bool = false
     ) -> [String] {
         let skipsPlatform = ReportEngine.nonPlatformAuthMethod(authMethod) != nil
+        let protect = protectConnected ? DataFreshnessHealth.protectKinds : []
         return ReportEngine.knownCollectKinds.filter { kind in
             if skipExpensive, ReportEngine.expensivePerDeviceKinds.contains(kind) {
                 return false
@@ -466,7 +469,7 @@ extension WorkspaceStore {
             }
             if collectSkip.contains(kind) { return false }
             return !(skipsPlatform && ReportEngine.platformOnlyKinds.contains(kind))
-        }
+        } + protect
     }
 
     // MARK: - Manual collect

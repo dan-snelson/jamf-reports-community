@@ -131,7 +131,7 @@ enum DemoData {
     static let securityControls = SecurityControls(
         total: 524, fileVault: 513, sip: 524, firewall: 482, gatekeeper: 512)
 
-    /// iPads and iPhones in the demo fleet — Mobile Fleet's demo inventory has 25.
+    /// iPads and iPhones in the demo fleet — Mobile Devices' demo inventory has 25.
     static let mobileDeviceCount = 25
     /// The Managed Devices chart's mobile line, ending on `mobileDeviceCount`.
     static let mobileDevicesTrend = trend(

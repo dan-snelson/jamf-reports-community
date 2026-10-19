@@ -1260,7 +1260,7 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
         case .extensionAttributes: "Extension Attributes"
         case .outreach:          "Offline Outreach"
         case .protectDashboard:  "Jamf Protect"
-        case .mobileFleet:       "Mobile Fleet"
+        case .mobileFleet:       "Mobile Devices"
         case .groupInventory:    "Groups & Searches"
         }
     }

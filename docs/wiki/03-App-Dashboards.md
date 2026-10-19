@@ -148,9 +148,9 @@ these interactive dashboards either — it produces a separate generated workboo
 
 ## Fleet
 
-![Mobile Fleet](images/mobile-fleet.png)
+![Mobile Devices](images/mobile-fleet.png)
 
-- **Mobile Fleet** — iOS/iPadOS device counts, compliance signals, OS-version
+- **Mobile Devices** — iOS/iPadOS device counts, compliance signals, OS-version
   distribution, and a device/profile inventory.
   Data source: `mobile-devices-list` (one fetch with the General, Hardware, Security and
   User and Location sections, tier 1) and profiles (tier 2).

@@ -183,7 +183,7 @@ final class DemoDataOperationsTests: XCTestCase {
         XCTAssertEqual(snapshot.snapshotDate, DemoData.referenceDate)
     }
 
-    // MARK: - Mobile Fleet
+    // MARK: - Mobile Devices
 
     /// Supervised devices are the ADE ones, each with its prestage; the
     /// personal devices are user-enrolled and never supervised.

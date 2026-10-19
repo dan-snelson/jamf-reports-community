@@ -283,7 +283,7 @@ final class HtmlReportFollowupsTests: XCTestCase {
         let lock = try XCTUnwrap(card("Activation Lock on"))
         XCTAssertTrue(lock.contains(">Unknown<"), lock)
         XCTAssertFalse(lock.contains(">0<"), lock)
-        // #275: the jailbreak status the Mobile Fleet screen shows is in the report too.
+        // #275: the jailbreak status the Mobile Devices screen shows is in the report too.
         let jailbreak = try XCTUnwrap(card("Jailbreak detected"))
         XCTAssertTrue(jailbreak.contains(">1<"), jailbreak)
         XCTAssertTrue(jailbreak.contains("of 2 reporting"), jailbreak)

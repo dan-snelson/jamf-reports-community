@@ -19,7 +19,7 @@ struct MobileFleetView: View {
         PageScaffold {
             PageHeader(
                 kicker: "Mobile",
-                title: "Mobile Fleet",
+                title: "Mobile Devices",
                 subtitle: subtitle,
                 // The demo dataset is frozen on purpose; an age warning on it is noise.
                 lastModified: workspace.demoMode ? nil : snapshot.snapshotDate
@@ -557,7 +557,7 @@ struct MobileFleetView: View {
         let total = snapshot.totalDevices
         let result = DashboardChartExport.run(
             title: "iOS / iPadOS Version Distribution",
-            subtitle: "Mobile Fleet",
+            subtitle: "Mobile Devices",
             footnote: "Source: pro mobile-devices · \(total) mobile devices",
             suggestedFilename: DashboardChartExport.filename(for: "mobile-os-distribution", profile: workspace.profile)
         ) {

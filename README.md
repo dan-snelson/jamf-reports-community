@@ -41,7 +41,7 @@ Screens are organized into four groups:
   Offline Outreach.
 - **Operations** — Patch Compliance, OS Updates, Policies & Profiles, and Extension
   Attributes (with **Adopt EAs** to track the ones jamf-cli collected).
-- **Fleet** — iOS/iPadOS Mobile Fleet, Jamf Protect (matched to Jamf Pro computers by
+- **Fleet** — iOS/iPadOS Mobile Devices, Jamf Protect (matched to Jamf Pro computers by
   hardware UUID or serial number), and Groups & Searches.
 
 Every non-core dashboard is toggleable, so unused screens disappear from the sidebar.

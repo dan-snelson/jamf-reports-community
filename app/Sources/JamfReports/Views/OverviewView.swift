@@ -1821,7 +1821,7 @@ struct OverviewView: View {
         case .mscpBandTrend:
             "Per-baseline mSCP compliance band trends over time. Open Compliance Posture for current distribution."
         case .managedDevices:
-            "Historical computers-vs-mobile split. Open Computers or Mobile Fleet to inspect current records."
+            "Historical computers-vs-mobile split. Open Computers or Mobile Devices to inspect current records."
         case .sip, .firewall, .gatekeeper:
             "Open Security Posture for the per-control breakdown."
         }

@@ -226,7 +226,7 @@ on an Intel Mac, build from source instead.
 
 Reports are built from `jamf-cli` data. The app renders Fleet Overview, Security Posture,
 Compliance Posture, Patch Compliance, OS Updates, Policies & Profiles, Extension
-Attributes, Mobile Fleet, and more — enough for every report template. There is no CSV step
+Attributes, Mobile Devices, and more — enough for every report template. There is no CSV step
 in setup and no CSV report mode (retired in 2.11).
 
 Custom Extension Attribute sheets and security agent coverage come from the Extension

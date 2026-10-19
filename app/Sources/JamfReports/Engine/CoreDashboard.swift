@@ -1647,7 +1647,7 @@ struct CoreDashboard: Sendable {
 
     /// The inventory rows the mobile sheets read: the newest `mobile-devices-list`, or a
     /// newer legacy `mobile-device-inventory-details` snapshot, whose rows carry sections.
-    /// Same choice the Mobile Fleet screen makes (`MobileFleetService.inventorySource`).
+    /// Same choice the Mobile Devices screen makes (`MobileFleetService.inventorySource`).
     private func loadMobileInventoryRows() -> [MobileDeviceInventoryItem] {
         let newestPerKind = [
             ["mobile-devices-list", "mobile_devices_list"],
@@ -1664,7 +1664,7 @@ struct CoreDashboard: Sendable {
 
     /// Normalize mobile device records from the inventory rows, joined to the devices-list
     /// row with the same id, or from the devices-list alone. Fields are read through
-    /// `MobileFleetService`, so the workbook and the Mobile Fleet screen agree. A blank
+    /// `MobileFleetService`, so the workbook and the Mobile Devices screen agree. A blank
     /// string means the snapshot does not report the field.
     private func normalizeMobileInventory() -> [[String: Any]] {
         let rich = loadMobileInventoryRows()

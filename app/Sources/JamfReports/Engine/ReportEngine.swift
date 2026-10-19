@@ -2422,7 +2422,7 @@ struct ReportEngine: Sendable {
 
     /// Sections `collect` asks `pro mobile-devices list` for, each as its own `--section`.
     /// Without the flag jamf-cli returns GENERAL (plus HARDWARE from 1.29), so the security
-    /// flags and assigned user the Mobile Fleet screen and the workbook read stayed empty,
+    /// flags and assigned user the Mobile Devices screen and the workbook read stayed empty,
     /// and so did serial and model before 1.29.
     /// APPLICATIONS is left out: about 20 KB per device for a managed-apps count nothing
     /// shows. The flag is on 1.18 through 1.29; the layout on 1.18 was not verified.

@@ -1095,16 +1095,15 @@ final class CLIBridge {
         return shouldSkipAuthProbe(for: authMethod)
     }
 
-    /// True, after one `[error]` line, when `profile` is a Jamf School (API-key) profile:
-    /// no `pro` command may run against it.
+    /// The refusal, after one `[error]` line, when `profile` is a Jamf School (API-key)
+    /// profile: no `pro` command may run against it. Nil for any other profile.
     nonisolated static func refusesProCommand(
         profile: String, operation: String, onLine: (@Sendable (LogLine) -> Void)?
-    ) -> Bool {
-        guard usesAPIKey(profile: profile) else { return false }
-        onLine?(.init(timestamp: Date(), level: .fail,
-            text: "[error] \(operation) is a Jamf Pro command; "
-                + "'\(profile)' is a Jamf School profile"))
-        return true
+    ) -> String? {
+        guard usesAPIKey(profile: profile) else { return nil }
+        let refusal = "\(operation) is a Jamf Pro command; '\(profile)' is a Jamf School profile"
+        onLine?(.init(timestamp: Date(), level: .fail, text: "[error] \(refusal)"))
+        return refusal
     }
 
     nonisolated func validateConnection(
@@ -1297,7 +1296,9 @@ final class CLIBridge {
             AppLogger.cli.warning("device detail: rejecting leading-dash identifier")
             return nil
         }
-        if Self.refusesProCommand(profile: profile, operation: "Device lookup", onLine: onLine) {
+        if Self.refusesProCommand(
+            profile: profile, operation: "Device lookup", onLine: onLine
+        ) != nil {
             return nil
         }
         guard ProfileService.isValid(profile),
@@ -1453,8 +1454,10 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] invalid profile name: \(profile)"))
             throw CLIBridgeError.invalidProfile(profile)
         }
-        if Self.refusesProCommand(profile: profile, operation: "Backup diff", onLine: onLine) {
-            return (Self.exitCodeRefusedByPolicy, Data())
+        if let refusal = Self.refusesProCommand(
+            profile: profile, operation: "Backup diff", onLine: onLine
+        ) {
+            throw CLIBridgeError.invalidArgument(refusal)
         }
         guard let bin = ExecutableLocator.locate("jamf-cli") else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] jamf-cli not found"))
@@ -1720,8 +1723,10 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] audit category may not start with '-'"))
             throw CLIBridgeError.invalidArgument("audit category may not start with '-'")
         }
-        if Self.refusesProCommand(profile: profile, operation: "Health audit", onLine: onLine) {
-            return Self.exitCodeRefusedByPolicy
+        if let refusal = Self.refusesProCommand(
+            profile: profile, operation: "Health audit", onLine: onLine
+        ) {
+            throw CLIBridgeError.invalidArgument(refusal)
         }
         guard await authGuard(profile: profile, onLine: onLine) else {
             return Self.exitCodeUnauthorized
@@ -1757,8 +1762,10 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] invalid profile name: \(profile)"))
             throw CLIBridgeError.invalidProfile(profile)
         }
-        if Self.refusesProCommand(profile: profile, operation: "Group analysis", onLine: onLine) {
-            return Self.exitCodeRefusedByPolicy
+        if let refusal = Self.refusesProCommand(
+            profile: profile, operation: "Group analysis", onLine: onLine
+        ) {
+            throw CLIBridgeError.invalidArgument(refusal)
         }
         guard await authGuard(profile: profile, onLine: onLine) else {
             return Self.exitCodeUnauthorized
@@ -1864,8 +1871,10 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] backup label may not start with '-'"))
             throw CLIBridgeError.invalidArgument("backup label may not start with '-'")
         }
-        if Self.refusesProCommand(profile: profile, operation: "Backup", onLine: onLine) {
-            return Self.exitCodeRefusedByPolicy
+        if let refusal = Self.refusesProCommand(
+            profile: profile, operation: "Backup", onLine: onLine
+        ) {
+            throw CLIBridgeError.invalidArgument(refusal)
         }
         guard let bin = _testExecutable ?? ExecutableLocator.locate("jamf-cli") else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] jamf-cli not found"))

@@ -67,6 +67,12 @@ struct ConfigView: View {
             default:        label
             }
         }
+
+        /// The tabs a workspace can use. Jamf School has no security agents, Extension
+        /// Attributes, Platform API or score, so it keeps Thresholds, Output and the file view.
+        static func offered(school: Bool) -> [ConfigTab] {
+            school ? [.thresholds, .output, .fromFile] : allCases
+        }
     }
 
     // MARK: Save-status feedback pill
@@ -358,8 +364,8 @@ struct ConfigView: View {
 
     private func segments(_ label: KeyPath<ConfigTab, String>) -> some View {
         SegmentedControl(
-            selection: $tab,
-            options: ConfigTab.allCases.map { ($0, $0[keyPath: label], $0.icon) }
+            selection: Binding(get: { shownTab }, set: { tab = $0 }),
+            options: offeredTabs.map { ($0, $0[keyPath: label], $0.icon) }
         )
     }
 
@@ -439,9 +445,18 @@ struct ConfigView: View {
 
     // MARK: Tab routing
 
+    private var offeredTabs: [ConfigTab] {
+        ConfigTab.offered(school: workspace.isSchoolWorkspace)
+    }
+
+    /// The selected tab, or the first offered one when the workspace does not offer it.
+    private var shownTab: ConfigTab {
+        offeredTabs.contains(tab) ? tab : offeredTabs[0]
+    }
+
     @ViewBuilder
     private var tabContent: some View {
-        switch tab {
+        switch shownTab {
         case .agents:     AgentsTab()
         case .eas:        EasTab()
         case .thresholds: ThresholdsTab()
@@ -727,8 +742,30 @@ private struct ThresholdsTab: View {
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
+        if workspace.isSchoolWorkspace { schoolBody } else { proBody }
+    }
+
+    /// Jamf School reports one date per device, its last check-in, so only the stale
+    /// threshold applies.
+    private var schoolBody: some View {
         @Bindable var ws = workspace
-        HStack(alignment: .top, spacing: 14) {
+        return Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeader(title: "General Thresholds").padding(.bottom, 14)
+                thresholdField(
+                    label: "Stale device threshold", key: "stale_device_days",
+                    value: $ws.configState.staleDeviceDays, unit: "days",
+                    help: "A device is stale when its last check-in with Jamf School is more "
+                        + "than this many days ago"
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var proBody: some View {
+        @Bindable var ws = workspace
+        return HStack(alignment: .top, spacing: 14) {
             Card(padding: 18) {
                 VStack(alignment: .leading, spacing: 0) {
                     SectionHeader(title: "General Thresholds").padding(.bottom, 14)

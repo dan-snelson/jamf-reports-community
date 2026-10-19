@@ -373,7 +373,8 @@ struct GenerateSheet: View {
             formatsSection
             templateSection
             collectToggle
-            auditToggle
+            // `pro audit` has no Jamf School counterpart; `request()` never runs it there.
+            if !state.schoolMode { auditToggle }
             outputFolderRow
             profileRow
             if state.collectFresh, let auth = workspace.authStatus, !auth.isValid {
@@ -467,7 +468,8 @@ struct GenerateSheet: View {
                     .foregroundStyle(Theme.Text.tertiary(contrast))
             }
 
-            if state.collectFresh {
+            // A Jamf School collect writes no daily summary yet (environment-model spec P8).
+            if state.collectFresh && !state.schoolMode {
                 Text("• summary.json (Trends snapshot)")
                     .font(Theme.Fonts.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
@@ -500,9 +502,11 @@ struct GenerateSheet: View {
 
     /// Two-line description block + audience line + tier badge for the chosen template.
     private func templateDescriptionPanel(for template: any ReportTemplate) -> some View {
-        let sheets = template.includedSheets
+        // The School template's tabs are SchoolDashboard's own, which have no SheetID.
+        let sheets = template is SchoolTemplate
+            ? SchoolDashboard.sheetNames : template.includedSheets.map(\.rawValue)
         let sheetPreview: String = {
-            let names = sheets.prefix(3).map(\.rawValue)
+            let names = sheets.prefix(3)
             let suffix = sheets.count > 3 ? " + \(sheets.count - 3) more" : ""
             return names.joined(separator: ", ") + suffix
         }()

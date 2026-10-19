@@ -236,7 +236,8 @@ struct ContentView: View {
     @ViewBuilder
     private var detailView: some View {
         switch tab {
-        case .overview:          OverviewView()
+        case .overview:
+            if workspace.isSchoolWorkspace { SchoolOverviewView() } else { OverviewView() }
         case .fleet:             FleetOverviewView()
         case .devices:           DevicesView()
         case .deviceLookup:      DeviceLookupView()
@@ -263,6 +264,7 @@ struct ContentView: View {
         case .protectDashboard:  ProtectView()
         case .mobileFleet:       MobileFleetView()
         case .groupInventory:    GroupsView()
+        case .schoolDevices:     SchoolDevicesView()
         }
     }
 
@@ -298,6 +300,7 @@ struct ContentView: View {
         case .protectDashboard:  "ALERTS & AGENTS"
         case .mobileFleet:       "IOS · IPADOS"
         case .groupInventory:    "CLASSIC API"
+        case .schoolDevices:     "JAMF SCHOOL"
         }
     }
 

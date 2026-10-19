@@ -1224,6 +1224,7 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
     case patch, updates, ddmBlueprints
     case policyProfile, extensionAttributes
     case outreach, protectDashboard, mobileFleet, groupInventory
+    case schoolDevices
 
     var id: String { rawValue }
 
@@ -1256,6 +1257,7 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
         case .protectDashboard:  "Jamf Protect"
         case .mobileFleet:       "Mobile Devices"
         case .groupInventory:    "Groups & Searches"
+        case .schoolDevices:     "Devices"
         }
     }
 
@@ -1288,16 +1290,20 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
         case .protectDashboard:  "shield.lefthalf.filled"
         case .mobileFleet:       "ipad"
         case .groupInventory:    "rectangle.3.group"
+        case .schoolDevices:     "ipad.and.iphone"
         }
     }
 
     var badgeIsGold: Bool { self == .trends }
 
     /// The tabs a Jamf School workspace keeps (2.10): it collects only School data, which no
-    /// Jamf Pro screen reads, so it keeps the screens about the workspace, its reports and its
-    /// automation. Applied by `TabVisibility.limited(toSchool:)`, never stored.
+    /// Jamf Pro screen reads, so it keeps its own Overview and Devices and the screens about the
+    /// workspace, its reports and its automation. Fleet Overview reads the daily summary, which
+    /// School does not write yet (environment-model spec P8). Applied by
+    /// `TabVisibility.limited(toSchool:)`, never stored.
     static let schoolTabs: Set<Tab> = [
-        .overview, .fleet, .reports, .schedules, .runs, .config, .sources, .settings, .onboarding,
+        .overview, .schoolDevices, .reports, .schedules, .runs, .config, .sources,
+        .settings, .onboarding,
     ]
 
     /// Tabs the user cannot hide. These are the bones of the app — hiding
@@ -1312,7 +1318,7 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
              .securityPosture, .compliancePosture, .complianceBenchmarks,
              .patch, .updates, .ddmBlueprints,
              .policyProfile, .extensionAttributes,
-             .outreach, .protectDashboard, .mobileFleet, .groupInventory:
+             .outreach, .protectDashboard, .mobileFleet, .groupInventory, .schoolDevices:
             return false
         }
     }
@@ -1331,7 +1337,8 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
         .init(label: "REPORTS",
               items: [.overview, .fleet, .trends, .audit, .reports]),
         .init(label: "FLEET",
-              items: [.devices, .mobileFleet, .deviceLookup, .protectDashboard, .groupInventory]),
+              items: [.devices, .schoolDevices, .mobileFleet, .deviceLookup, .protectDashboard,
+                      .groupInventory]),
         .init(label: "POSTURE",
               items: [.securityPosture, .compliancePosture, .complianceBenchmarks, .outreach]),
         .init(label: "OPERATIONS",
@@ -1370,16 +1377,20 @@ struct TabVisibility: Sendable, Equatable {
         self.hidden = hidden.filter { !$0.isCoreTab }
     }
 
+    /// False for a tab the workspace's product cannot fill, whatever the user chose.
+    func isAvailable(_ tab: Tab) -> Bool { !unavailable.contains(tab) }
+
     /// True when this tab should appear in the sidebar.
     func isVisible(_ tab: Tab) -> Bool {
         !unavailable.contains(tab) && (tab.isCoreTab || !hidden.contains(tab))
     }
 
     /// This visibility for the active workspace: a Jamf School workspace also leaves out every
-    /// tab outside `Tab.schoolTabs`.
+    /// tab outside `Tab.schoolTabs`, and any other workspace leaves out the School Devices tab.
     func limited(toSchool isSchool: Bool) -> TabVisibility {
         var copy = self
-        copy.unavailable = isSchool ? Set(Tab.allCases).subtracting(Tab.schoolTabs) : []
+        copy.unavailable = isSchool
+            ? Set(Tab.allCases).subtracting(Tab.schoolTabs) : [.schoolDevices]
         return copy
     }
 

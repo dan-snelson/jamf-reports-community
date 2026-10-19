@@ -86,6 +86,8 @@ enum CollectRouter {
     typealias SchoolCollect = @Sendable (
         _ profile: String,
         _ workspacePaths: WorkspacePaths.Type,
+        _ tiers: Set<CollectionTier>,
+        _ force: Bool,
         _ onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws -> Void
 
@@ -100,9 +102,9 @@ enum CollectRouter {
     ///
     /// - Parameters:
     ///   - profile: Validated profile slug (caller has already verified `ProfileService.isValid`).
-    ///   - tiers: Collection tiers for the Pro path (ignored for School).
+    ///   - tiers: Collection tiers (School collects with the refresh or inventory tier).
     ///   - skipExpensive: Skip expensive per-device Pro commands (ignored for School).
-    ///   - force: Bypass the once-per-day guard on the Pro path (ignored for School).
+    ///   - force: Bypass the once-per-day guard (Pro) and the cadence (Pro and School).
     ///   - config: Loaded config for the profile; pass nil when load failed. A nil config
     ///     degrades to Jamf Pro (same behaviour as before this router existed).
     ///   - workspacePaths: Path resolver (injectable for tests).
@@ -139,7 +141,7 @@ enum CollectRouter {
         case .jamfSchool:
             onLine(.init(timestamp: Date(), level: .info,
                          text: "[info] routing \(profile) → Jamf School collect"))
-            try await schoolCollect(profile, workspacePaths, onLine)
+            try await schoolCollect(profile, workspacePaths, tiers, force, onLine)
 
         case .jamfPro:
             let disposition = try await proCollect(
@@ -194,10 +196,12 @@ enum CollectRouter {
     }
 
     /// Default production closure wrapping `ReportEngine.schoolCollect`.
-    static let defaultSchoolCollect: SchoolCollect = { profile, workspacePaths, onLine in
+    static let defaultSchoolCollect: SchoolCollect = { profile, workspacePaths, tiers, force, onLine in
         try await ReportEngine.schoolCollect(
             profile: profile,
             workspacePaths: workspacePaths,
+            tiers: tiers,
+            force: force,
             onLine: onLine
         )
     }

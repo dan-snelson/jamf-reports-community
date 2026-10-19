@@ -2055,8 +2055,7 @@ struct ReportEngine: Sendable {
         // These flags are 1.18-only; passing them to an older binary produces exit 1
         // (unknown flag) and silently skips every snapshot. Default-off when version
         // detection fails (nil) — safer than risking unknown flags on an old binary.
-        // Scope: pro namespace only. school/protect namespace flag support is unverified;
-        // those collect paths are left unmodified until confirmed via `school --help`.
+        // They are global flags: `schoolCollect` passes them under the same gate.
         let supportsQuietFlags = detectedVersion.map {
             !JamfCLIInstaller.isBelowMinimumRunnable($0)
         } ?? false
@@ -3370,6 +3369,8 @@ struct ReportEngine: Sendable {
     static func schoolCollect(
         profile: String,
         workspacePaths: WorkspacePaths.Type,
+        tiers: Set<CollectionTier> = Set(CollectionTier.allCases),
+        force: Bool = false,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
         guard let bin = ExecutableLocator.locate("jamf-cli") else {
@@ -3380,14 +3381,22 @@ struct ReportEngine: Sendable {
         }
         let dataDir = try workspacePaths.dataDir(for: profile)
 
-        let commands = schoolCommandMatrix(profile: profile)
-
-        for line in collectPlanLines(profile: profile, running: commands.map(\.kind)) {
+        let stateStore = (try? workspacePaths.stateDir(for: profile)).map(StateFileStore.init(directory:))
+        let plan = planSchoolCollect(profile: profile, tiers: tiers, force: force) {
+            stateStore?.lastRun(report: $0)
+        }
+        for line in collectPlanLines(profile: profile, fixedPlan: plan) {
             onLine(.init(timestamp: Date(), level: .info, text: line))
+        }
+        // Same gate as the Pro loop: the flags exist from the runnable floor (1.18) on.
+        let quiet = JamfCLIInstaller.installedVersion(at: bin).map {
+            !JamfCLIInstaller.isBelowMinimumRunnable($0)
+        } ?? false
+        let commands = plan.filter { $0.skip == nil }.map {
+            (args: quiet ? $0.args + ["--no-hints", "--no-version-check"] : $0.args, kind: $0.kind)
         }
 
         let bridge = CLIBridge()
-        let stateStore = (try? workspacePaths.stateDir(for: profile)).map(StateFileStore.init(directory:))
         let collectStart = Date()
         var schoolOutcomes: [CollectOutcome] = []
         var schoolSaved: Set<String> = []

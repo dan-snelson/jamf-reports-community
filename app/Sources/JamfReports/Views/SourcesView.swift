@@ -58,7 +58,8 @@ struct SourcesView: View {
 
             HStack(alignment: .top, spacing: 14) {
                 cliCard
-                eaCard
+                // Jamf School has no Extension Attributes to adopt.
+                if !isSchoolWorkspace { eaCard }
             }
             doctorCard
             ConnectionCard()

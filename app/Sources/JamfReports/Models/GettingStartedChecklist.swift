@@ -91,4 +91,31 @@ struct GettingStartedChecklist: Sendable, Equatable {
         ]
         return GettingStartedChecklist(steps: steps)
     }
+    /// The Jamf School checklist: School has no Extension Attributes, so there is no
+    /// customize step, and the collect step is done once any School snapshot exists.
+    static func buildSchool(
+        connected: Bool, collected: Bool, scheduled: Bool, reported: Bool
+    ) -> GettingStartedChecklist {
+        let pro = build(connected: connected, collected: collected, customized: false,
+                        scheduled: scheduled, reported: reported)
+        let steps = pro.steps.compactMap { step -> GettingStartedStep? in
+            switch step.kind {
+            case .customize: return nil
+            case .connect:
+                return step.with(detail: "Authenticate jamf-cli with your Jamf School API key.")
+            case .collect:
+                return step.with(detail: "Pull a snapshot from Jamf School to list its devices.")
+            case .schedule, .report: return step
+            }
+        }
+        return GettingStartedChecklist(steps: steps)
+    }
+}
+
+extension GettingStartedStep {
+    func with(detail: String) -> GettingStartedStep {
+        GettingStartedStep(kind: kind, title: title, detail: detail, done: done,
+                           actionLabel: actionLabel, destinationTab: destinationTab,
+                           isOptional: isOptional)
+    }
 }

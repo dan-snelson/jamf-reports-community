@@ -497,3 +497,13 @@ final class SchoolDashboardTests: XCTestCase {
         XCTAssertTrue(counts.contains(2), "a fractional count still truncates")
     }
 }
+
+final class SchoolDashboardSheetNamesTests: XCTestCase {
+    /// The Generate sheet lists `sheetNames`; the workbook writes `sheetPlan`.
+    func test_sheetNames_matchTheSheetPlan() {
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
+            workbook: Workbook())
+        XCTAssertEqual(dash.sheetPlan.map(\.name), SchoolDashboard.sheetNames)
+    }
+}

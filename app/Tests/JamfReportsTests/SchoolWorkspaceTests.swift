@@ -33,13 +33,16 @@ final class SchoolWorkspaceTests: XCTestCase {
         XCTAssertTrue(school.isVisible(.overview))
         XCTAssertTrue(school.isVisible(.sources))
         XCTAssertTrue(school.isVisible(.reports))
-        XCTAssertFalse(school.isVisible(.devices), "a core tab, but School has no device data")
+        XCTAssertFalse(school.isVisible(.devices), "a core tab, but School has its own Devices")
+        XCTAssertTrue(school.isVisible(.schoolDevices))
         XCTAssertFalse(school.isVisible(.patch))
         XCTAssertFalse(school.isVisible(.backups), "pro backup is Jamf Pro's")
         XCTAssertFalse(school.isVisible(.protectDashboard))
 
         let pro = TabVisibility().limited(toSchool: false)
-        XCTAssertTrue(Tab.allCases.allSatisfy { pro.isVisible($0) })
+        let proTabs = Tab.allCases.filter { $0 != .schoolDevices }
+        XCTAssertTrue(proTabs.allSatisfy { pro.isVisible($0) })
+        XCTAssertFalse(pro.isVisible(.schoolDevices))
     }
 
     func testTheProductFilterIsNeverStoredAsTheUsersChoice() {

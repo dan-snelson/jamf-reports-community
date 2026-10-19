@@ -53,6 +53,14 @@ struct SchoolDashboard: Sendable {
         return (written, failures)
     }
 
+    /// The School tab names in their default order, for screens that list them without a
+    /// workbook (the Generate sheet). `sheetPlan` writes the same names.
+    static let sheetNames = [
+        "School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles", "Locations",
+        "DEP Devices", "iBeacons", "Device Inventory", "OS Versions", "Device Status",
+        "Stale Devices",
+    ]
+
     /// The School tabs in their default order.
     var sheetPlan: [(name: String, write: () throws -> Void)] {
         [

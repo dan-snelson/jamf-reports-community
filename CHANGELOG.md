@@ -26,6 +26,10 @@ versions in this repository map to git tags.
 - **Protect** now shows which Protect computers match a Jamf Pro computer (by hardware UUID or
   serial number, never by name), which have no Jamf Pro record, and which Jamf Pro Macs have no
   Protect record.
+- **Devices** on a Jamf School workspace lists the devices Jamf School manages: name, serial,
+  model, OS, managed, supervised and last check-in, with counts by platform, filters for
+  managed, unmanaged and stale devices, and a search. Devices waiting in Automated Device
+  Enrollment are listed below them.
 
 ### Changed
 
@@ -58,6 +62,18 @@ versions in this repository map to git tags.
   different Jamf Pro servers, so their figures are no longer averaged or listed together on one
   screen; switching the workspace in the sidebar changes what it shows. Figures across
   workspaces stay in the report-group fleet CSV and workbook.
+- On a Jamf School workspace the Automation screen's Data Freshness card describes School's
+  daily collect and says the weekly deep scan applies to Jamf Pro workspaces only.
+- A Jamf School workspace no longer shows Jamf Pro parts it has no data for: Fleet Overview,
+  the Health Audit option and the `summary.json` line in Generate, the Agents, EAs, Platform API
+  and Scoring tabs in Config (Thresholds keeps only the stale threshold), and the Extension
+  Attributes card in Data Sources. Generate lists the School workbook's own tabs, and Settings ›
+  Sidebar Visibility lists only the tabs the workspace has.
+- The **Overview** on a Jamf School workspace now shows School's own data: device counts by
+  platform, managed, supervised and stale devices, and each count Jamf School reports (users,
+  classes, apps and the rest). It used to show the Jamf Pro cards with nothing in them. Its
+  Getting Started list ticks off the collect step after a School collect and no longer asks you
+  to track Extension Attributes. School keeps no history yet, so Trends is still Jamf Pro only.
 
 ### Fixed
 
@@ -118,6 +134,10 @@ versions in this repository map to git tags.
   School workspace has no HTML report instead of writing an empty one.
 - A new Jamf School workspace's first report now collects before it writes the workbook. It
   used to write a workbook with no sheets.
+- On a Jamf School workspace the weekly scan schedule no longer collects School a second time,
+  and a School collect skips sources it fetched in the last 12 hours unless you click Collect
+  now, so a morning no longer leaves ten copies of each snapshot. jamf-cli's "hint:" lines no
+  longer fill School run logs, and `jamf-reports school-check` lists all ten School sources.
 
 ### Removed
 

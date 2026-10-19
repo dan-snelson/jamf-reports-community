@@ -16,6 +16,16 @@ final class ServerHostRedactionTests: XCTestCase {
         XCTAssertTrue(out.contains("host-"), "got: \(out)")
     }
 
+    /// A profile named after a label of its own server must not break the host match.
+    func testAWorkspaceNameThatIsAHostLabelLeavesNoDomain() {
+        let r = DiagnosticRedactor()
+        r.seedWorkspaceNames(["jamf"])
+        r.seedServerHosts(["jamf.example.org:8443", "jamf.example.org"])
+        let out = r.redactText("lookup jamf.example.org: no such host; profile jamf")
+        XCTAssertFalse(out.contains("example.org"), "got: \(out)")
+        XCTAssertFalse(out.contains("jamf"), "got: \(out)")
+    }
+
     func testUnseededBareHostSurvives() {
         XCTAssertTrue(DiagnosticRedactor().redactText(line).contains("jss.example.org"))
     }

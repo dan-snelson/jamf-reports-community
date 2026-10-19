@@ -204,12 +204,6 @@ final class WorkspaceStore {
         ProfileService.connectionGrouping(profiles: profiles, connections: activeConnections)
     }
 
-    /// Initialized workspaces under their connections, for Fleet Overview.
-    var initializedConnectionGrouping: ConnectionGrouping {
-        ProfileService.connectionGrouping(
-            profiles: initializedProfiles, connections: activeConnections)
-    }
-
     /// True when the active profile has a `config.yaml` on disk under
     /// `~/Jamf-Reports/<profile>/`. Demo profiles always report `true` because
     /// they don't have an on-disk workspace to initialize.
@@ -223,7 +217,7 @@ final class WorkspaceStore {
 
     /// Profiles with a workspace on disk. An `.error` profile is left out even
     /// when a folder answers to it: a case variant finds the owner's folder, and
-    /// Fleet Overview would count that workspace twice.
+    /// the sidebar would count that workspace twice.
     var initializedProfiles: [JamfCLIProfile] {
         if demoMode { return profiles }
         return profiles.filter { profile in

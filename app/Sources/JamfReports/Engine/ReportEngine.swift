@@ -2833,9 +2833,11 @@ struct ReportEngine: Sendable {
                 text: "[info] \(kind): dropped \(data.count - payload.count) byte(s) "
                     + note))
         }
+        let saved = kind == MobileFleetService.deviceKind
+            ? Self.droppingLostModeText(payload) : payload
         do {
             try saveSnapshot(
-                data: payload, kind: kind, dataDir: dataDir,
+                data: saved, kind: kind, dataDir: dataDir,
                 recordManifest: recordManifest, onLine: onLine
             )
         } catch {
@@ -3920,6 +3922,38 @@ struct ReportEngine: Sendable {
             outcome: CollectOutcome(kind: kind, exitCode: exitCode, cause: cause.kind),
             saved: false
         )
+    }
+
+    /// Lost-mode text jamf-cli returns in each mobile record's SECURITY section. No reader
+    /// uses it, and the snapshot can sync to a shared folder; `lostModeEnabled` stays.
+    static let lostModeTextKeys: Set<String> = [
+        "lostModePhoneNumber", "lostModeLocation", "lostModeMessage", "lostModeFootnote",
+    ]
+
+    /// The payload with every `lostModeTextKeys` key removed at any depth. Returned unchanged
+    /// when it holds none of them or does not parse.
+    static func droppingLostModeText(_ data: Data) -> Data {
+        guard let object = try? JSONSerialization.jsonObject(with: data, options: []) else {
+            return data
+        }
+        var removed = false
+        func strip(_ value: Any) -> Any {
+            if let dict = value as? [String: Any] {
+                var kept: [String: Any] = [:]
+                for (key, child) in dict {
+                    if lostModeTextKeys.contains(key) { removed = true; continue }
+                    kept[key] = strip(child)
+                }
+                return kept
+            }
+            if let array = value as? [Any] { return array.map(strip) }
+            return value
+        }
+        let stripped = strip(object)
+        guard removed,
+              let out = try? JSONSerialization.data(withJSONObject: stripped, options: [])
+        else { return data }
+        return out
     }
 
     static func jsonPayload(from data: Data) -> Data? {

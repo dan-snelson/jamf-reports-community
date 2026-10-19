@@ -53,6 +53,11 @@ versions in this repository map to git tags.
   sheet, since collected inventory carries no per-Mac compliance count.
 - `branding.logo_path` now puts the logo on the first tab of the workbook. It used to sit on the
   CSV-based tabs only.
+- **Fleet Overview** shows the workspace selected in the sidebar, with its issues, stability
+  trend and summary details, instead of a card for every workspace. Two workspaces can be
+  different Jamf Pro servers, so their figures are no longer averaged or listed together on one
+  screen; switching the workspace in the sidebar changes what it shows. Figures across
+  workspaces stay in the report-group fleet CSV and workbook.
 
 ### Fixed
 
@@ -129,6 +134,9 @@ versions in this repository map to git tags.
 
 ### Security
 
+- The saved mobile device inventory no longer keeps Lost Mode text (the phone number, location,
+  message and footnote shown on a lost device). Nothing in the app read it, and the snapshot can
+  sit in a shared folder. Whether Lost Mode is on is still kept.
 - A link another Mac plants on a shared folder at `Generated Reports` or at the default
   `archive` folder no longer redirects where reports and archived runs are written. The app
   refuses the link, logs one warning naming the folder and writes nothing through it. (#284)

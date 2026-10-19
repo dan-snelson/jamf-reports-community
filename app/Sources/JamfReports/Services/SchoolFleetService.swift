@@ -171,7 +171,10 @@ enum SchoolFleetService {
     private static func text(_ row: [String: Any], _ keys: String...) -> String {
         for key in keys {
             if let s = row[key] as? String { return s }
-            if let n = row[key] as? NSNumber, !(row[key] is Bool) { return n.stringValue }
+            // `is Bool` is also true for a JSON 0 or 1, so test the CF type instead.
+            if let n = row[key] as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() {
+                return n.stringValue
+            }
         }
         return ""
     }

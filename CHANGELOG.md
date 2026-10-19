@@ -79,6 +79,10 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- Jamf Pro commands no longer run against a Jamf Protect, Jamf Security Cloud or Jamf School
+  login, or an organization-level Platform API profile. Collect, scheduled runs, backup, audit and
+  device lookup stop with one line naming the product; a scheduled run on such a profile is
+  skipped rather than retried or reported as a failure, and `schedules add` refuses it.
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
 - A schedule whose last success was recorded while the Mac's clock was set ahead is retried

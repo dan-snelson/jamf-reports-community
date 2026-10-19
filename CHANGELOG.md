@@ -57,10 +57,6 @@ versions in this repository map to git tags.
 - A Mac's risk rating now counts it as stale by your stale settings (`stale_device_days` and
   `stale_basis`) instead of a fixed 30 days, so Computers, the Priority filter and the risk pill
   agree with the stale counts elsewhere.
-- **Fleet Drift** now compares the collected inventory from two different days, so it no longer
-  needs a CSV export. It lists Macs that joined or left, macOS changes, and Macs that became or
-  stopped being stale under your stale settings. The "Compliance Changed" section is gone from this
-  sheet, since collected inventory carries no per-Mac compliance count.
 - `branding.logo_path` now puts the logo on the first tab of the workbook. It used to sit on the
   CSV-based tabs only.
 - **Fleet Overview** shows the workspace selected in the sidebar, with its issues, stability

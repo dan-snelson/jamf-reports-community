@@ -140,6 +140,9 @@ versions in this repository map to git tags.
 
 ### Security
 
+- A diagnostic bundle now replaces the workspace (profile) name with a placeholder in every
+  file and in the file names, the zip's own name included, since the name is often the
+  organisation's.
 - A link another Mac plants on a shared folder at `Generated Reports` or at the default
   `archive` folder no longer redirects where reports and archived runs are written. The app
   refuses the link, logs one warning naming the folder and writes nothing through it. (#284)

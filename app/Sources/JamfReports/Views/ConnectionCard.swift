@@ -198,10 +198,13 @@ struct ConnectionCard: View {
                 workspace.reloadConnections()
             },
             onSetUpSchool: {
-                OnboardingFlow.pendingProductPath = .school
-                NotificationCenter.default.post(
-                    name: .navigateToTab, object: nil,
-                    userInfo: ["tab": Tab.onboarding.rawValue])
+                // A sheet asked for while this one is still closing would not show.
+                Task {
+                    try? await Task.sleep(for: .milliseconds(400))
+                    NotificationCenter.default.post(
+                        name: .showAddSheet, object: nil,
+                        userInfo: ["product": AddSheetPlan.NewProduct.jamfSchool.rawValue])
+                }
             })
     }
 

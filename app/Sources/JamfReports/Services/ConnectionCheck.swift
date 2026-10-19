@@ -134,8 +134,8 @@ extension ConnectionCheck.Verdict {
     /// At tenant level (legacy) a tenant that is not Jamf Pro can be Jamf School, Jamf Protect
     /// or Jamf Security Cloud; an environment's MDM is Jamf Pro or Jamf School, so it is School.
     static let notJamfProTenantText = "The gateway recognises this tenant ID, but it is not a "
-        + "Jamf Pro tenant. If it is Jamf School, set it up as a Jamf School workspace (Add Jamf "
-        + "School workspace in the sidebar's workspace menu). If it is Jamf Protect or Jamf "
+        + "Jamf Pro tenant. If it is Jamf School, set it up as a Jamf School workspace (Settings › "
+        + "Add connection, then Jamf School). If it is Jamf Protect or Jamf "
         + "Security Cloud, Jamf Reports cannot report from it on its own: Jamf Protect is added "
         + "to a Jamf Pro workspace (Data Sources › Add Jamf Protect), and Jamf Security Cloud is "
         + "not supported yet."
@@ -177,8 +177,8 @@ extension ConnectionCheck.Verdict {
         case .noJamfPro:
             return "The gateway recognises this ID, but no Jamf Pro server answers for it. This "
                 + "environment's MDM is probably Jamf School. Jamf Reports reads Jamf School with "
-                + "a School API key, so set it up as a Jamf School workspace (Add Jamf School "
-                + "workspace in the sidebar's workspace menu). If it should be Jamf Pro, check "
+                + "a School API key, so set it up as a Jamf School workspace (Settings › Add "
+                + "connection, then Jamf School). If it should be Jamf Pro, check "
                 + "that the ID is for the environment that holds your Jamf Pro tenant."
         case .missingPermission(let names):
             return Self.missingPermissionText(names: names)

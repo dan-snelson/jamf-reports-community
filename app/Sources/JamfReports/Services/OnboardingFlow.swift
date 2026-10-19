@@ -35,12 +35,9 @@ final class OnboardingFlow {
 
     /// Which product this onboarding run is setting up.
     ///
-    /// `.pro` is the default and lenient fallback — every existing entry point
-    /// (Settings "Add connection", the sidebar "Add workspace…", and every test
-    /// that constructs `OnboardingFlow()`) resolves to `.pro`, so the Jamf Pro
-    /// flow is unchanged. `.school` is chosen only from the first-launch chooser's
-    /// "Connect Jamf School" card, which sets `pendingProductPath` before the
-    /// view constructs the flow.
+    /// `.pro` is the default and lenient fallback (every test that constructs
+    /// `OnboardingFlow()` gets it). The first-launch chooser and the Add sheet set
+    /// `pendingProductPath` before the view constructs the flow.
     enum ProductPath: String, Sendable {
         case pro
         case school
@@ -1265,7 +1262,16 @@ final class OnboardingFlow {
     internal func writeProtectConfig(
         profileSlug: String, protectProfileName: String
     ) throws -> ConfigSaveReport {
-        let report = try Self.writeProductBlock(
+        try Self.writeProtectConfig(
+            profileSlug: profileSlug, protectProfileName: protectProfileName)
+    }
+
+    /// The same write for a Protect profile jamf-cli already has (the Add sheet).
+    @discardableResult
+    static func writeProtectConfig(
+        profileSlug: String, protectProfileName: String
+    ) throws -> ConfigSaveReport {
+        let report = try writeProductBlock(
             "protect", profile: protectProfileName, for: profileSlug)
         SharedConfigPin.confirmWritten(
             protectProfileName.trimmingCharacters(in: .whitespaces),

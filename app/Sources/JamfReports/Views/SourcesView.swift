@@ -879,8 +879,8 @@ struct SourcesView: View {
                     onConnect: { showingProtectConnect = true },
                     onDisconnected: reloadConnectedProducts)
 
-                Text("Jamf School uses its own workspace: choose Add Jamf School workspace in "
-                    + "the sidebar's workspace menu.")
+                Text("Jamf School uses its own workspace: add one with Settings › Add "
+                    + "connection.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                     .fixedSize(horizontal: false, vertical: true)

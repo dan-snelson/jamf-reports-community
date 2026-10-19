@@ -29,6 +29,12 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- **Settings › Add connection** and the workspace menu's **Add workspace or product…** now open
+  one **Add** sheet, which replaces Add workspace, Add Jamf School workspace and the Jamf
+  Pro-only setup they started. Choose a new Jamf Pro, Platform API or Jamf School workspace, or
+  add Jamf Protect to the current Jamf Pro workspace. The sheet also lists the jamf-cli profiles
+  no workspace uses, including ones made in Terminal since the app started (**Re-check** reads
+  them again), and sets one up or adds it to this workspace with a click.
 - The Devices screen is now **Computers**, matching Jamf Pro's naming, and Mobile Fleet is now
   **Mobile Devices**. Your saved sidebar choices and export file names are unchanged.
 - The sidebar's **Fleet** group now sits right under Reports and holds Computers, Mobile Devices,

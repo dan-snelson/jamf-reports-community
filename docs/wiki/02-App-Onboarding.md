@@ -31,10 +31,17 @@ that existed before setup is never touched. When the profile cannot be removed, 
 open and names the command to run. The cards already chose the connection type, so the
 Authenticate step does not ask for it again on this path.
 
-After setup finishes the chooser does not reappear. To set up additional tenants
-later, open the **workspace switcher** at the bottom of the sidebar and choose **Add
-workspace…**, or click **Settings → jamf-cli → Connections → Add connection**. Both
-routes start the same onboarding flow.
+After setup finishes the chooser does not reappear. To add more later, open the **workspace
+switcher** at the bottom of the sidebar and choose **Add workspace or product…**, or click
+**Settings → jamf-cli → Connections → Add connection**. Both open the same **Add** sheet:
+
+- **New workspace**: Jamf Pro (OAuth2), Platform API or Jamf School. **Connect new** starts
+  that product's onboarding.
+- **Add to** the current workspace: Jamf Protect, on a Jamf Pro workspace.
+- **Profiles jamf-cli already has**: the sheet reads jamf-cli's profiles when it opens and on
+  **Re-check**, and lists the ones no workspace uses, including profiles made in Terminal since
+  the app started. **Set up workspace** creates the workspace and runs its first collection; a
+  Jamf Protect profile is added to the current workspace.
 
 ## When jamf-cli is already set up
 
@@ -217,7 +224,7 @@ on an Intel Mac, build from source instead.
 - [ ] `jamf-cli` installed (`brew install Jamf-Concepts/tap/jamf-cli`)
 - [ ] Jamf Pro URL, API client ID, and secret on hand
 - [ ] `JamfReports.app` in `/Applications`, first launch past Gatekeeper
-- [ ] Profile created through **Add workspace…** → onboarding
+- [ ] Profile created through **Add connection** → New workspace → onboarding
 - [ ] Authentication succeeded (Validate step passed)
 - [ ] First report generated and opened cleanly
 - [ ] `~/Jamf-Reports/<profile>/jamf-cli-data/` contains JSON files

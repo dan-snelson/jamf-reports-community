@@ -29,6 +29,11 @@ struct ContentView: View {
     @State private var isNarrowWindow: Bool?
     /// A sidebar cycle while narrow; cleared when the window widens past the threshold.
     @State private var sidebarOverriddenWhileNarrow = false
+    /// The open Add sheet (`.showAddSheet`).
+    @State private var addRequest: AddSheetRequest?
+    /// Bumped when the Add sheet starts onboarding, so the tab builds a new flow that takes
+    /// the queued product even when setup was already showing.
+    @State private var onboardingRun = 0
 
     /// What the shell shows. `sidebarModeRaw` stays the user's choice; the width rule never
     /// writes it.
@@ -62,6 +67,14 @@ struct ContentView: View {
         } else {
             shell
         }
+    }
+
+    /// The Add sheet's New workspace: the product's onboarding path, on a fresh flow.
+    private func startOnboarding(_ product: AddSheetPlan.NewProduct) {
+        let (path, connection) = product.onboarding
+        FirstLaunchChooserView.queueOnboarding(path, connection: connection)
+        onboardingRun += 1
+        tab = .onboarding
     }
 
     private var showExistingCLISetup: Bool {
@@ -139,6 +152,13 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .cycleSidebar)) { _ in
             cycleSidebar()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showAddSheet)) { note in
+            addRequest = AddSheetRequest(product: (note.userInfo?["product"] as? String)
+                .flatMap(AddSheetPlan.NewProduct.init(rawValue:)))
+        }
+        .sheet(item: $addRequest) { request in
+            AddSheet(requested: request.product, onStartOnboarding: startOnboarding)
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToTab)) { note in
             if let raw = note.userInfo?["tab"] as? String, let newTab = Tab(rawValue: raw) {
@@ -250,7 +270,7 @@ struct ContentView: View {
         case .sources:           SourcesView()
         case .backups:           BackupsView()
         case .settings:          SettingsView()
-        case .onboarding:        OnboardingView()
+        case .onboarding:        OnboardingView().id(onboardingRun)
         case .securityPosture:   SecurityPostureView()
         case .compliancePosture: CompliancePostureView()
         case .complianceBenchmarks: ComplianceBenchmarksView()

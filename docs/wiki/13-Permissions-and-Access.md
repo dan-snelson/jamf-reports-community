@@ -113,7 +113,7 @@ permission:
 - **No Jamf Pro:** the ID is valid but no Jamf Pro tenant answers behind it, including an
   environment that holds no tenant. That environment's MDM is probably Jamf School, which
   Jamf Reports reads with a School API key, so setup offers **Set up Jamf School** (or
-  **Add Jamf School workspace** in the sidebar's workspace menu) and no way to continue with
+  **Settings → Add connection**, then Jamf School) and no way to continue with
   this profile. If it should be Jamf Pro, check that the ID is for the environment that
   holds your Jamf Pro tenant.
 - **Missing permission:** the gateway did not reject the ID but refused the request with a

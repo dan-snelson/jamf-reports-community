@@ -170,7 +170,7 @@ final class ConnectionCheckTests: XCTestCase {
         let verdict = ConnectionCheck.Verdict.noJamfPro
         XCTAssertTrue(verdict.message.contains("probably Jamf School"))
         XCTAssertTrue(verdict.message.contains("School API key"))
-        XCTAssertTrue(verdict.message.contains("Add Jamf School workspace"))
+        XCTAssertTrue(verdict.message.contains("Add connection, then Jamf School"))
         XCTAssertTrue(verdict.suggestsJamfSchool)
         for other: ConnectionCheck.Verdict in [
             .accepted(jamfProVersion: nil), .rejectedID(.unknownEnvironment), .undecided(exitCode: 1),

@@ -144,4 +144,17 @@ final class GettingStartedChecklistTests: XCTestCase {
         )
         XCTAssertNotEqual(a, b)
     }
+
+    /// Jamf School has no Extension Attributes, so its checklist has no customize step and
+    /// finishes on the four it has.
+    func testSchoolChecklistHasNoCustomizeStep() {
+        let cl = GettingStartedChecklist.buildSchool(
+            connected: true, collected: true, scheduled: true, reported: true)
+        XCTAssertEqual(cl.steps.map(\.kind), [.connect, .collect, .schedule, .report])
+        XCTAssertTrue(cl.isComplete)
+        XCTAssertFalse(cl.steps.contains { $0.detail.contains("Jamf Pro") })
+        let fresh = GettingStartedChecklist.buildSchool(
+            connected: true, collected: false, scheduled: false, reported: false)
+        XCTAssertEqual(fresh.firstIncomplete?.kind, .collect)
+    }
 }

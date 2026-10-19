@@ -140,7 +140,7 @@ struct OverviewView: View {
                     workspaceInitBanner
                 }
                 if !workspace.demoMode, let cl = checklist, !cl.isComplete {
-                    gettingStartedCard(cl)
+                    GettingStartedCard(checklist: cl, onAction: performStepAction)
                 }
                 // PR-13: shared StaleDataBanner surfaces freshness above
                 // the KPI grid. Suppressed in demo mode (canonical demo
@@ -1934,59 +1934,6 @@ struct OverviewView: View {
             customized: customized,
             scheduled: scheduled,
             reported: reported
-        )
-    }
-
-    /// Card rendered above StaleDataBanner for new users.
-    /// Auto-hides once all steps are done — no stored dismiss flag.
-    @ViewBuilder
-    private func gettingStartedCard(_ cl: GettingStartedChecklist) -> some View {
-        Card(padding: 16) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Kicker(
-                        text: "Getting started — \(cl.completedCount) of \(cl.steps.count)",
-                        tone: cl.completedCount > 0 ? .teal : .muted
-                    )
-                    Spacer(minLength: 8)
-                }
-                ForEach(cl.steps) { step in
-                    gettingStartedRow(step, isActive: cl.firstIncomplete?.id == step.id)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func gettingStartedRow(_ step: GettingStartedStep, isActive: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: step.done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(step.done ? Theme.Colors.ok : Theme.Text.tertiary(contrast))
-                    .accessibilityHidden(true)
-                Text(step.title)
-                    .font(.callout.weight(isActive ? .semibold : .regular))
-                    .foregroundStyle(step.done ? Theme.Text.tertiary(contrast) : Theme.Colors.fg)
-                    .strikethrough(step.done, color: Theme.Text.tertiary(contrast))
-            }
-            if !step.done {
-                Text(step.detail)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .padding(.leading, 24)
-            }
-            if isActive {
-                PNPButton(title: step.actionLabel, style: .gold, size: .sm) {
-                    performStepAction(step)
-                }
-                .padding(.leading, 24)
-                .padding(.top, 2)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(step.title): \(step.done ? "complete" : "incomplete"). \(step.done ? "" : step.detail)"
         )
     }
 

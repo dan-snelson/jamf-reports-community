@@ -236,7 +236,8 @@ struct ContentView: View {
     @ViewBuilder
     private var detailView: some View {
         switch tab {
-        case .overview:          OverviewView()
+        case .overview:
+            if workspace.isSchoolWorkspace { SchoolOverviewView() } else { OverviewView() }
         case .fleet:             FleetOverviewView()
         case .devices:           DevicesView()
         case .deviceLookup:      DeviceLookupView()

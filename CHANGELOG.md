@@ -33,6 +33,11 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- The **Overview** on a Jamf School workspace now shows School's own data: device counts by
+  platform, managed, supervised and stale devices, and each count Jamf School reports (users,
+  classes, apps and the rest). It used to show the Jamf Pro cards with nothing in them. Its
+  Getting Started list ticks off the collect step after a School collect and no longer asks you
+  to track Extension Attributes. School keeps no history yet, so Trends is still Jamf Pro only.
 - The Devices screen is now **Computers**, matching Jamf Pro's naming, and Mobile Fleet is now
   **Mobile Devices**. Your saved sidebar choices and export file names are unchanged.
 - The sidebar's **Fleet** group now sits right under Reports and holds Computers, Mobile Devices,

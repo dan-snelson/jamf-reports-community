@@ -31,7 +31,7 @@ versions in this repository map to git tags.
   managed, unmanaged and stale devices, and a search. Devices waiting in Automated Device
   Enrollment are listed below them.
 - A Jamf School workspace now builds Trends history: each collect that reads its devices saves
-  a daily summary of Macs, mobile devices and stale devices, and Trends shows those two charts.
+  a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
 
 ### Changed
 

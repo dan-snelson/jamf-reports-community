@@ -454,6 +454,9 @@ struct TrendsView: View {
                 return !points(for: .securityScore).isEmpty
             case .managedDevices:
                 return true
+            case .stale:
+                // A School fleet with no Macs records no stale count.
+                return !workspaceStore.isSchoolWorkspace || !points(for: .stale).isEmpty
             default:
                 return true
             }

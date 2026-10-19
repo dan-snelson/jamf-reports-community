@@ -6,19 +6,22 @@ extension ReportEngine {
     /// (`SchoolFleetService`; devices in School's trash are already left out). Macs are
     /// `totalDevices`, every other platform is `mobileDeviceCount` (nil when there is none, as
     /// `mobileOnlySummary` records nothing for a fleet with no mobile devices). `staleCount`
-    /// counts every device, Mac or mobile, whose check-in is more than `staleDays` ago: School
-    /// has no other staleness source, and most School fleets are iPads. The Mac security
+    /// counts the Macs whose check-in is more than `staleDays` ago, as the Pro summary does, and
+    /// is nil on a fleet with no Macs (as `mobileOnlySummary`): mobile staleness waits for the
+    /// mobile spec's M2 `mobile` object, so no mixed count is recorded. The Mac security
     /// figures are School data it does not carry, so they stay nil. Nil when there are no devices.
     static func schoolSummary(
         from snapshot: SchoolFleetService.Snapshot, date: String, staleDays: Int, now: Date,
         collectionSources: [String: String]?, collectedByHost: String?
     ) -> DailySummary? {
-        let macs = snapshot.devices.filter { $0.platform == "macOS" }.count
+        let macDevices = snapshot.devices.filter { $0.platform == "macOS" }
+        let macs = macDevices.count
+        let staleMacs = macDevices.filter { $0.isStale(atDays: staleDays, now: now) }.count
         let mobile = snapshot.devices.filter { !["macOS", "Unknown"].contains($0.platform) }.count
         guard macs + mobile > 0 else { return nil }
         return DailySummary(
             date: date, totalDevices: macs, fileVaultPct: nil, compliancePct: nil,
-            staleCount: snapshot.staleCount(atDays: staleDays, now: now),
+            staleCount: macs > 0 ? staleMacs : nil,
             osCurrentPct: nil, crowdstrikePct: nil, patchPct: nil,
             source: "jamf-cli", collectionSources: collectionSources,
             mobileDeviceCount: mobile > 0 ? mobile : nil, collectedByHost: collectedByHost)

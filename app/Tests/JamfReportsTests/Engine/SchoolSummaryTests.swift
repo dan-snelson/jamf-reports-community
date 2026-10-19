@@ -72,7 +72,7 @@ final class SchoolSummaryTests: XCTestCase {
         let s = try summary()
         XCTAssertEqual(s.totalDevices, 2, "Macs only")
         XCTAssertEqual(s.mobileDeviceCount, 4, "iPadOS, iOS and tvOS; the trashed iPad is left out")
-        XCTAssertEqual(s.staleCount, 2, "Mac 02 and iPad 02; the TV has no check-in; trash skipped")
+        XCTAssertEqual(s.staleCount, 1, "Mac 02 only; the stale iPad is not counted")
         XCTAssertEqual(s.source, "jamf-cli")
         XCTAssertEqual(s.collectionSources, [SchoolFleetService.devicesKind: "live"])
         let macFigures: [Double?] = [
@@ -111,7 +111,20 @@ final class SchoolSummaryTests: XCTestCase {
         let s = try summary()
         XCTAssertEqual(s.totalDevices, 0)
         XCTAssertEqual(s.mobileDeviceCount, 1)
-        XCTAssertEqual(s.staleCount, 0)
+        XCTAssertNil(s.staleCount, "no Macs: mobile staleness is not recorded")
+    }
+
+    func testIPadOnlyFleetRecordsNoStaleCountEvenWhenIPadsAreStale() throws {
+        try writeDevices("""
+        [{"name":"Cart iPad 01","serialNumber":"I1","os":"iPadOS 18.1",
+          "lastCheckin":"2026-01-01 09:00:00","inTrash":false}]
+        """)
+        write()
+        let s = try summary()
+        XCTAssertEqual(s.totalDevices, 0)
+        XCTAssertNil(s.staleCount)
+        XCTAssertTrue(TrendStore(summaries: [s], range: .all).points(metric: .stale).isEmpty,
+                      "Trends has no stale series to offer")
     }
 
     func testStaleIsMoreThanTheThresholdInWholeDays() throws {
@@ -150,6 +163,7 @@ final class SchoolSummaryTests: XCTestCase {
         write()
         let store = TrendStore(summaries: [try summary()], range: .all)
 
+        XCTAssertEqual(TrendSeries.Metric.schoolMetrics, [.managedDevices, .stale])
         for metric in TrendSeries.Metric.schoolMetrics {
             XCTAssertFalse(store.points(metric: metric).isEmpty, "\(metric.rawValue)")
         }

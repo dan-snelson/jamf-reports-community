@@ -567,7 +567,7 @@ All 14 recommendations were accepted on 2026-10-19.
 | D13 | Source of the Fleet view's figures | The daily summary, extended with the small aggregate maps in section 8. Snapshots are never read across environments |
 | D14 | Release that retires `jamf_cli.profile`, `protect.*` and `school_cli.*` | The release that ships P4 (planned 2.12). Until then those keys are read as in 3.3 |
 
-Added after the Jamf School test (2026-10-19), open:
+Added after the Jamf School test, accepted on 2026-10-19:
 
 | # | Decision | Recommendation |
 |---|---|---|

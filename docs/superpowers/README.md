@@ -27,7 +27,7 @@ Pairing: four spec and plan pairs (DDM, ticker, connection access, security poli
 | [plans/2026-10-10-monocle-review-plan.md](plans/2026-10-10-monocle-review-plan.md) | Follow-up to an external security review (Monocle), docs audit and epic triage | Shipped after 2.9.0 (PRs #250 to #260, 2026-10-10); re-score 70/100 unchanged, raw 59 to 66 |
 | [specs/2026-10-18-security-cloud-and-device-correlation-design.md](specs/2026-10-18-security-cloud-and-device-correlation-design.md) | Cross-product device correlation and Security Cloud plan (epic #283) | First slice (Protect to Jamf Pro match) shipped after 2.10.1; the rest is blocked on a tenant |
 | [specs/2026-10-19-environment-model-design.md](specs/2026-10-19-environment-model-design.md) | The workspace becomes the environment: one profile per product, merging workspaces, a multi-environment view (epics #283, #284) | Design only; D1–D14 accepted; section 10 and P11 superseded by the mobile spec; must land before Security Cloud collect |
-| [specs/2026-10-19-mobile-first-class-design.md](specs/2026-10-19-mobile-first-class-design.md) | Mobile devices beside computers: Overview, Trends, summary fields, Health Audit; Fleet Overview shows one environment (#207 L5) | Design only; 12 decisions open |
+| [specs/2026-10-19-mobile-first-class-design.md](specs/2026-10-19-mobile-first-class-design.md) | Mobile devices beside computers: Overview, Trends, summary fields, Health Audit; Fleet Overview shows one environment (#207 L5) | Design only; 13 decisions open; mobile fields checked on a test tenant |
 
 ## Known divergences
 

@@ -16,7 +16,8 @@ Mobile Fleet, Device Lookup, Jamf Protect and Groups & Searches.
   A figure that could exist after a collect or a setup step uses `OverviewUnavailable`, as today.
 - Every new figure comes from data the app already collects: `mobile-devices-list` (GENERAL,
   HARDWARE, SECURITY, USER_AND_LOCATION), `classic-ios-profiles`, the `update-device-failures`
-  scan and the cached SOFA iOS feed. Battery and storage wait for the environment spec's P10.
+  scan and the cached SOFA iOS feed. Mobile battery and storage are already in HARDWARE
+  (section 9), so they need a reader only, not new collection.
 - No config key is added. Mobile staleness reuses `thresholds.stale_device_days`.
 - The app stays read-only. It never offers lock, wipe, lost mode or an OS update.
 
@@ -37,11 +38,19 @@ Audit and Fleet Overview all read them from there, so no screen counts different
 | Stale | `general.lastInventoryUpdateDate` more than `stale_device_days` ago (`>`, like Macs) | devices with a parseable date (`DateParser`) |
 | Update errors | rows in the `update-device-failures` scan's `error_devices` whose `device_type` is not a computer | the scan's rows |
 
-Two notes. A share is counted over the devices that report the field: an unsupervised or older
-record leaves fields out, and counting a missing field as a failure would invent bad news.
-Every share is stored with its count, so a screen can say "112 of 115 reporting".
-`thresholds.stale_basis` does not apply: Jamf Pro's mobile record carries no last check-in and no
-last contact, only last inventory update. Each mobile staleness label says "last inventory".
+Notes:
+
+- A share is counted over the devices that report the field. An unsupervised or older record
+  leaves fields out, and counting a missing field as a failure would invent bad news. Every
+  share is stored with its count, so a screen can say "112 of 115 reporting".
+- A record with no GENERAL or SECURITY data (`deviceType` "Unknown" on the test tenant) counts
+  toward the device total and toward no share.
+- OS versions arrive as both `17.5` and `17.5.0`. Count them through `OSVersionName`, which
+  today normalises macOS only.
+- `thresholds.stale_basis` does not apply. The record has `general.lastContactDate`, but it was
+  null on every device of the test tenant, so staleness uses last inventory update for now and
+  each mobile staleness label says "last inventory". Use last contact once a tenant fills it and
+  its meaning is checked.
 
 ## 3. Overview
 
@@ -196,9 +205,10 @@ devices (the donut filter pattern from #207 A3).
   (`FleetInsightInput.audit`) counts them by name with no device names.
 - `classic-ios-profiles` carries `{id, name}` only, so it yields no finding. It stays as the
   profile count on Mobile Fleet.
-- `pro audit` (jamf-cli) may report mobile checks of its own. Check a real tenant's audit output
-  before deciding whether its mobile rows supersede a finding here, as `withoutSupersededRows`
-  does for MDM commands.
+- `pro audit` (jamf-cli 1.31.1) returned five findings on the test tenant. None is mobile by
+  name. Whether "Unencrypted devices" counts mobile devices is not known. If it does, its row is
+  superseded by the data protection finding here, as `withoutSupersededRows` does for MDM
+  commands.
 - The HTML report's "Needs attention" gets the same rules (#207 L5: it has no mobile rules).
 
 ## 6. Fleet Overview shows one environment
@@ -271,8 +281,41 @@ Each has one recommendation.
 | M-D5 | Summary shape | One optional `mobile` object with `{met, of}` pairs. `mobileDeviceCount` stays top-level |
 | M-D6 | Share denominator | Devices that report the field, stored with the share so screens say "of N reporting" |
 | M-D7 | Backfill | Same-day snapshots only, newest 21 days, read-time. OS currency never backfilled |
-| M-D8 | Mobile staleness | `lastInventoryUpdateDate` against `stale_device_days`. `stale_basis` does not apply, and there is no new key |
+| M-D8 | Mobile staleness | `lastInventoryUpdateDate` against `stale_device_days`. `lastContactDate` exists but was null on the test tenant: adopt it only once a tenant fills it. `stale_basis` does not apply, and there is no new key |
 | M-D9 | Which mobile conditions are Audit findings | The seven in section 5. Unsupervised and Activation Lock stay as counts, not findings |
 | M-D10 | Recent Activity on the Overview | Stays Mac-only, and is left out on a mobile-only environment. Mobile has only a last-inventory date, and mixing date meanings in one list misleads |
 | M-D11 | Where cross-environment figures live | Report-group exports only (fleet CSV and workbook, on demand and scheduled). No on-screen cross-environment view |
 | M-D12 | When Fleet Overview stops mixing workspaces | Now (M1), before the environment phases. It needs nothing from them |
+| M-D13 | Lost-mode text in the saved `mobile-devices-list` snapshot (section 9) | Drop `lostModePhoneNumber`, `lostModeLocation`, `lostModeMessage` and `lostModeFootnote` at collect and keep `lostModeEnabled`. No reader uses them, and the snapshot can sync to a shared folder |
+
+## 9. Checked against a test tenant (2026-10-19)
+
+One read-only run of jamf-cli 1.31.1 on a test tenant: `pro mobile-devices list` with the four
+sections `collect` passes (105 records, 103 iOS and 2 "Unknown" with no GENERAL or SECURITY),
+`pro audit`, `pro report update-status --scan-failures` and `pro app-installers-deployments
+list`. Only key names, types and counts were read, not values.
+
+- The section flags work: every section not asked for (applications, certificates, network,
+  profiles, groups) is null.
+- GENERAL has `managed`, `supervised`, `osVersion`, `lastInventoryUpdateDate` (ISO 8601 with a
+  2- or 3-digit fraction, `DateParser` reads both), `lastEnrolledDate`, `lastContactDate`
+  (null on every record), `deviceOwnershipType`, `sharedIpad`, `udid` and `managementId` (the
+  `DeviceCorrelation` keys for a mobile source). It has no `passcodeCompliant`,
+  `dataProtectionEnabled`, `activationLockEnabled` or `jailbreakDetected`: SECURITY carries them,
+  and `MobileFleetService` reads SECURITY first.
+- SECURITY has booleans `passcodeCompliant`, `passcodePresent`, `dataProtected`,
+  `activationLockEnabled`, `jailBreakDetected` and `lostModeEnabled`, and `hardwareEncryption`
+  (a number). `lockdownModeEnabled` was null everywhere. It also has the lost-mode text fields
+  `lostModePhoneNumber`, `lostModeLocation`, `lostModeMessage` and `lostModeFootnote`, empty on
+  this tenant but saved raw in the snapshot (M-D13).
+- HARDWARE has `batteryLevel` (0–100), `usedSpacePercentage` (0–98 seen), `capacityMb` and
+  `availableSpaceMb`. `batteryHealth` was "UNKNOWN" on every record. Mobile storage and battery
+  therefore need no new collection. The environment spec's section 8.1 row is confirmed, and the
+  storage tile's mobile half reads `usedSpacePercentage`.
+- `update-status --scan-failures` returned no data: the tenant has Managed Software Update Plans
+  off (`.softwareUpdatePlansOff`). The mobile `device_type` values of `error_devices` are still
+  unverified.
+- App Installers: the read commands are `pro app-installers-deployments list`, `get`,
+  `installation-summary` and `computers` (per deployment). The rest of that command group writes
+  and is never called. The tenant has no deployments, so the shape is unverified. The "installed
+  in 30 days / pending in 24 hours" figure needs one call per deployment.

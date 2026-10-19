@@ -371,7 +371,7 @@ absent never fire (a nil never fires).
 | Figure | Collection | Notes |
 |---|---|---|
 | Computer storage used | A new `computer-storage` kind: `pro computers list --section STORAGE`, reduced on collect through an allow-list to `{id, udid, bootPercentUsed, capacityMB}` and saved with `saveJSONSnapshot`. Inventory tier, `collect_skip`-able | 2.11 dropped the boot-drive risk factor because STORAGE was not requested. A reduced kind keeps the `computers` snapshot the size it is. Measure the call's time and payload on a large fleet first (D9) |
-| Mobile storage used, battery level | Already in `mobile-devices-list` (HARDWARE) | Reader only. The field names must be confirmed on a real jamf-cli 1.29+ answer before a fixture is written |
+| Mobile storage used, battery level | Already in `mobile-devices-list` (HARDWARE) | Reader only. Confirmed on jamf-cli 1.31.1: `usedSpacePercentage`, `capacityMb`, `availableSpaceMb`, `batteryLevel` (mobile spec, section 9) |
 | App auto-update (App Installers) status | A new kind from jamf-cli's `app-installers` read commands (released in 1.23, never adopted) | Command, shape and whether a per-deployment status needs a fan-out are unverified. Check before planning the tile |
 | Mobile last seen | `mobile-devices-list` last inventory update | Jamf Pro's mobile record has no last check-in (Jamf Insights shows none either). The tile says "last inventory" |
 | Model family | `computers` HARDWARE model name | Bucket by the marketing name (MacBook, Mac mini, iMac, Mac Pro or Mac Studio). Model identifiers like `Mac14,13` do not name the family |

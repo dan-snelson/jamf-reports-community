@@ -8,7 +8,7 @@ final class PhoneRedactionTests: XCTestCase {
         let r = DiagnosticRedactor()
         for phone in ["+14155550123", "(415) 555-0123", "415.555.0123", "415-555-0123"] {
             let out = r.redactText("[warn] contact \(phone) failed")
-            XCTAssertFalse(out.contains("555"), "\(phone) -> \(out)")
+            XCTAssertFalse(withoutPlaceholders(out).contains("555"), "\(phone) -> \(out)")
             XCTAssertTrue(out.contains("phone-"), "\(phone) -> \(out)")
         }
     }
@@ -48,7 +48,12 @@ final class PhoneRedactionTests: XCTestCase {
 
     func testPhoneIsMaskedEvenWhenUsernamesAreKept() {
         let out = DiagnosticRedactor(redactUsernames: false).redactText("call 415-555-0123")
-        XCTAssertFalse(out.contains("555"), out)
+        XCTAssertFalse(withoutPlaceholders(out).contains("555"), out)
+    }
+
+    /// The placeholder's random hex can itself contain "555".
+    private func withoutPlaceholders(_ text: String) -> String {
+        text.replacingOccurrences(of: "phone-[0-9a-f]+", with: "", options: .regularExpression)
     }
 
     func testPolicyListsPhones() {

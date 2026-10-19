@@ -17,6 +17,18 @@ enum NotifyConfigLoader {
         guard FileManager.default.fileExists(atPath: url.path) else { return NotifyConfig() }
         return (try? ConfigLoader.load(from: url))?.notify ?? NotifyConfig()
     }
+
+    /// Only the `notify:` block of the config.yaml at `url`, for a config.yaml the full decode
+    /// rejects (a mistyped threshold must not silence the failure card or the overdue digest it
+    /// would have raised). Nil when the file, the block or the block's values cannot be read.
+    static func scoped(at url: URL) -> NotifyConfig? {
+        guard let text = try? ConfigLoader.readText(at: url),
+              let root = try? ConfigLoader.rawMapping(fromYAML: text),
+              let block = ConfigLoader.rawValue(at: ["notify"], in: root) as? [String: Any],
+              let data = try? JSONSerialization.data(withJSONObject: block)
+        else { return nil }
+        return try? JSONDecoder().decode(NotifyConfig.self, from: data)
+    }
 }
 
 /// Scoped write-back for the `notify:` config.yaml block, used by the Automation

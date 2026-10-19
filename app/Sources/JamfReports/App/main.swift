@@ -171,9 +171,9 @@ func notifyOverdueSchedulesHeadless(
 }
 
 /// A target for each profile in `profiles` whose `config.yaml` `notify:` block is
-/// usable, in discovery order. Best-effort per profile — an unreadable or
-/// undecodable config is left out.
-private func notifyTargets(
+/// usable, in discovery order. Best-effort per profile — an unreadable config is left out; one
+/// that does not decode still contributes its `notify:` block.
+func notifyTargets(
     in profiles: [String], sentToday: (URL) -> Bool
 ) -> [OverdueDigestRouting.Target] {
     profiles.compactMap { profile in
@@ -181,8 +181,9 @@ private func notifyTargets(
               let workspace = ProfileService.workspaceURL(for: profile) else { return nil }
         let url = workspace.appendingPathComponent("config.yaml")
         guard FileManager.default.fileExists(atPath: url.path),
-              let config = try? ConfigLoader.load(from: url),
-              let notify = SharedConfigPin.effectiveNotify(config.notify, profile: profile),
+              let notify = SharedConfigPin.effectiveNotify(
+                  (try? ConfigLoader.load(from: url))?.notify ?? NotifyConfigLoader.scoped(at: url),
+                  profile: profile),
               notify.isUsable else { return nil }
         return OverdueDigestRouting.Target(
             profile: profile, notify: notify, workspace: workspace,
@@ -258,6 +259,8 @@ private func scheduledRunSingleBody(
         routingConfig = nil
         configError = error
     }
+    // A config the full decode rejects still carries the webhook the failure card goes to.
+    let routingNotify = configError == nil ? nil : NotifyConfigLoader.scoped(at: configURL)
     if routingConfig == nil {
         AppLogger.schedule.warning(
             "[routing] no usable config for \(profile, privacy: .public) — treating it as Jamf Pro")
@@ -320,7 +323,8 @@ private func scheduledRunSingleBody(
         recorder?.finish(exitCode: 1)
         await ScheduledRunSignals.notifyScheduledRunFailure(
             config: nil, profile: profile, mode: mode,
-            errorDescription: configError.localizedDescription, recorder: nil)
+            errorDescription: configError.localizedDescription, recorder: nil,
+            fallbackNotify: routingNotify)
         return 1
     }
 
@@ -403,7 +407,7 @@ private func scheduledRunSingleBody(
             if let failureDetail {
                 await ScheduledRunSignals.notifyScheduledRunFailure(
                     config: routingConfig, profile: profile, mode: mode,
-                    errorDescription: failureDetail, recorder: nil
+                    errorDescription: failureDetail, recorder: nil, fallbackNotify: routingNotify
                 )
             }
             return exit
@@ -416,7 +420,7 @@ private func scheduledRunSingleBody(
             recorder?.finish(exitCode: 1)
             await ScheduledRunSignals.notifyScheduledRunFailure(
                 config: routingConfig, profile: profile, mode: mode,
-                errorDescription: errorDesc, recorder: nil
+                errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify
             )
             return 1
         }
@@ -585,7 +589,7 @@ private func scheduledRunSingleBody(
         // webhook send latency never blocks the exit path.
         await ScheduledRunSignals.notifyScheduledRunFailure(
             config: routingConfig, profile: profile, mode: mode,
-            errorDescription: errorDesc, recorder: nil
+            errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify
         )
         return 1
     }

@@ -136,14 +136,17 @@ enum ScheduledRunSignals {
     /// it is scrubbed through the strictest pipeline (`LogRedactor` credential
     /// patterns + `DiagnosticRedactor` full-PII pass) before it enters a fact.
     /// `minimal` mode drops the error fact entirely. Best-effort — never throws.
+    /// `fallbackNotify` is the `notify:` block read alone, for a run with no decoded config.
     static func notifyScheduledRunFailure(
         config: ReportConfig?,
         profile: String,
         mode: Schedule.RunMode,
         errorDescription: String,
-        recorder: ScheduledRunRecorder?
+        recorder: ScheduledRunRecorder?,
+        fallbackNotify: NotifyConfig? = nil
     ) async {
-        guard let notify = SharedConfigPin.effectiveNotify(config?.notify, profile: profile),
+        guard let notify = SharedConfigPin.effectiveNotify(
+                config?.notify ?? fallbackNotify, profile: profile),
               notify.isUsable else { return }
         let facts = failureFacts(
             detail: notify.resolvedDetail, profile: profile, mode: mode,

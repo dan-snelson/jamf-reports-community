@@ -187,6 +187,23 @@ final class ScheduledRunUndecodableConfigTests: XCTestCase {
         XCTAssertTrue(text.contains("Config decode failed"), text)
     }
 
+    /// notify lives in the file that failed to decode; its own failure card must still go out.
+    func testTheFailureCardAndTheOverdueDigestStillReadTheNotifyBlock() async throws {
+        WebhookCapture.start()
+        addTeardownBlock { WebhookCapture.stop() }
+        try writeConfig(
+            "thresholds: not-a-mapping\nnotify:\n  enabled: true\n  provider: teams\n"
+                + "  url: \"\(WebhookCapture.webhookURL)\"\n")
+        let outcome = await runSchedule(schedule(.snapshotOnly), verbose: false)
+        XCTAssertEqual(outcome.exitCode, 1)
+        let posted = WebhookCapture.posted
+        XCTAssertEqual(posted.count, 1, "one failure card")
+        XCTAssertTrue(posted.first?.contains("Failed") == true, "\(posted)")
+
+        let targets = notifyTargets(in: [profile]) { _ in false }
+        XCTAssertEqual(targets.map(\.profile), [profile], "the digest reaches this workspace")
+    }
+
     func testAnAbsentConfigStillRunsAsBefore() async throws {
         try ProductGuardSeed.seed(profile: profile, product: "protect", in: root)
         let outcome = await runSchedule(schedule(.snapshotOnly), verbose: false)

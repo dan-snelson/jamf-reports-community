@@ -56,4 +56,25 @@ final class ValidationVerdictTests: XCTestCase {
         XCTAssertEqual(CLIBridge.validationVerdict(stdout: junk, exitCode: 0, profile: "pro").exit, 0)
         XCTAssertEqual(CLIBridge.validationVerdict(stdout: Data(), exitCode: 1, profile: "pro").exit, 1)
     }
+
+    /// jamf-cli 1.33.0 fails every apikey profile's auth-method row (`validAuthMethods` lacks it).
+    func testAnAPIKeyProfilesAuthMethodRowIsIgnoredButNothingElse() {
+        let apikey = ("school", "auth-method", "fail", "invalid \"apikey\"")
+        let clean = CLIBridge.validationVerdict(
+            stdout: json([("config", "file-exists", "pass", nil), ("school", "url", "pass", nil), apikey]),
+            exitCode: 1, profile: "school")
+        XCTAssertEqual(clean.exit, 0)
+        XCTAssertTrue(clean.failures.isEmpty)
+
+        let other = CLIBridge.validationVerdict(
+            stdout: json([("school", "url", "fail", "missing"), apikey]),
+            exitCode: 1, profile: "school")
+        XCTAssertEqual(other.exit, 1)
+        XCTAssertEqual(other.failures, ["school url failed: missing"])
+
+        let bad = CLIBridge.validationVerdict(
+            stdout: json([("pro", "auth-method", "fail", "invalid \"bearer\"")]),
+            exitCode: 1, profile: "pro")
+        XCTAssertEqual(bad.exit, 1, "a different invalid method still fails")
+    }
 }

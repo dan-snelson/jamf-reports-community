@@ -1152,7 +1152,8 @@ final class CLIBridge {
 
     /// Reduces `jamf-cli config validate --output json` (an array of `{scope, name, status,
     /// message}`) to the rows for `config` and `profile`; another profile's failing row does
-    /// not fail this one. Output that does not parse keeps `exitCode`.
+    /// not fail this one, nor does the apikey false positive below. Output that does not parse
+    /// keeps `exitCode`.
     nonisolated static func validationVerdict(
         stdout: Data, exitCode: Int32, profile: String
     ) -> (exit: Int32, failures: [String]) {
@@ -1161,6 +1162,10 @@ final class CLIBridge {
         }
         let failures = checks
             .filter { ($0.scope == "config" || $0.scope == profile) && $0.status == "fail" }
+            // jamf-cli's validAuthMethods (internal/commands/config.go, 1.33.0) lacks apikey, so it
+            // fails every Jamf School profile's auth-method row; the credentials are fine.
+            .filter { !($0.scope == profile && $0.name == "auth-method"
+                && $0.message == #"invalid "apikey""#) }
             .map { check in
                 let message = check.message ?? ""
                 return "\(check.scope) \(check.name) failed" + (message.isEmpty ? "" : ": \(message)")

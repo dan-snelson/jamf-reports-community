@@ -62,7 +62,8 @@ func runTick(
     var state = TickState.load()
     let due = TickScheduler.due(
         schedules: schedules, state: state, runNowLabels: runNowLabels, now: now,
-        nonCatchUpAnchor: blockedSince)
+        nonCatchUpAnchor: blockedSince,
+        summaryMissingToday: { summaryMissing(for: $0, profiles: profiles, now: now) })
     // After the decision, which reads the previous wake. Best-effort: without it a daily
     // schedule just waits for its fire.
     state.lastTick = now
@@ -100,6 +101,19 @@ func runTick(
         saveLastTick(finished)
     }
     return result
+}
+
+/// True when a run of `schedule` is meant to write today's summary for a Jamf Pro workspace
+/// that has none. Jamf School collects write no summary, so they never count.
+func summaryMissing(for schedule: Schedule, profiles: [JamfCLIProfile], now: Date) -> Bool {
+    let names = schedule.isMulti
+        ? ProfileService.runnableProfiles(
+            profiles, excluding: Set(schedule.excludedProfiles ?? [])).map(\.name)
+        : [schedule.profile]
+    return names.contains { name in
+        ProfileProductType.detect(from: collectRoutingConfig(profile: name), profile: name)
+            .type == .jamfPro && !SummaryJSONParser.hasSummary(profile: name, on: now)
+    }
 }
 
 private func saveLastTick(_ state: TickState) {

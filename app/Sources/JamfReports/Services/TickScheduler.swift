@@ -97,6 +97,9 @@ enum TickScheduler {
     /// tick alone never re-polls an on-prem server inside an hour.
     static let retryBackoffs: [TimeInterval] = [1 * 3600, 2 * 3600, 4 * 3600]
 
+    /// Wait between retries once `retryBackoffs` are spent, while today's summary is missing.
+    static let missingSummaryRetryInterval: TimeInterval = 3600
+
     /// A longer gap between two wakes than this (the agent wakes every 300 s) means the Mac was
     /// off or asleep.
     static let offGap: TimeInterval = 15 * 60
@@ -109,6 +112,11 @@ enum TickScheduler {
         let reason: Reason
     }
 
+    /// - Parameter summaryMissingToday: Whether `schedule` should have produced today's daily
+    ///   summary and none exists. Asked only once the backoffs are spent: a collect that has not
+    ///   produced it keeps retrying hourly until local midnight (a laptop off the VPN until
+    ///   14:00 still gets its day). The default says it exists, so retries stop after the
+    ///   backoffs.
     /// - Parameter nonCatchUpAnchor: When a wake was turned away by the lock,
     ///   the time of the FIRST such refusal. The non-catch-up window is measured
     ///   from the earlier of it and `now`, so a 40-minute collect that blocks
@@ -119,7 +127,8 @@ enum TickScheduler {
         state: TickState,
         runNowLabels: Set<String>,
         now: Date,
-        nonCatchUpAnchor: Date? = nil
+        nonCatchUpAnchor: Date? = nil,
+        summaryMissingToday: (Schedule) -> Bool = { _ in false }
     ) -> [DueRun] {
         let anchor = min(nonCatchUpAnchor ?? now, now)
         return schedules.compactMap { schedule -> DueRun? in
@@ -151,7 +160,8 @@ enum TickScheduler {
                 return DueRun(schedule: schedule, reason: .fire)
             }
             let retry = retryIsDue(
-                mode: schedule.mode, label: label, fire: slot, state: state, now: now)
+                mode: schedule.mode, label: label, fire: slot, state: state, now: now,
+                summaryMissing: { summaryMissingToday(schedule) })
             return retry ? DueRun(schedule: schedule, reason: .retry) : nil
         }
     }
@@ -178,10 +188,12 @@ enum TickScheduler {
     }
 
     /// Same-day retry of a run that started for `fire` but never succeeded:
-    /// collect modes only, at most `retryBackoffs.count` per fire, each one its
-    /// backoff after the previous start. Only reached once the fire has started.
+    /// collect modes only, each one its backoff after the previous start: `retryBackoffs.count`
+    /// per fire, then hourly until local midnight while `summaryMissing`. Only reached once the
+    /// fire has started.
     private static func retryIsDue(
-        mode: Schedule.RunMode, label: String, fire: Date, state: TickState, now: Date
+        mode: Schedule.RunMode, label: String, fire: Date, state: TickState, now: Date,
+        summaryMissing: () -> Bool
     ) -> Bool {
         guard mode.runsAtLoad else { return false }
         // A success stamped beyond clock skew ahead (a clock set ahead once) is no success yet.
@@ -190,8 +202,12 @@ enum TickScheduler {
         } ?? .distantPast
         guard succeeded < fire else { return false }
         let retries = state.retryCount[label] ?? 0
-        guard retryBackoffs.indices.contains(retries) else { return false }
         let started = startStamp(label, state: state, now: now)
+        guard retryBackoffs.indices.contains(retries) else {
+            return Calendar.current.isDate(started, inSameDayAs: now)
+                && now.timeIntervalSince(started) >= missingSummaryRetryInterval
+                && summaryMissing()
+        }
         return now.timeIntervalSince(started) >= retryBackoffs[retries]
     }
 }

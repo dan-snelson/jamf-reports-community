@@ -482,6 +482,7 @@ final class DiagnosticBundleServiceTests: XCTestCase {
                    atomically: true, encoding: .utf8)
         var sources = workspace.sources
         sources.cliProfile = "Acme-School"
+        let folderName = sources.workspaceName
         let outputDir = try makeTempDir()
         defer { try? FileManager.default.removeItem(at: outputDir) }
 
@@ -501,6 +502,7 @@ final class DiagnosticBundleServiceTests: XCTestCase {
             XCTAssertFalse(file.lastPathComponent.lowercased().contains("acme"), file.path)
             let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
             XCTAssertFalse(text.lowercased().contains("acme-school"), file.lastPathComponent)
+            XCTAssertFalse(text.contains(folderName), file.lastPathComponent)
         }
         let log = try String(contentsOf: try XCTUnwrap(logs.first), encoding: .utf8)
         XCTAssertTrue(log.contains("routing workspace-"), log)

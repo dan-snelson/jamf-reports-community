@@ -1054,7 +1054,8 @@ enum DiagnosticBundleService {
         return [
             "schema_version": schemaVersion,
             "generated_at": iso8601(now),
-            "workspace": sources.workspaceName,
+            "workspace": redactor?.redactWorkspaceNames(in: sources.workspaceName)
+                ?? sources.workspaceName,
             "log_lookback_days": options.logLookbackDays,
             "summary_limit": options.summaryLimit,
             "redaction_policy": policy,

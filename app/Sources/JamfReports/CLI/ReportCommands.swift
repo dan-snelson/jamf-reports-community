@@ -15,7 +15,8 @@ struct Generate: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Generate an xlsx workbook for a profile.",
         discussion: "With html.with_workbook: true in the profile's config.yaml, the HTML "
-            + "report is written beside the workbook, with the same name and a .html extension.")
+            + "report is written beside the workbook, with the same name and a .html extension. "
+            + "A Jamf School workspace writes the School workbook and ignores --template.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Output .xlsx path (default: the workspace's Generated Reports dir).") var output: String?
     @Option(help: "Report template id (default: full-instance).") var template: String?
@@ -40,22 +41,34 @@ struct Generate: AsyncParsableCommand {
         config: ReportConfig, dataDir: URL, template resolved: any ReportTemplate
     ) async throws -> Int {
         let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
+        // A School workspace writes the School workbook whatever the template: the Pro
+        // engine would skip every sheet.
+        let isSchool = ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool
         // Trust signals (Run History record + webhook digest) — best-effort,
         // additive, and mode-consistent with a scheduled jamf-cli-only run.
         // generate does not collect, so it never evaluates metric alerts.
         let signals = CLIRunSignals.begin(profile: profile, kind: .generate, config: config)
         let outputURL = try output.map { URL(fileURLWithPath: $0) }
-            ?? engine.resolveOutputURL(stem: "report", profile: profile,
-                                       onLine: signals.teeing(CLIRun.printLogLine))
+            ?? engine.resolveOutputURL(
+                stem: ExportNaming.reportKind(for: .xlsx, schoolMode: isSchool), profile: profile,
+                onLine: signals.teeing(CLIRun.printLogLine))
         do {
-            let failures = try await engine.generate(
-                outputURL: outputURL, template: resolved,
-                onLine: signals.teeing(CLIRun.printLogLine))
+            let onLine = signals.teeing(CLIRun.printLogLine)
+            let failures: [SheetFailure]
+            if isSchool {
+                failures = try await ReportEngine.schoolGenerate(
+                    config: config, dataDir: dataDir, outputURL: outputURL, onLine: onLine)
+            } else {
+                failures = try await engine.generate(
+                    outputURL: outputURL, template: resolved, onLine: onLine)
+            }
             // html.with_workbook. Before the path below, which stays the last line of
-            // stdout for a script that reads it.
-            await engine.writeHTMLWithWorkbook(
-                besideWorkbook: outputURL, template: resolved,
-                onLine: signals.teeing(CLIRun.printLogLine))
+            // stdout for a script that reads it. There is no School HTML report.
+            if !isSchool {
+                await engine.writeHTMLWithWorkbook(
+                    besideWorkbook: outputURL, template: resolved,
+                    onLine: signals.teeing(CLIRun.printLogLine))
+            }
             // The workbook is written even when some sheets error, so always emit
             // the path (scripts can still find the artifact); exit non-zero to
             // flag partial.
@@ -122,6 +135,10 @@ struct Html: AsyncParsableCommand {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
         if let output { CLIRun.requireSafeOutput(output) }
         let (config, dataDir) = try CLIRun.loadProfile(profile)
+        if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
+            CLIRun.fail("'\(profile)' is a Jamf School workspace, which has no HTML report; "
+                + "use `jamf-reports generate` for the School workbook")
+        }
         // Reuse the xlsx naming convention (timestamp + profile attribution),
         // swapping the extension — there's no HTML-specific path resolver.
         let defaultURL = try ReportEngine(config: config, dataDir: dataDir)

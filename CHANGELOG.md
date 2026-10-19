@@ -56,6 +56,9 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- `jamf-reports generate` and scheduled report runs on a Jamf School workspace now write the
+  School workbook. They used to write an empty Jamf Pro workbook. `jamf-reports html` now says a
+  School workspace has no HTML report instead of writing an empty one.
 - A new Jamf School workspace's first report now collects before it writes the workbook. It
   used to write a workbook with no sheets.
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial

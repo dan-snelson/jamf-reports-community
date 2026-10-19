@@ -191,19 +191,6 @@ func notifyTargets(
     }
 }
 
-/// The installed jamf-cli version when it is present but below the supported
-/// floor; nil when jamf-cli is absent (optional) or meets the floor. Uses the
-/// nonisolated probe so it is callable from the headless `@Sendable` runner
-/// without a MainActor hop.
-@Sendable
-private func jamfCLIVersionBelowFloor() -> String? {
-    guard let binary = ExecutableLocator.locate("jamf-cli"),
-          let installed = JamfCLIInstaller.installedVersion(at: binary),
-          JamfCLIInstaller.isBelowMinimumSupported(installed) else { return nil }
-    return installed
-}
-
-
 /// True unless `value` looks like another flag — guards `args[idx + 1]` reads
 /// against silently consuming a missing value's own flag name (e.g.
 /// `--profile --all-profiles` taking "--all-profiles" as the profile).
@@ -337,12 +324,15 @@ private func scheduledRunSingleBody(
     // the app cannot drive; below the supported floor it warns and carries on. jamf-cli-only
     // generates from cache and never calls jamf-cli, so it is exempt; an absent jamf-cli is
     // also exempt (the collect path handles it).
-    if mode != .jamfCLIOnly, let belowVersion = jamfCLIVersionBelowFloor() {
+    if mode != .jamfCLIOnly, let belowVersion = JamfCLIInstaller.installedVersionBelowFloor() {
         let line = JamfCLIInstaller.floorLine(installed: belowVersion, profile: profile)
         fputs(line.text + "\n", stderr)
         recorder?.record(line.text)
         if line.stops {
             recorder?.finish(exitCode: 1)
+            await ScheduledRunSignals.notifyScheduledRunFailure(
+                config: routingConfig, profile: profile, mode: mode,
+                errorDescription: line.text, recorder: nil, fallbackNotify: routingNotify)
             return 1
         }
     }

@@ -163,6 +163,20 @@ final class JamfCLIInstaller {
         isBelow(installedVersion, minimumRunnableVersion)
     }
 
+    /// What `installedVersionBelowFloor` reads the installed version through; a test replaces it.
+    nonisolated(unsafe) static var installedVersionProbe: @Sendable () -> String? = {
+        ExecutableLocator.locate("jamf-cli").flatMap { installedVersion(at: $0) }
+    }
+
+    /// The installed jamf-cli version when it is present but below the supported floor; nil when
+    /// jamf-cli is absent (optional) or meets the floor. Nonisolated, so the headless runner
+    /// calls it without a MainActor hop.
+    nonisolated static func installedVersionBelowFloor() -> String? {
+        guard let installed = installedVersionProbe(), isBelowMinimumSupported(installed)
+        else { return nil }
+        return installed
+    }
+
     /// The scheduled-run line for a jamf-cli below the supported floor: an `[error]` that stops
     /// the run below `minimumRunnableVersion`, else a `[warn]`, and the run carries on.
     nonisolated static func floorLine(

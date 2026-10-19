@@ -56,6 +56,8 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- A Jamf School workspace no longer shows "Auth may be expired" in Generate or "Token: not
+  authenticated" in Settings. School signs in with an API key, which has no token to check.
 - `jamf-reports generate` and scheduled report runs on a Jamf School workspace now write the
   School workbook. They used to write an empty Jamf Pro workbook. `jamf-reports html` now says a
   School workspace has no HTML report instead of writing an empty one.

@@ -1047,10 +1047,7 @@ final class CLIBridge {
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> Bool {
         AppLogger.auth.debug("auth probe profile=\(profile, privacy: .public)")
-        let authMethod = ProfileService.discoverLocal()
-            .first(where: { $0.name == profile })?
-            .auth?.rawValue ?? ""
-        guard !CLIBridge.shouldSkipAuthProbe(for: authMethod) else { return true }
+        guard !Self.usesAPIKey(profile: profile) else { return true }
         let probe = await probeToken(
             for: profile, executable: _testExecutable, timeout: probeTimeout
         )
@@ -1090,6 +1087,14 @@ final class CLIBridge {
         JamfCLIAuthMethod(raw: authMethod) == .apiKey
     }
 
+    /// Whether jamf-cli lists `profile` with API-key auth (`shouldSkipAuthProbe`).
+    nonisolated static func usesAPIKey(profile: String) -> Bool {
+        let authMethod = ProfileService.discoverLocal()
+            .first(where: { $0.name == profile })?
+            .auth?.rawValue ?? ""
+        return shouldSkipAuthProbe(for: authMethod)
+    }
+
     nonisolated func validateConnection(
         profile: String,
         onLine: @Sendable @escaping (LogLine) -> Void
@@ -1127,7 +1132,11 @@ final class CLIBridge {
     /// - jamf-cli exits non-zero (unauthenticated, old version, unknown command)
     /// - JSON is missing or malformed
     /// - the probe did not answer within `tokenProbeTimeout`
+    ///
+    /// Returns nil for an API-key profile (Jamf School), which has no bearer token: the
+    /// probe would fail and read as "not authenticated" for working credentials.
     nonisolated func tokenStatus(for profile: String) async -> TokenStatus? {
+        guard !Self.usesAPIKey(profile: profile) else { return nil }
         switch await probeToken(for: profile, executable: nil, timeout: Self.tokenProbeTimeout) {
         case .status(let status): return status
         case .timedOut: return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)

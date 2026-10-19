@@ -173,4 +173,28 @@ final class WorkspaceFreshnessEvaluationTests: XCTestCase {
             .first { $0.snapshotKind == "protect-alerts" }
         XCTAssertEqual(issue?.kind, .failing)
     }
+
+    /// `collect` skips Protect when the pin refuses `protect.profile` or the login is another
+    /// product, so its kinds are not owed.
+    func testProtectKindsAreNotExpectedWhereCollectSkipsProtect() throws {
+        UserDefaults.standard.set(false, forKey: skipExpensiveKey)
+        try writeConfig("protect:\n  enabled: true\n  profile: prot\n")
+        let protectKinds = Set(DataFreshnessHealth.protectKinds)
+        func expected(
+            resolved: ProfileAuthMethod.Resolved?, pinAllows: Bool = true
+        ) -> Set<String> {
+            Set(WorkspaceStore.expectedKinds(
+                profile: profile, jamfCLIVersion: nil, auth: nil,
+                protectResolved: { _ in resolved }, protectPinAllows: { _ in pinAllows }))
+        }
+        func login(_ product: JamfCLIProduct) -> ProfileAuthMethod.Resolved {
+            .init(authMethod: "oauth2", isTenantLevel: false, product: product)
+        }
+        XCTAssertTrue(protectKinds.isSubset(of: expected(resolved: login(.protect))))
+        XCTAssertTrue(protectKinds.isSubset(of: expected(resolved: nil)), "could not ask")
+        XCTAssertTrue(expected(resolved: login(.pro)).isDisjoint(with: protectKinds))
+        XCTAssertTrue(expected(resolved: login(.school)).isDisjoint(with: protectKinds))
+        XCTAssertTrue(
+            expected(resolved: login(.protect), pinAllows: false).isDisjoint(with: protectKinds))
+    }
 }

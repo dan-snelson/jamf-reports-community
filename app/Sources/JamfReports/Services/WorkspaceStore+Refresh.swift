@@ -568,9 +568,13 @@ extension WorkspaceStore {
 
     /// The kinds `profile` is expected to collect, from the inputs the health
     /// strip reads: the skip-expensive toggle, `jamf_cli.collect_skip`, the
-    /// profile's auth method and the jamf-cli version (for the dashboard).
+    /// profile's auth method and the jamf-cli version (for the dashboard). The Protect kinds are
+    /// expected only where `collect` would run Protect: the pin allows `protect.profile` and
+    /// that login is not another product. Off the main actor: resolving can run `config list`.
     nonisolated static func expectedKinds(
-        profile: String, jamfCLIVersion: String?, auth: ProfileAuthMethod.Resolved?
+        profile: String, jamfCLIVersion: String?, auth: ProfileAuthMethod.Resolved?,
+        protectResolved: (String) -> ProfileAuthMethod.Resolved? = { ProfileAuthMethod.resolve(profile: $0) },
+        protectPinAllows: (String) -> Bool = { SharedConfigPin.protectAllowed(profile: $0) }
     ) -> [String] {
         let config = ProfileService.workspaceURL(for: profile).flatMap {
             try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
@@ -580,13 +584,17 @@ extension WorkspaceStore {
         if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
             return []
         }
+        let protectProfile = ConnectedProducts.read(profile: profile).protectProfile
+        let protectCollected = protectProfile.map {
+            protectPinAllows(profile) && protectResolved($0)?.protectRefusal(profile: $0) == nil
+        } ?? false
         return expectedKinds(
             skipExpensive: UserDefaults.standard.bool(forKey: "skipExpensiveCollections"),
             authMethod: auth?.authMethod,
             tenantLevel: auth?.isTenantLevel == true,
             collectSkip: ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip),
             dashboardSupported: JamfCLIInstaller.supportsDashboard(jamfCLIVersion),
-            protectConnected: ConnectedProducts.read(profile: profile).protectProfile != nil
+            protectConnected: protectCollected
         )
     }
 

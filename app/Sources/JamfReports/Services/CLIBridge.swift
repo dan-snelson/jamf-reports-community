@@ -1165,8 +1165,13 @@ final class CLIBridge {
                 let message = check.message ?? ""
                 return "\(check.scope) \(check.name) failed" + (message.isEmpty ? "" : ": \(message)")
             }
-        guard !failures.isEmpty else { return (0, []) }
-        return (exitCode == 0 ? 1 : exitCode, failures)
+        let failing = exitCode == 0 ? 1 : exitCode
+        guard failures.isEmpty else { return (failing, failures) }
+        // Every profile jamf-cli holds emits rows, so none means it does not have this one.
+        guard checks.contains(where: { $0.scope == profile }) else {
+            return (failing, ["\(profile) not found in jamf-cli's config"])
+        }
+        return (0, [])
     }
 
     /// What `probeToken` found: the token status, or no answer within the time limit.

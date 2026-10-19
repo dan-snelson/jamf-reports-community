@@ -43,6 +43,13 @@ final class ValidationVerdictTests: XCTestCase {
         XCTAssertEqual(verdict.failures, ["pro url failed"])
     }
 
+    func testAProfileWithNoRowsFails() {
+        let out = json([("config", "file-exists", "pass", nil), ("other", "url", "pass", nil)])
+        let verdict = CLIBridge.validationVerdict(stdout: out, exitCode: 0, profile: "pro")
+        XCTAssertEqual(verdict.exit, 1)
+        XCTAssertEqual(verdict.failures, ["pro not found in jamf-cli's config"])
+    }
+
     func testUnparseableOutputKeepsTheExitCode() {
         let junk = Data("not json".utf8)
         XCTAssertEqual(CLIBridge.validationVerdict(stdout: junk, exitCode: 7, profile: "pro").exit, 7)

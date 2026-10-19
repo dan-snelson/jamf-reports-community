@@ -247,6 +247,65 @@ offers "Add to Example" ahead of "New environment". Protect onboarding asks whic
 it belongs to (Protect-only allowed). Security Cloud setup is reachable only from an
 environment's Data Sources card.
 
+### 5.1 One Add flow (added 2026-10-19, from the Jamf School test)
+
+Adding a connection and adding a workspace are the same action. Today Settings › Add connection
+always opens the seven-step Jamf Pro onboarding, and Jamf School is reachable only from the
+first-launch chooser or the workspace chip's "Add Jamf School workspace…". Both are replaced by
+one **Add** sheet. Settings › Add connection, the workspace chip's Add item, the Environment
+card's empty-slot Add (section 6) and the first-launch chooser all open it. No second button is
+added.
+
+1. **What are you adding?** Two choices, each a card with product pictures:
+   - **Add to <active environment>**: the environment's slots as cards. Empty slots can be
+     chosen: Jamf Protect, Security Cloud, Platform API, and the MDM only while both MDM slots
+     are empty. Filled slots are shown greyed with their profile. Not offered on first launch.
+   - **New environment**: pick what manages its devices: Jamf Pro, Jamf Pro through the
+     Platform API, Jamf School, or none (Protect only, section 7.5). Then name it (default: the
+     profile's name).
+2. **Use a profile jamf-cli already has, or connect a new one.** The sheet runs profile
+   discovery (`config list`) when it opens, and again on **Re-check**. That picks up profiles made
+   in Terminal since launch. It lists the profiles of the chosen product that no environment
+   names (`JamfCLIProfile.product`). Picking one fills the slot after that product's check
+   (`ConnectionCheck` for Platform, the host check of 3.1 for a Platform profile beside
+   `jamf_pro`). **Connect new** runs only that product's setup (the PTY `config add-profile`,
+   `school setup`, `protect setup` or `security setup`). It skips the workspace step when adding to
+   an existing environment.
+3. **Re-check suggestions.** When discovery finds profiles that `EnvironmentProposal`
+   (section 5) would place, the sheet shows them at the top, for example "Example-API reaches
+   the same Jamf Pro as Example — add it?" It also shows a new MDM profile as a candidate new
+   environment. Nothing is added without a click.
+
+Facts preselect the choice in step 1, and the user can always change it: a profile whose Jamf
+Pro host matches the active environment preselects Add to it. An MDM profile while the active
+environment already has an MDM preselects New environment (D10). A Protect or Security Cloud
+login preselects Add to the active environment, with a picker for another environment or
+"New environment (Protect only)".
+
+Pictures are SF Symbols and the app's own product glyphs, never Jamf logos (NOTICE.md).
+
+**First slice, before P1.** The sheet can ship on today's config. It replaces Settings › Add
+connection, the sidebar's "Add workspace…" and "Add Jamf School workspace…", and the School
+button in `ConnectionCredentialsSheet`. On today's config it offers:
+
+- New workspace: Jamf Pro, Platform API or Jamf School. Each runs its existing onboarding path
+  (`OnboardingFlow` connection types, the School path) from its connection step.
+- Add to current workspace: Jamf Protect only, through today's `protect.enabled/profile`
+  writer (`ProductConnectSheetView`).
+- Re-check: profile discovery lists jamf-cli profiles no workspace names, and adopts one
+  through `ExistingCLISetupFlow`.
+
+A Platform API profile added to an existing workspace needs the `profiles` slots (P1 to P4).
+A Protect-only workspace needs 7.5 (P8). Neither appears in the sheet until its phase lands:
+no disabled placeholder cards. The stale "and CSV mapping" copy goes with the old entry points.
+
+A Jamf School environment shows only what the School API supplies: no Jamf Pro screen,
+section, Config tab or Generate option with blanks (section 8, P8). The Jamf School test found
+each place it shows today (the Overview, the Generate sheet, Config tabs, the Adopt EAs card).
+No `jamf-cli pro` command runs on a School profile: the routing in 3.2 never passes one (a
+School environment has no `jamf_pro` slot), and `CLIBridge.refusesProCommand` (from the School
+test fixes) stays as the guard behind it.
+
 ## 6. Data Sources
 
 An **Environment** card replaces the profile header at the top of Data Sources:
@@ -490,7 +549,7 @@ golden command-line test from 3.3 runs in every phase from P1.
 | P3 | Collect across products: `collectCommandMatrix` per family, `[plan]` lines, per-product verdicts, add-on products follow the environment gate, finalize once, `collect_skip` for whole products | Stub jamf-cli through the `locateJamfCLI` seam (not named `jamf-cli`): MDM auth-dead and Protect still runs; stand-down stops all; Platform kinds skipped with no `platform`; host mismatch skips Platform kinds |
 | P4 | Data Sources Environment card, `ProfilesConfigWriter`, retired keys dropped on save, pin coverage and seeding, Doctor rows (`two_mdms`, `profile_shared`, `platform_host`, retired keys) | Writer keeps comments outside the block and backs up. Pin drift on a peer edit. Protect pin seeding. Each Doctor row. Needs visual verification at `PageScaffold.minSupportedWidth` |
 | P5 | Discovery: slots hide profiles, sidebar lists workspaces only, "Profiles not in an environment" card | `droppingPairedProductProfiles` generalised. Active-workspace fallback when a profile moves into a slot |
-| P6 | `EnvironmentProposal` and the adoption screen. Onboarding's "Add to Example" | The four-profile example gives two environments. Connection siblings are never merged. Two platform profiles on one host are flagged. Protect is suggested by prefix and never preselected without the label. Existing workspaces are extended, not duplicated |
+| P6 | `EnvironmentProposal`, the adoption screen and the one Add sheet (5.1) that replaces Settings › Add connection and the chip's School item, with Re-check | The four-profile example gives two environments. Connection siblings are never merged. Two platform profiles on one host are flagged. Protect is suggested by prefix and never preselected without the label. Existing workspaces are extended, not duplicated. Re-check lists a profile added after launch. Preselection per 5.1. Needs visual verification |
 | P7 | Merge: `WorkspaceMergePlan`, executor with journal, sheet | Fixture workspaces: overlapping summary days filled, same-name snapshots identical and different, schedules keep their labels, report groups de-duplicated, crash after N steps resumes, refused under the lock and under a peer claim, source moved and never deleted |
 | P8 | `EnvironmentProducts`, `TabVisibility.limited(to:)`, product-aware Overview, Config and report sections. Protect-only environment (L3). School per-kind state and summary (L6) | Tab sets per product mix. A Protect-only collect writes a summary with Mac figures nil. A School summary is written |
 | P9 | Daily summary product and composition fields, Trends and alert keys, `environment.protect_match` Doctor row | Nil when absent. Alert on an absent product never fires. Match-rate row thresholds |
@@ -522,3 +581,10 @@ All 14 recommendations were accepted on 2026-10-19.
 | D12 | Unassigned jamf-cli profiles in the sidebar | No. Workspaces only. Unassigned profiles are listed in Data Sources and adoption |
 | D13 | Source of the Fleet view's figures | The daily summary, extended with the small aggregate maps in section 8. Snapshots are never read across environments |
 | D14 | Release that retires `jamf_cli.profile`, `protect.*` and `school_cli.*` | The release that ships P4 (planned 2.12). Until then those keys are read as in 3.3 |
+
+Added after the Jamf School test, accepted on 2026-10-19:
+
+| # | Decision | Recommendation |
+|---|---|---|
+| D15 | Add connection and add workspace as one flow | One Add sheet (5.1) from every entry point, first launch included. It asks add-on or new environment, with facts preselecting the answer |
+| D16 | When the Add sheet re-reads jamf-cli's profiles | When it opens and on Re-check. No background polling |

@@ -9,7 +9,7 @@ struct ConnectionCredentialsSheet: View {
     @State var model: ConnectionCredentialsModel
     /// Called when the sheet closes; the flag says whether anything was registered or added.
     var onFinished: (Bool) -> Void
-    /// Starts the Jamf School path for an ID no Jamf Pro answers for.
+    /// Opens the Add sheet on Jamf School for an ID no Jamf Pro answers for.
     var onSetUpSchool: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -193,7 +193,7 @@ struct ConnectionCredentialsSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
             if row.suggestsJamfSchool {
-                PNPButton(title: "Add Jamf School workspace\u{2026}", icon: "graduationcap",
+                PNPButton(title: "Add a workspace\u{2026}", icon: "graduationcap",
                           size: .sm, action: schoolAction)
             }
         }

@@ -945,7 +945,7 @@ private struct PlatformTab: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.Text.primary)
                 Text("Create an integration in Jamf Account under Integrations, then add it "
-                     + "with Settings → Add connection and choose Platform Gateway. That routes "
+                     + "with Settings → Add connection and choose Platform API. That routes "
                      + "Jamf Pro API traffic through the gateway and unlocks the Platform "
                      + "commands these sheets use.")
                     .font(.caption)

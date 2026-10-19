@@ -198,10 +198,9 @@ struct ConnectionCard: View {
                 workspace.reloadConnections()
             },
             onSetUpSchool: {
-                OnboardingFlow.pendingProductPath = .school
                 NotificationCenter.default.post(
-                    name: .navigateToTab, object: nil,
-                    userInfo: ["tab": Tab.onboarding.rawValue])
+                    name: .showAddSheet, object: nil,
+                    userInfo: ["product": AddSheetPlan.NewProduct.jamfSchool.rawValue])
             })
     }
 

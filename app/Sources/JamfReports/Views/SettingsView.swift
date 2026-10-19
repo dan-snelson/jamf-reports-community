@@ -440,17 +440,14 @@ struct SettingsView: View {
                     // The way out of demo mode: setup ends it through
                     // `setDemoMode(false)` once the new profile exists.
                     PNPButton(title: "Add connection", icon: "plus", style: .gold, size: .sm) {
-                        NotificationCenter.default.post(
-                            name: .navigateToTab,
-                            object: nil,
-                            userInfo: ["tab": Tab.onboarding.rawValue]
-                        )
+                        NotificationCenter.default.post(name: .showAddSheet, object: nil)
                     }
                     .help(workspace.demoMode
                           ? "Set up a real connection; demo mode ends when setup finishes."
-                          : "Opens the onboarding wizard so the GUI walks you through jamf-cli "
-                              + "profile setup.")
-                    Text("Walks you through profile registration, workspace setup, and CSV mapping without leaving the app.")
+                          : "Add a workspace or Jamf Protect, or use a profile jamf-cli "
+                              + "already has.")
+                    Text("A new Jamf Pro, Platform API or Jamf School workspace, Jamf Protect "
+                        + "for this workspace, or a profile jamf-cli already has.")
                         .font(.caption)
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                         .fixedSize(horizontal: false, vertical: true)

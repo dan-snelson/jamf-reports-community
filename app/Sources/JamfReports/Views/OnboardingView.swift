@@ -588,8 +588,8 @@ struct OnboardingView: View {
     private var addProductsStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             protectProductCard
-            Text("Jamf School uses its own workspace. Add one later from the workspace menu "
-                + "in the sidebar: Add Jamf School workspace.")
+            Text("Jamf School uses its own workspace. Add one later with Settings › Add "
+                + "connection, or Add workspace or product in the sidebar's workspace menu.")
                 .font(.footnote)
                 .foregroundStyle(Theme.Text.tertiary(contrast))
                 .fixedSize(horizontal: false, vertical: true)
@@ -890,12 +890,11 @@ struct OnboardingView: View {
     ///     `workspace.profiles`, ContentView swaps in the shell, the default
     ///     `tab = .overview` takes effect. The `.navigateToTab` post is a no-op
     ///     here because the shell's listener isn't registered yet.
-    ///   - Settings "Add connection" → in-shell OnboardingView: the active tab
+    ///   - The Add sheet's New workspace → in-shell OnboardingView: the active tab
     ///     is `.onboarding`; the `.navigateToTab(.overview)` post lands the
     ///     user back on Overview where progress is visible.
-    ///   - Sidebar "Add workspace…" → same as Settings path above.
-    /// Restarts this screen on the Jamf School steps, as the sidebar's "Add Jamf School
-    /// workspace…" does. The profile saved for the Platform ID stays in jamf-cli.
+    /// Restarts this screen on the Jamf School steps, as the Add sheet's Jamf School card
+    /// does. The profile saved for the Platform ID stays in jamf-cli.
     private func startSchoolWorkspace() {
         flow.clearAllSecrets()
         OnboardingFlow.pendingProductPath = .school

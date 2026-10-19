@@ -493,8 +493,8 @@ struct SettingsView: View {
                 .disabled(workspace.demoMode)
                 .help(workspace.demoMode
                       ? DemoData.liveOnlyHelp
-                      : "Run `jamf-cli pro auth-status` against this profile to verify the API "
-                          + "token is valid.")
+                      : "Run `jamf-cli config validate` and check this profile's URL and credential "
+                          + "settings, plus the config file itself.")
             }
         }
     }

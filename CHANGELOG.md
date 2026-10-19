@@ -144,6 +144,9 @@ versions in this repository map to git tags.
   and a School collect skips sources it fetched in the last 12 hours unless you click Collect
   now, so a morning no longer leaves ten copies of each snapshot. jamf-cli's "hint:" lines no
   longer fill School run logs, and `jamf-reports school-check` lists all ten School sources.
+- One Jamf School profile on the Mac no longer makes **Test connection**, onboarding's
+  **Validate** and **Reauthenticate** fail for your other profiles. They now judge only the
+  config file and the profile being checked.
 
 ### Removed
 

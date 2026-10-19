@@ -244,15 +244,32 @@ private func scheduledRunSingleBody(
         return 1
     }
 
+    // Loaded once for the product refusal, the version preflight, routing and generate. A
+    // config.yaml that exists but does not decode is kept as an error, not read as "no config":
+    // the product (School, Pro) cannot be told from it, and reading it as Jamf Pro refused a
+    // School profile with exit 0 on every run.
+    let configURL = workspace.appendingPathComponent("config.yaml")
+    var configError: Error?
+    let routingConfig: ReportConfig?
+    do {
+        routingConfig = FileManager.default.fileExists(atPath: configURL.path)
+            ? try ConfigLoader.load(from: configURL) : nil
+    } catch {
+        routingConfig = nil
+        configError = error
+    }
+    if routingConfig == nil {
+        AppLogger.schedule.warning(
+            "[routing] no usable config for \(profile, privacy: .public) — treating it as Jamf Pro")
+    }
+
     // A profile of another product (Protect, Security Cloud, organization level) can never run
     // a Jamf Pro schedule, so every retry would fail the same way. Refused before the recorder
     // creates anything in the workspace; like a School backup, it ends the run as a success
     // so the tick does not retry it and no failure webhook is posted. jamf-cli-only reads the
     // cache and sends no command.
-    if mode != .jamfCLIOnly, let refusal = CollectRouter.proRunRefusal(
-        profile: profile, operation: "Scheduled \(mode.rawValue) run",
-        config: try? ConfigLoader.load(
-            from: workspace.appendingPathComponent("config.yaml"))
+    if mode != .jamfCLIOnly, configError == nil, let refusal = CollectRouter.proRunRefusal(
+        profile: profile, operation: "Scheduled \(mode.rawValue) run", config: routingConfig
     ) {
         let message = "[skip] scheduled \(mode.rawValue) run skipped for '\(profile)': "
             + "\(refusal). Not a failure. Exclude this profile from the schedule to stop "
@@ -294,6 +311,19 @@ private func scheduledRunSingleBody(
             + "ran as jamf-cli-full"))
     }
 
+    if mode != .jamfCLIOnly, let configError {
+        let message = LogRedactor.redact(
+            "[error] '\(profile)': config.yaml does not decode, so the product cannot be told "
+                + "and nothing ran: \(configError.localizedDescription)")
+        fputs(message + "\n", stderr)
+        recorder?.record(message)
+        recorder?.finish(exitCode: 1)
+        await ScheduledRunSignals.notifyScheduledRunFailure(
+            config: nil, profile: profile, mode: mode,
+            errorDescription: configError.localizedDescription, recorder: nil)
+        return 1
+    }
+
     // Shared workspace: a config.yaml value another Mac changed since this one pinned it is
     // not followed (folders, retention, webhook); the run says which and carries on.
     SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
@@ -312,22 +342,6 @@ private func scheduledRunSingleBody(
             return 1
         }
     }
-
-    // Load config once, before the backup branch (product-type routing needs
-    // it), before collect (routing needs it) and before generate. Failure
-    // degrades routing to Jamf Pro and still fails generate with the real error
-    // (ConfigLoader.LoadError) so the recorded run shows a meaningful message.
-    // nil config in routing logs loudly and uses Pro.
-    let configURL = workspace.appendingPathComponent("config.yaml")
-    let routingConfig: ReportConfig? = {
-        guard let loaded = try? ConfigLoader.load(from: configURL) else {
-            AppLogger.schedule.warning(
-                "[routing] could not load config for \(profile, privacy: .public) — defaulting to Jamf Pro"
-            )
-            return nil
-        }
-        return loaded
-    }()
 
     // Backup mode (v2.2.0): export configuration objects; no collect, no
     // generate. Retention prunes scheduled backups beyond the newest 10 and

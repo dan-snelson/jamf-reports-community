@@ -128,3 +128,68 @@ final class ScheduledRunHealthProductGuardTests: XCTestCase {
             schedules: [schedule(.jamfCLIFull)], statusProfile: nil).first?.refusal)
     }
 }
+
+/// A config.yaml that exists but does not decode cannot say which product the profile is, so
+/// the run fails with the decode error instead of being read as Jamf Pro and refused.
+final class ScheduledRunUndecodableConfigTests: XCTestCase {
+    nonisolated(unsafe) private var root: URL!
+    private let profile = "school-broken"
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sched-undecodable-\(UUID().uuidString)", isDirectory: true)
+        let workspaces = root.appendingPathComponent("Jamf-Reports", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: workspaces.appendingPathComponent(profile), withIntermediateDirectories: true)
+        setenv("JRC_TEST_WORKSPACES_ROOT", workspaces.path, 1)
+        ProfileAuthMethod.invalidateCache()
+    }
+
+    override func tearDownWithError() throws {
+        ProfileAuthMethod.invalidateCache()
+        unsetenv("JRC_TEST_WORKSPACES_ROOT")
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func schedule(_ mode: Schedule.RunMode) -> Schedule {
+        Schedule(
+            name: "broken", profile: profile, schedule: "manual", cadence: "custom", mode: mode,
+            next: "—", last: "—", lastStatus: .ok, artifacts: [], enabled: true,
+            launchAgentLabel: nil, multiTarget: nil, tiers: nil, excludedProfiles: nil)
+    }
+
+    private func writeConfig(_ yaml: String) throws {
+        let url = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+            .appendingPathComponent("config.yaml")
+        try yaml.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func testAnUndecodableConfigFailsTheRunInsteadOfRefusingItWithExitZero() async throws {
+        try ProductGuardSeed.seed(profile: profile, product: "protect", in: root)
+        try writeConfig("school_cli:\n  enabled: true\nthresholds: not-a-mapping\n")
+        XCTAssertThrowsError(try ConfigLoader.load(from: try XCTUnwrap(
+            ProfileService.workspaceURL(for: profile)).appendingPathComponent("config.yaml")))
+        for mode in [Schedule.RunMode.jamfCLIFull, .snapshotOnly, .backup] {
+            let outcome = await runSchedule(schedule(mode), verbose: false)
+            XCTAssertEqual(outcome.exitCode, 1, "\(mode)")
+            XCTAssertFalse(outcome.endsRetries, "\(mode): the tick must retry it")
+        }
+    }
+
+    func testTheFailureIsInRunHistoryWithTheDecodeError() async throws {
+        try writeConfig("thresholds: not-a-mapping\n")
+        _ = await runSchedule(schedule(.snapshotOnly), verbose: false)
+        let logs = try WorkspacePaths.runHistoryDir(for: profile)
+        let log = try XCTUnwrap(FileManager.default.contentsOfDirectory(atPath: logs.path)
+            .first { $0.hasSuffix(".log") })
+        let text = try String(contentsOf: logs.appendingPathComponent(log), encoding: .utf8)
+        XCTAssertTrue(text.contains("config.yaml does not decode"), text)
+        XCTAssertTrue(text.contains("Config decode failed"), text)
+    }
+
+    func testAnAbsentConfigStillRunsAsBefore() async throws {
+        try ProductGuardSeed.seed(profile: profile, product: "protect", in: root)
+        let outcome = await runSchedule(schedule(.snapshotOnly), verbose: false)
+        XCTAssertEqual(outcome.exitCode, 0, "a Protect login with no config is still refused")
+    }
+}

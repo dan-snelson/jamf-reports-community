@@ -61,4 +61,39 @@ final class SchoolProCommandRefusalTests: XCTestCase {
         }
         XCTAssertTrue(lines.all.isEmpty)
     }
+
+    /// The writing and long-running Pro commands throw the plain refusal, not "Invalid
+    /// argument: …", and the toast text is the refusal sentence itself.
+    func testBridgeCommandsThrowWrongProductWithTheRefusalSentence() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("refusal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        ProfileAuthMethod.invalidateCache()
+        addTeardownBlock {
+            ProfileAuthMethod.invalidateCache()
+            try? FileManager.default.removeItem(at: dir)
+        }
+        try ProductGuardSeed.seed(profile: "prot", product: "protect", in: dir)
+        let bridge = CLIBridge()
+        let operations: [(String, () async throws -> Void)] = [
+            ("Health audit", { _ = try await bridge.audit(profile: "prot", category: nil) { _ in } }),
+            ("Group analysis", { _ = try await bridge.groupHygiene(profile: "prot") { _ in } }),
+            ("Backup", { _ = try await bridge.backup(profile: "prot", label: nil) { _ in } }),
+            ("Backup diff", {
+                _ = try await bridge.diffBackups(
+                    profile: "prot", left: dir, right: dir) { _ in }
+            }),
+        ]
+        for (operation, run) in operations {
+            let sentence = "\(operation) is a Jamf Pro command; 'prot' is a Jamf Protect profile"
+            do {
+                try await run()
+                XCTFail("\(operation) was not refused")
+            } catch {
+                XCTAssertEqual(error as? CLIBridgeError, .wrongProduct(sentence), operation)
+                XCTAssertEqual(
+                    CLIBridge.explainOperationError(error, operation: operation), sentence)
+            }
+        }
+    }
 }

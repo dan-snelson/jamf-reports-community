@@ -1005,6 +1005,8 @@ final class CLIBridge {
         if let refused = error as? CLIBridgeError, refused.isCollectRefusal {
             return refused.localizedDescription
         }
+        // Already a sentence naming the operation and the profile's product.
+        if case let CLIBridgeError.wrongProduct(refusal) = error { return refusal }
         if case let ReportEngineError.collectFailed(_, exitCode) = error {
             return explainExit(exitCode, operation: operation)
         }
@@ -1507,7 +1509,7 @@ final class CLIBridge {
         if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Backup diff", onLine: onLine
         ) {
-            throw CLIBridgeError.invalidArgument(refusal)
+            throw CLIBridgeError.wrongProduct(refusal)
         }
         guard let bin = ExecutableLocator.locate("jamf-cli") else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] jamf-cli not found"))
@@ -1776,7 +1778,7 @@ final class CLIBridge {
         if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Health audit", onLine: onLine
         ) {
-            throw CLIBridgeError.invalidArgument(refusal)
+            throw CLIBridgeError.wrongProduct(refusal)
         }
         guard await authGuard(profile: profile, onLine: onLine) else {
             return Self.exitCodeUnauthorized
@@ -1815,7 +1817,7 @@ final class CLIBridge {
         if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Group analysis", onLine: onLine
         ) {
-            throw CLIBridgeError.invalidArgument(refusal)
+            throw CLIBridgeError.wrongProduct(refusal)
         }
         guard await authGuard(profile: profile, onLine: onLine) else {
             return Self.exitCodeUnauthorized
@@ -1924,7 +1926,7 @@ final class CLIBridge {
         if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Backup", onLine: onLine
         ) {
-            throw CLIBridgeError.invalidArgument(refusal)
+            throw CLIBridgeError.wrongProduct(refusal)
         }
         guard let bin = _testExecutable ?? ExecutableLocator.locate("jamf-cli") else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] jamf-cli not found"))

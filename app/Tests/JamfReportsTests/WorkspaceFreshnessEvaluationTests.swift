@@ -132,4 +132,45 @@ final class WorkspaceFreshnessEvaluationTests: XCTestCase {
         XCTAssertFalse(reportsDashboard("1.30.2"))
         XCTAssertFalse(reportsDashboard(nil))
     }
+
+    // MARK: - Jamf Protect
+
+    private func writeConfig(_ yaml: String) throws {
+        let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+        try yaml.write(to: workspace.appendingPathComponent("config.yaml"),
+                       atomically: true, encoding: .utf8)
+    }
+
+    private func reportedKinds() -> Set<String> {
+        Set(WorkspaceStore.evaluateFreshness(profile: profile, now: now).map(\.snapshotKind))
+    }
+
+    func testProtectKindsAreEvaluatedOnlyWhenProtectIsConnected() throws {
+        UserDefaults.standard.set(false, forKey: skipExpensiveKey)
+        try stateStore().record(.landed, report: "overview", at: now)
+        let protectKinds = Set(DataFreshnessHealth.protectKinds)
+
+        XCTAssertTrue(reportedKinds().isDisjoint(with: protectKinds), "no config: no Protect")
+        try writeConfig("protect:\n  enabled: true\n")
+        XCTAssertTrue(reportedKinds().isDisjoint(with: protectKinds), "enabled, no profile")
+        try writeConfig("protect:\n  enabled: false\n  profile: prot\n")
+        XCTAssertTrue(reportedKinds().isDisjoint(with: protectKinds), "profile, not enabled")
+        try writeConfig("protect:\n  enabled: true\n  profile: prot\n")
+        XCTAssertEqual(reportedKinds().intersection(protectKinds), protectKinds,
+                       "connected, never landed on an established workspace")
+    }
+
+    func testAFailingProtectKindReachesTheBannerInputs() throws {
+        UserDefaults.standard.set(false, forKey: skipExpensiveKey)
+        try writeConfig("protect:\n  enabled: true\n  profile: prot\n")
+        let store = try stateStore()
+        store.record(.landed, report: "overview", at: now)
+        for kind in DataFreshnessHealth.protectKinds { store.record(.landed, report: kind, at: now) }
+        for _ in 0..<2 {
+            store.record(.failed(exitCode: 5), report: "protect-alerts", at: now)
+        }
+        let issue = WorkspaceStore.evaluateFreshness(profile: profile, now: now)
+            .first { $0.snapshotKind == "protect-alerts" }
+        XCTAssertEqual(issue?.kind, .failing)
+    }
 }

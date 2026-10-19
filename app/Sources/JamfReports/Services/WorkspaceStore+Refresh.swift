@@ -585,7 +585,8 @@ extension WorkspaceStore {
             authMethod: auth?.authMethod,
             tenantLevel: auth?.isTenantLevel == true,
             collectSkip: ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip),
-            dashboardSupported: JamfCLIInstaller.supportsDashboard(jamfCLIVersion)
+            dashboardSupported: JamfCLIInstaller.supportsDashboard(jamfCLIVersion),
+            protectConnected: ConnectedProducts.read(profile: profile).protectProfile != nil
         )
     }
 

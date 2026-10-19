@@ -74,6 +74,16 @@ enum DataFreshnessHealth {
     /// already absorbs those — so alerting on the first is noise.
     static let failingThreshold = 2
 
+    /// The Protect snapshot kinds `protectCollect` writes. They are not in `CollectionTier`
+    /// (planning and the refresh coordinator read that map), so freshness gives them the
+    /// refresh tier here: `CollectRouter` runs Protect after a Pro refresh collect.
+    static let protectKinds: [String] = ReportEngine.protectCommandMatrix(profile: "").map(\.kind)
+
+    /// The tier whose cadence judges `kind` and whose collect remediates it.
+    static func tier(forKind kind: String) -> CollectionTier? {
+        CollectionTier.tier(forReport: kind) ?? (protectKinds.contains(kind) ? .refresh : nil)
+    }
+
     /// Evaluate one pass. `now` is injected for deterministic tests.
     ///
     /// A kind is reported at most once: `.failing` wins over `.stale`, because
@@ -90,7 +100,7 @@ enum DataFreshnessHealth {
         now: Date = Date()
     ) -> [DataFreshnessIssue] {
         states.compactMap { state in
-            guard let tier = CollectionTier.tier(forReport: state.kind) else { return nil }
+            guard let tier = tier(forKind: state.kind) else { return nil }
 
             if state.consecutiveFailures >= failingThreshold {
                 return DataFreshnessIssue(

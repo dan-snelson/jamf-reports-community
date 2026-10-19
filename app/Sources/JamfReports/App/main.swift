@@ -253,6 +253,9 @@ private func scheduledRunSingleBody(
             "[routing] no usable config for \(profile, privacy: .public) — treating it as Jamf Pro")
     }
 
+    let labelProfile = ProfileName.labelComponent(profile)
+    let runLabel = label ?? "\(LaunchAgentWriter.labelPrefix).\(labelProfile).\(mode.rawValue)"
+
     // A profile of another product (Protect, Security Cloud, organization level) can never run
     // a Jamf Pro schedule, so every retry would fail the same way. Refused before the recorder
     // creates anything in the workspace; like a School backup, it ends the run as a success
@@ -266,6 +269,10 @@ private func scheduledRunSingleBody(
             + "scheduling it."
         fputs(message + "\n", stderr)
         AppLogger.schedule.notice("\(LogRedactor.redact(message), privacy: .public)")
+        // Exit 0 so the tick does not retry it, but not silence: one card a day.
+        await ScheduledRunSignals.notifyRefusedRun(
+            config: routingConfig, profile: profile, mode: mode,
+            scheduleKey: "\(runLabel).\(labelProfile)", refusal: refusal)
         return 0
     }
 
@@ -275,8 +282,6 @@ private func scheduledRunSingleBody(
     // stream capture); the recorder is the structured per-run record.
     // Legacy plists without --label fall back to a profile+mode label so
     // their runs are recorded too.
-    let labelProfile = ProfileName.labelComponent(profile)
-    let runLabel = label ?? "\(LaunchAgentWriter.labelPrefix).\(labelProfile).\(mode.rawValue)"
     let recorder = ScheduledRunRecorder(workspace: workspace, label: runLabel)
     if recorder == nil {
         fputs("[warn] could not open run record in automation/logs — run will not appear in Run History\n", stderr)

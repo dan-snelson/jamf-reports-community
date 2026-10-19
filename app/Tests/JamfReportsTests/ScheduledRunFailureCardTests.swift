@@ -47,4 +47,43 @@ final class ScheduledRunFailureCardTests: XCTestCase {
         XCTAssertEqual(WebhookCapture.posted.count, 1)
         XCTAssertTrue(WebhookCapture.posted.first?.contains("Failed") == true)
     }
+
+    // MARK: - Refused runs
+
+    private func refusedSchedule() -> Schedule {
+        Schedule(
+            name: "refused", profile: profile, schedule: "manual", cadence: "custom",
+            mode: .snapshotOnly, next: "—", last: "—", lastStatus: .ok, artifacts: [],
+            enabled: true,
+            launchAgentLabel: "com.github.tonyyo11.jamf-reports-community.r\(UUID().uuidString.prefix(8))")
+    }
+
+    func testARefusedRunPostsOneCardADayAndWritesNothingInTheWorkspace() async throws {
+        try ProductGuardSeed.seed(profile: profile, product: "protect", in: root)
+        let schedule = refusedSchedule()
+        for _ in 0..<3 {
+            let outcome = await runSchedule(schedule, verbose: false)
+            XCTAssertEqual(outcome.exitCode, 0)
+            XCTAssertTrue(outcome.endsRetries)
+        }
+        XCTAssertEqual(WebhookCapture.posted.count, 1, "once a day, not once a wake")
+        XCTAssertTrue(WebhookCapture.posted.first?.contains("Failed") == true)
+        let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: workspace.appendingPathComponent("automation").path))
+    }
+
+    func testARefusedRunPostsAgainTheNextDayAndPerSchedule() async throws {
+        let config = try ConfigLoader.load(from: try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+            .appendingPathComponent("config.yaml"))
+        let state = root.appendingPathComponent("refused-state")
+        let today = Date()
+        for (key, day) in [("a", today), ("a", today), ("b", today),
+                           ("a", today.addingTimeInterval(86_400))] {
+            await ScheduledRunSignals.notifyRefusedRun(
+                config: config, profile: profile, mode: .snapshotOnly, scheduleKey: key,
+                refusal: "refused", stateRoot: state, now: day)
+        }
+        XCTAssertEqual(WebhookCapture.posted.count, 3)
+    }
 }

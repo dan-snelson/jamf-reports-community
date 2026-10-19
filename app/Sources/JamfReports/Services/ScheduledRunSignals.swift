@@ -162,6 +162,39 @@ enum ScheduledRunSignals {
         }
     }
 
+    /// Post the failure card for a run the product guard refused, once per local day per
+    /// schedule. A refused run exits 0 and writes nothing in the workspace, so without a card
+    /// nobody learns the schedule has never run. The once-a-day stamp lives in `stateRoot`
+    /// (this Mac's Application Support), never in the workspace. Best-effort — never throws.
+    static func notifyRefusedRun(
+        config: ReportConfig?,
+        profile: String,
+        mode: Schedule.RunMode,
+        scheduleKey: String,
+        refusal: String,
+        stateRoot: URL = AppSupport.directory()
+            .appendingPathComponent("refused-runs", isDirectory: true),
+        now: Date = Date()
+    ) async {
+        guard let notify = SharedConfigPin.effectiveNotify(config?.notify, profile: profile),
+              notify.isUsable else { return }
+        let facts = failureFacts(
+            detail: notify.resolvedDetail, profile: profile, mode: mode,
+            errorDescription: refusal)
+        let folder = stateRoot.appendingPathComponent(
+            ProfileName.labelComponent(scheduleKey), isDirectory: true)
+        let outcome = await DayMarker(name: "refused-run").sendOnce(
+            day: SummaryJSONParser.dateFormatter.string(from: now), in: [folder], now: now,
+            onLine: { fputs($0 + "\n", stderr) }
+        ) {
+            await WebhookNotifier.sendFailed(
+                config: notify, title: "Jamf Report — \(profile)", facts: facts)
+        }
+        if outcome == .failed {
+            fputs("[warn] refused-run notification failed for '\(profile)'\n", stderr)
+        }
+    }
+
     /// Record any config problem serious enough to make the data unreliable.
     ///
     /// A scheduled run happily collects against broken column mappings or a

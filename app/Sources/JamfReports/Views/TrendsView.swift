@@ -304,10 +304,12 @@ struct TrendsView: View {
             if let preferred = TrendRange(rawValue: defaultTrendRangeRaw), preferred != range {
                 range = preferred
             }
+            ensureOfferedMetric()
             // Off-main scan so entering Trends never freezes the UI.
             Task { await loadTrendsOffMain() }
         }
         .onChange(of: workspaceStore.profile) { _, _ in
+            ensureOfferedMetric()
             Task { await loadTrendsOffMain() }
         }
         .onChange(of: range) { _, newValue in
@@ -320,6 +322,14 @@ struct TrendsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .refreshActiveTab)) { _ in
             Task { await loadTrendsOffMain() }
+        }
+    }
+
+    /// A workspace whose summary lacks the selected metric (School has no Mac figures) shows
+    /// its first pill as the hero instead.
+    private func ensureOfferedMetric() {
+        if !availableMetrics.contains(metric), let first = availableMetrics.first {
+            metric = first
         }
     }
 
@@ -444,6 +454,9 @@ struct TrendsView: View {
                 return !points(for: .securityScore).isEmpty
             case .managedDevices:
                 return true
+            case .stale:
+                // A School fleet with no Macs records no stale count.
+                return !workspaceStore.isSchoolWorkspace || !points(for: .stale).isEmpty
             default:
                 return true
             }
@@ -852,7 +865,7 @@ struct TrendsView: View {
                         securityPostureCard
                     }
                 }
-            } else {
+            } else if !workspaceStore.isSchoolWorkspace {
                 securityPostureCard
             }
         }

@@ -179,8 +179,12 @@ final class WorkspaceStore {
         }
     }
 
-    /// Every metric a score card or the Trends picker can show for this workspace.
-    var availableMetrics: [TrendSeries.Metric] { TrendSeries.Metric.allCases + agentMetrics }
+    /// Every metric a score card or the Trends picker can show for this workspace; a Jamf School
+    /// workspace has only the device counts its summary measures.
+    var availableMetrics: [TrendSeries.Metric] {
+        isSchoolWorkspace ? TrendSeries.Metric.schoolMetrics
+            : TrendSeries.Metric.allCases + agentMetrics
+    }
 
     /// Whether the Overview shows `metric` as a score card: an agent metric needs its agent
     /// configured (and not counted as EDR), a control card needs its control counted by the
@@ -1298,11 +1302,11 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
 
     /// The tabs a Jamf School workspace keeps (2.10): it collects only School data, which no
     /// Jamf Pro screen reads, so it keeps its own Overview and Devices and the screens about the
-    /// workspace, its reports and its automation. Fleet Overview reads the daily summary, which
-    /// School does not write yet (environment-model spec P8). Applied by
-    /// `TabVisibility.limited(toSchool:)`, never stored.
+    /// workspace, its reports and its automation, and Trends, which charts the School daily
+    /// summary (`ReportEngine.writeSchoolSummary`). Fleet Overview stays out until its tiles
+    /// read that summary. Applied by `TabVisibility.limited(toSchool:)`, never stored.
     static let schoolTabs: Set<Tab> = [
-        .overview, .schoolDevices, .reports, .schedules, .runs, .config, .sources,
+        .overview, .schoolDevices, .trends, .reports, .schedules, .runs, .config, .sources,
         .settings, .onboarding,
     ]
 

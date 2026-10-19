@@ -30,6 +30,8 @@ versions in this repository map to git tags.
   model, OS, managed, supervised and last check-in, with counts by platform, filters for
   managed, unmanaged and stale devices, and a search. Devices waiting in Automated Device
   Enrollment are listed below them.
+- A Jamf School workspace now builds Trends history: each collect that reads its devices saves
+  a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
 
 ### Changed
 
@@ -81,7 +83,7 @@ versions in this repository map to git tags.
   platform, managed, supervised and stale devices, and each count Jamf School reports (users,
   classes, apps and the rest). It used to show the Jamf Pro cards with nothing in them. Its
   Getting Started list ticks off the collect step after a School collect and no longer asks you
-  to track Extension Attributes. School keeps no history yet, so Trends is still Jamf Pro only.
+  to track Extension Attributes.
 
 ### Fixed
 

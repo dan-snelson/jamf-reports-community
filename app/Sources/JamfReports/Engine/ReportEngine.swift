@@ -432,7 +432,7 @@ struct ReportEngine: Sendable {
                 let upgradeMsg = "[info] summary_\(today).json rebuilt with fresher data"
                 AppLogger.collect.info("\(upgradeMsg, privacy: .public)")
                 onLine?(.init(timestamp: Date(), level: .info, text: upgradeMsg))
-                return writeSummaryFile(fresh, to: summaryFile, onLine: onLine)
+                return Self.writeSummaryFile(fresh, to: summaryFile, onLine: onLine)
                     ? .wrote : .writeFailed
             }
             let msg = "[info] summary_\(today).json already exists — "
@@ -455,7 +455,7 @@ struct ReportEngine: Sendable {
             return .nothingToSummarize
         }
 
-        return writeSummaryFile(summary, to: summaryFile, onLine: onLine)
+        return Self.writeSummaryFile(summary, to: summaryFile, onLine: onLine)
             ? .wrote : .writeFailed
     }
 
@@ -536,7 +536,7 @@ struct ReportEngine: Sendable {
     /// exactly the kind of quiet lie this release is closing. The return value
     /// is what lets the scheduled path stop claiming "Trends updated".
     @discardableResult
-    private func writeSummaryFile(
+    static func writeSummaryFile(
         _ summary: DailySummary,
         to url: URL,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
@@ -3457,7 +3457,43 @@ struct ReportEngine: Sendable {
             onLine(.init(timestamp: Date(), level: .fail, text: msg))
             throw ReportEngineError.collectDead(profile: profile, failedCount: failedCount)
         }
+        writeSchoolSummaryAfterCollect(
+            profile: profile, dataDir: dataDir, workspacePaths: workspacePaths,
+            landedKinds: schoolSaved, onLine: onLine)
         reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
+    }
+
+    /// The School daily summary: Trends history for a workspace that writes no other. The stale
+    /// cut-off is `thresholds.stale_device_days`; a config.yaml that will not load is named in
+    /// a `[warn]` and the default 30 applies, since the summary should still advance.
+    private static func writeSchoolSummaryAfterCollect(
+        profile: String, dataDir: URL, workspacePaths: WorkspacePaths.Type,
+        landedKinds: Set<String>, onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
+    ) {
+        var staleDays = 30
+        if let workspace = ProfileService.workspaceURL(for: profile) {
+            let configURL = workspace.appendingPathComponent("config.yaml")
+            if FileManager.default.fileExists(atPath: configURL.path) {
+                do {
+                    staleDays = try ConfigLoader.load(from: configURL)
+                        .thresholds?.resolvedStaleDays ?? 30
+                } catch {
+                    onLine(.init(timestamp: Date(), level: .warn,
+                        text: "[warn] School summary: config.yaml did not load "
+                            + "(\(error.localizedDescription)); stale cut-off is 30 days"))
+                }
+            }
+        }
+        guard let summariesDir = try? workspacePaths.summariesDir(for: profile) else {
+            if landedKinds.contains(SchoolFleetService.devicesKind) {
+                onLine(.init(timestamp: Date(), level: .warn,
+                    text: "\(summaryNotWrittenMarker) the summaries directory could not be resolved"))
+            }
+            return
+        }
+        writeSchoolSummary(
+            dataDir: dataDir, summariesDir: summariesDir, landedKinds: landedKinds,
+            staleDays: staleDays, onLine: onLine)
     }
 
     /// The `[partial]` line for sources a School or Protect collect did not land, so the run

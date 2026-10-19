@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The Overview on a Jamf School workspace: today's device counts and School's own resource
 /// counts from the newest snapshots (`SchoolFleetService`), and the Getting Started steps School
-/// has. Jamf School writes no daily summary yet (environment-model spec P8), so there is no
-/// history here; the Jamf Pro Overview's cards have nothing to read on School.
+/// has. The history is on Trends (the School daily summary); the Jamf Pro Overview's cards
+/// have nothing to read on School.
 struct SchoolOverviewView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast

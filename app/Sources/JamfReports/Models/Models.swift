@@ -1071,6 +1071,11 @@ struct TrendSeries: Identifiable, Sendable {
             .gatekeeper,
         ]
 
+        /// What a Jamf School summary can measure: device counts and the Mac stale count (the
+        /// Trends screen offers `.stale` only once a summary has Macs). Every other metric reads
+        /// a Mac security figure School does not carry.
+        static let schoolMetrics: [Metric] = [.managedDevices, .stale]
+
         static let agentPrefix = "agent:"
 
         var id: String { rawValue }

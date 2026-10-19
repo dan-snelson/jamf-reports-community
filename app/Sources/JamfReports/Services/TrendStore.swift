@@ -344,7 +344,9 @@ struct TrendPoint: Identifiable, Sendable, Equatable {
         case .managedDevices:
             // Headline value for the pill/hero display — the computer count
             // (always present). The two-line breakdown against mobile devices
-            // is rendered separately by `managedDeviceSeries()`.
+            // is rendered separately by `managedDeviceSeries()`. A day with no Macs (a
+            // mobile-only or iPad-only fleet) has its mobile count, never a headline of 0.
+            if summary.totalDevices == 0 { return summary.mobileDeviceCount.map(Double.init) }
             return Double(summary.totalDevices)
         }
     }

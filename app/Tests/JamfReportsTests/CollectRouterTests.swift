@@ -428,7 +428,7 @@ final class CollectRouterTests: XCTestCase {
     /// A Pro collect that stood down for a peer fetched nothing, and the peer holds
     /// the shared-workspace claim: Protect must not collect beside it.
     func test_router_proStoodDown_skipsProtect() async throws {
-        let (spy, lines) = try await runProtectEnabledProfile(proReturning: .stoodDown)
+        let (spy, lines, _) = try await runProtectEnabledProfile(proReturning: .stoodDown)
 
         XCTAssertEqual(spy.proCallCount, 1, "Pro collect must still be asked")
         XCTAssertEqual(spy.protectCallCount, 0, "Protect must not run after a stand-down")
@@ -438,12 +438,69 @@ final class CollectRouterTests: XCTestCase {
 
     /// The once-per-day guard skipped the Pro collect, so Protect skips with it.
     func test_router_proAlreadyCollected_skipsProtect() async throws {
-        let (spy, lines) = try await runProtectEnabledProfile(proReturning: .alreadyCollected)
+        let (spy, lines, _) = try await runProtectEnabledProfile(proReturning: .alreadyCollected)
 
         XCTAssertEqual(spy.proCallCount, 1)
         XCTAssertEqual(spy.protectCallCount, 0,
                        "Protect must not run when today's Pro collect already ran")
         XCTAssertTrue(lines.contains { $0.hasPrefix("[skip] protect:") }, "got: \(lines)")
+    }
+
+    // MARK: - Protect after a failed Pro collect
+
+    /// A dead run or dead credentials reached Jamf and failed; Protect has its own login, so it
+    /// still runs, and the Pro error is what the caller sees.
+    func test_router_proVerdictThrow_stillRunsProtectAndRethrowsProError() async throws {
+        let verdicts: [ReportEngineError] = [
+            .authExpired(profile: "p", failedCount: 3),
+            .collectDead(profile: "p", failedCount: 3),
+        ]
+        for verdict in verdicts {
+            let (spy, _, thrown) = try await runProtectEnabledProfile(proThrowing: verdict)
+            XCTAssertEqual(spy.protectCallCount, 1, "\(verdict)")
+            XCTAssertEqual(thrown?.localizedDescription, verdict.localizedDescription)
+        }
+    }
+
+    /// A Protect failure after a Pro failure is a `[partial]` line; it never replaces the Pro error.
+    func test_router_protectFailureAfterProVerdict_keepsProError() async throws {
+        let verdict = ReportEngineError.authExpired(profile: "p", failedCount: 2)
+        let (spy, lines, thrown) = try await runProtectEnabledProfile(
+            proThrowing: verdict, protectThrowing: NSError(domain: "test", code: 7))
+        XCTAssertEqual(spy.protectCallCount, 1)
+        XCTAssertEqual(thrown?.localizedDescription, verdict.localizedDescription)
+        XCTAssertTrue(lines.contains { $0.hasPrefix(ReportEngine.protectCollectFailedMarker) })
+    }
+
+    /// Anything that is not a collect verdict (no jamf-cli, a bad profile, a collect refusal)
+    /// stops the run before Protect.
+    func test_router_proPreflightThrow_doesNotRunProtect() async throws {
+        let errors: [Error] = [
+            ReportEngineError.jamfCLINotFound,
+            ReportEngineError.profileMismatch(named: "a", run: "b"),
+            CLIBridgeError.tickLockHeld,
+            CLIBridgeError.collectInProgress,
+        ]
+        for error in errors {
+            let (spy, _, thrown) = try await runProtectEnabledProfile(proThrowing: error)
+            XCTAssertEqual(spy.protectCallCount, 0, "\(error)")
+            XCTAssertEqual(thrown?.localizedDescription, error.localizedDescription)
+        }
+    }
+
+    /// The product guard refuses before the Pro collect, so Protect does not run either.
+    func test_router_wrongProduct_doesNotRunProtect() async throws {
+        let config = try ConfigLoader.loadFromString(
+            "protect:\n  enabled: true\n  profile: my-protect\n")
+        let spy = RouterSpy()
+        do {
+            try await CollectRouter.run(
+                profile: "other", config: config, workspacePaths: WorkspacePaths.self,
+                proCollect: spy.proCollect, schoolCollect: spy.schoolCollect,
+                protectCollect: spy.protectCollect, resolved: resolved(.protect), onLine: { _ in })
+            XCTFail("not refused")
+        } catch CLIBridgeError.wrongProduct {}
+        XCTAssertEqual([spy.proCallCount, spy.protectCallCount], [0, 0])
     }
 
     // MARK: - Helpers
@@ -452,8 +509,10 @@ final class CollectRouterTests: XCTestCase {
     /// `WorkspacePaths.dataDir(for:)` resolves and a skipped Protect can only come
     /// from the Pro collect's disposition.
     private func runProtectEnabledProfile(
-        proReturning disposition: ReportEngine.CollectDisposition
-    ) async throws -> (spy: RouterSpy, lines: [String]) {
+        proReturning disposition: ReportEngine.CollectDisposition = .collected,
+        proThrowing proError: Error? = nil,
+        protectThrowing protectError: Error? = nil
+    ) async throws -> (spy: RouterSpy, lines: [String], thrown: Error?) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CollectRouterTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -473,19 +532,25 @@ final class CollectRouterTests: XCTestCase {
           enabled: true
           profile: my-protect
         """)
-        let spy = RouterSpy(proDisposition: disposition)
+        let spy = RouterSpy(
+            proDisposition: disposition, proError: proError, protectError: protectError)
         let lines = RouterLineCollector()
 
-        try await CollectRouter.run(
-            profile: profile,
-            config: config,
-            workspacePaths: WorkspacePaths.self,
-            proCollect: spy.proCollect,
-            schoolCollect: spy.schoolCollect,
-            protectCollect: spy.protectCollect,
-            onLine: { line in lines.append(line.text) }
-        )
-        return (spy, lines.texts)
+        var thrown: Error?
+        do {
+            try await CollectRouter.run(
+                profile: profile,
+                config: config,
+                workspacePaths: WorkspacePaths.self,
+                proCollect: spy.proCollect,
+                schoolCollect: spy.schoolCollect,
+                protectCollect: spy.protectCollect,
+                onLine: { line in lines.append(line.text) }
+            )
+        } catch {
+            thrown = error
+        }
+        return (spy, lines.texts, thrown)
     }
 }
 
@@ -525,6 +590,8 @@ private struct RouterSpy {
     /// What the spy's Pro collect reports; `.collected` is the only value that
     /// lets Protect follow.
     var proDisposition: ReportEngine.CollectDisposition = .collected
+    var proError: Error?
+    var protectError: Error?
 
     var proCallCount: Int { proCounter.value }
     var schoolCallCount: Int { schoolCounter.value }
@@ -533,8 +600,10 @@ private struct RouterSpy {
     var proCollect: CollectRouter.ProCollect {
         let counter = proCounter
         let disposition = proDisposition
+        let error = proError
         return { _, _, _, _, _, _ in
             counter.increment()
+            if let error { throw error }
             return disposition
         }
     }
@@ -546,6 +615,10 @@ private struct RouterSpy {
 
     var protectCollect: CollectRouter.ProtectCollect {
         let counter = protectCounter
-        return { _, _, _ in counter.increment() }
+        let error = protectError
+        return { _, _, _ in
+            counter.increment()
+            if let error { throw error }
+        }
     }
 }

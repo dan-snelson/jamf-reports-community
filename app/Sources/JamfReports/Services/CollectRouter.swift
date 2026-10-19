@@ -158,40 +158,66 @@ enum CollectRouter {
             try await schoolCollect(profile, workspacePaths, tiers, force, onLine)
 
         case .jamfPro:
-            let disposition = try await proCollect(
-                profile, workspacePaths, tiers, skipExpensive, force, onLine
-            )
-            guard detected.runsProtect else { return }
-            guard SharedConfigPin.protectAllowed(profile: profile) else {
-                onLine(.init(timestamp: Date(), level: .info,
-                             text: "[skip] protect: protect.profile changed in the shared "
-                                + "config.yaml and is not confirmed on this Mac — "
-                                + "Protect not collected"))
-                return
-            }
-            guard disposition == .collected else {
-                let reason = disposition == .stoodDown
-                    ? "the Jamf Pro collect stood down for another Mac"
-                    : "Jamf Pro already collected today"
-                onLine(.init(timestamp: Date(), level: .info,
-                             text: "[skip] protect: \(reason) — Protect not collected"))
-                return
-            }
-            // Protect augments Pro: a failure does not fail the run, but reads as Partial.
-            let protectProfile = config?.protect?.resolvedProfile ?? profile
-            guard let dataDir = try? workspacePaths.dataDir(for: profile) else {
-                onLine(.init(timestamp: Date(), level: .warn,
-                    text: "[warn] protect: could not resolve dataDir for \(profile) — skipping"))
-                return
-            }
-            onLine(.init(timestamp: Date(), level: .info,
-                         text: "[info] running protect collect for \(profile)"))
+            let disposition: ReportEngine.CollectDisposition
             do {
-                try await protectCollect(protectProfile, dataDir, onLine)
-            } catch {
-                onLine(.init(timestamp: Date(), level: .warn,
-                    text: "\(ReportEngine.protectCollectFailedMarker)\(error.localizedDescription)"))
+                disposition = try await proCollect(
+                    profile, workspacePaths, tiers, skipExpensive, force, onLine
+                )
+            } catch let verdict as ReportEngineError where verdict.isCollectVerdict {
+                // The Pro run reached Jamf and failed (dead credentials, a dead run): Protect has
+                // its own login and may still answer. The Pro error stays the run's result.
+                await collectProtect(
+                    detected: detected, config: config, profile: profile, disposition: .collected,
+                    workspacePaths: workspacePaths, protectCollect: protectCollect, onLine: onLine)
+                throw verdict
             }
+            await collectProtect(
+                detected: detected, config: config, profile: profile, disposition: disposition,
+                workspacePaths: workspacePaths, protectCollect: protectCollect, onLine: onLine)
+        }
+    }
+
+    /// The Protect half of a Jamf Pro run. Never throws: a Protect failure is a `[partial]`
+    /// line and the Pro run's result stands.
+    private static func collectProtect(
+        detected: DetectedProduct,
+        config: ReportConfig?,
+        profile: String,
+        disposition: ReportEngine.CollectDisposition,
+        workspacePaths: WorkspacePaths.Type,
+        protectCollect: ProtectCollect,
+        onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
+    ) async {
+        guard detected.runsProtect else { return }
+        guard SharedConfigPin.protectAllowed(profile: profile) else {
+            onLine(.init(timestamp: Date(), level: .info,
+                         text: "[skip] protect: protect.profile changed in the shared "
+                            + "config.yaml and is not confirmed on this Mac — "
+                            + "Protect not collected"))
+            return
+        }
+        guard disposition == .collected else {
+            let reason = disposition == .stoodDown
+                ? "the Jamf Pro collect stood down for another Mac"
+                : "Jamf Pro already collected today"
+            onLine(.init(timestamp: Date(), level: .info,
+                         text: "[skip] protect: \(reason) — Protect not collected"))
+            return
+        }
+        // Protect augments Pro: a failure does not fail the run, but reads as Partial.
+        let protectProfile = config?.protect?.resolvedProfile ?? ""
+        guard let dataDir = try? workspacePaths.dataDir(for: profile) else {
+            onLine(.init(timestamp: Date(), level: .warn,
+                text: "[warn] protect: could not resolve dataDir for \(profile) — skipping"))
+            return
+        }
+        onLine(.init(timestamp: Date(), level: .info,
+                     text: "[info] running protect collect for \(profile)"))
+        do {
+            try await protectCollect(protectProfile, dataDir, onLine)
+        } catch {
+            onLine(.init(timestamp: Date(), level: .warn,
+                text: "\(ReportEngine.protectCollectFailedMarker)\(error.localizedDescription)"))
         }
     }
 
@@ -237,5 +263,16 @@ enum CollectRouter {
             dataDir: dataDir,
             onLine: onLine
         )
+    }
+}
+
+extension ReportEngineError {
+    /// A collect that ran and failed as a whole (credentials dead, every call failed), as
+    /// opposed to a refusal before it started.
+    var isCollectVerdict: Bool {
+        switch self {
+        case .authExpired, .collectDead: true
+        default: false
+        }
     }
 }

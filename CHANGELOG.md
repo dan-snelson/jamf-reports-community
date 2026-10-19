@@ -31,6 +31,8 @@ versions in this repository map to git tags.
 
 - The Devices screen is now **Computers**, matching Jamf Pro's naming. Mobile Fleet keeps
   mobile devices. Your saved sidebar choices and export file names are unchanged.
+- The sidebar's **Fleet** group now sits right under Reports and holds Computers, Mobile Fleet,
+  Device Lookup, Jamf Protect and Groups & Searches, so computers and mobile devices sit side by side.
 - **Fleet Drift** now compares the collected inventory from two different days, so it no longer
   needs a CSV export. It lists Macs that joined or left, macOS changes, and Macs that became or
   stopped being stale under your stale settings. The "Compliance Changed" section is gone from this

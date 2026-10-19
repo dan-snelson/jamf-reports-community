@@ -23,9 +23,9 @@ final class KeyboardNavigationTests: XCTestCase {
     func testNextTabSkipsHiddenTab() {
         var v = TabVisibility()
         v.toggle(.fleet)
-        // Starting from .overview the next visible should skip .fleet → .devices
+        // Starting from .overview the next visible should skip .fleet → .trends
         let result = nextVisibleTab(from: .overview, in: v)
-        XCTAssertEqual(result, .devices)
+        XCTAssertEqual(result, .trends)
     }
 
     func testNextTabSkipsHiddenTabAtBoundary() {
@@ -70,16 +70,16 @@ final class KeyboardNavigationTests: XCTestCase {
     func testPrevTabSkipsHiddenTab() {
         var v = TabVisibility()
         v.toggle(.fleet)
-        // Backward from .devices, .fleet is hidden → should land on .overview
-        let result = previousVisibleTab(from: .devices, in: v)
+        // Backward from .trends, .fleet is hidden → should land on .overview
+        let result = previousVisibleTab(from: .trends, in: v)
         XCTAssertEqual(result, .overview)
     }
 
     func testPrevTabSkipsHiddenTabAtBoundary() {
         var v = TabVisibility()
-        // Hide .fleet (index 1). Backward from .devices (index 2) skips it → .overview.
+        // Hide .fleet (index 1). Backward from .trends (index 2) skips it → .overview.
         v.toggle(.fleet)
-        let result = previousVisibleTab(from: .devices, in: v)
+        let result = previousVisibleTab(from: .trends, in: v)
         XCTAssertEqual(result, .overview)
     }
 

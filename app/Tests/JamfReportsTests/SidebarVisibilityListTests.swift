@@ -26,7 +26,7 @@ final class SidebarVisibilityListTests: XCTestCase {
         let shown = SettingsView.toggleableGroups.map(\.label)
         XCTAssertEqual(shown, sidebar.filter { shown.contains($0) })
         XCTAssertEqual(SettingsView.toggleableGroups.first { $0.label == "FLEET" }?.tabs,
-                       [.mobileFleet, .protectDashboard, .groupInventory])
+                       [.mobileFleet, .deviceLookup, .protectDashboard, .groupInventory])
         XCTAssertFalse(shown.contains("SYSTEM"), "Settings is core, so its group is empty")
     }
 }

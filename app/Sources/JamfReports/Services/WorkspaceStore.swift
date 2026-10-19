@@ -1335,13 +1335,13 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
     /// `.onboarding` is intentionally absent: the sidebar never lists it.
     static let navGroups: [NavGroup] = [
         .init(label: "REPORTS",
-              items: [.overview, .fleet, .devices, .deviceLookup, .trends, .audit, .reports]),
+              items: [.overview, .fleet, .trends, .audit, .reports]),
+        .init(label: "FLEET",
+              items: [.devices, .mobileFleet, .deviceLookup, .protectDashboard, .groupInventory]),
         .init(label: "POSTURE",
               items: [.securityPosture, .compliancePosture, .complianceBenchmarks, .outreach]),
         .init(label: "OPERATIONS",
               items: [.patch, .updates, .ddmBlueprints, .policyProfile, .extensionAttributes]),
-        .init(label: "FLEET",
-              items: [.mobileFleet, .protectDashboard, .groupInventory]),
         .init(label: "AUTOMATION",
               items: [.schedules, .runs]),
         .init(label: "CONFIGURATION",

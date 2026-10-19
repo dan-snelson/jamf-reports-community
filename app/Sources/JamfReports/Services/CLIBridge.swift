@@ -1123,12 +1123,50 @@ final class CLIBridge {
         guard await authGuard(profile: profile, onLine: onLine) else {
             return Self.exitCodeUnauthorized
         }
-        return try await run(
+        // `config validate` ignores -p and checks every profile in jamf-cli's file, so the
+        // verdict is taken from the JSON rows that concern this profile. runAndCapture keeps
+        // stdout out of onLine; its stderr "Error: config validation failed" is dropped here
+        // because another profile may be the one that failed.
+        let (code, stdout) = try await runAndCapture(
             executable: bin,
-            arguments: ["-p", profile, "config", "validate"],
+            arguments: ["-p", profile, "config", "validate", "--output", "json"],
             environment: Self.environmentForJamfCLI(),
-            onLine: onLine
+            onLine: { line in
+                if line.text.contains("config validation failed") { return }
+                onLine(line)
+            }
         )
+        let verdict = Self.validationVerdict(stdout: stdout, exitCode: code, profile: profile)
+        for failure in verdict.failures {
+            onLine(.init(timestamp: Date(), level: .fail, text: "[error] \(failure)"))
+        }
+        return verdict.exit
+    }
+
+    private struct ValidateCheck: Decodable {
+        let scope: String
+        let name: String
+        let status: String
+        let message: String?
+    }
+
+    /// Reduces `jamf-cli config validate --output json` (an array of `{scope, name, status,
+    /// message}`) to the rows for `config` and `profile`; another profile's failing row does
+    /// not fail this one. Output that does not parse keeps `exitCode`.
+    nonisolated static func validationVerdict(
+        stdout: Data, exitCode: Int32, profile: String
+    ) -> (exit: Int32, failures: [String]) {
+        guard let checks = try? JSONDecoder().decode([ValidateCheck].self, from: stdout) else {
+            return (exitCode, [])
+        }
+        let failures = checks
+            .filter { ($0.scope == "config" || $0.scope == profile) && $0.status == "fail" }
+            .map { check in
+                let message = check.message ?? ""
+                return "\(check.scope) \(check.name) failed" + (message.isEmpty ? "" : ": \(message)")
+            }
+        guard !failures.isEmpty else { return (0, []) }
+        return (exitCode == 0 ? 1 : exitCode, failures)
     }
 
     /// What `probeToken` found: the token status, or no answer within the time limit.

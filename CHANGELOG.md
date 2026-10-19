@@ -79,6 +79,9 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- One Jamf School profile on the Mac no longer makes **Test connection**, onboarding's
+  **Validate** and **Reauthenticate** fail for your other profiles. They now judge only the
+  config file and the profile being checked.
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
 - A schedule whose last success was recorded while the Mac's clock was set ahead is retried

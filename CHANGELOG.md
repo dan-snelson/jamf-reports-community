@@ -85,6 +85,16 @@ versions in this repository map to git tags.
   skipped rather than retried or reported as a failure, and `schedules add` refuses it.
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
+- A Jamf Pro collect that fails as a whole (dead credentials, every call failing) no longer
+  stops Jamf Protect from being collected; Protect runs and the run still reports the Jamf Pro
+  failure. (#284)
+- A blank `protect.profile`, or one that names a Jamf Pro, Jamf School or Jamf Security Cloud
+  login, now skips Jamf Protect with one warning line in collect, backup and the dashboard,
+  instead of a Protect failure on every run. Config Doctor warns about the second case, and Data
+  Sources lists the Protect commands as skipped. (#284)
+- The workbook no longer keeps Protect tabs from old data after Protect is turned off. (#284)
+- Health audit, group analysis, backup and backup diff on a profile of another product now say
+  that plainly instead of "Invalid argument". (#284)
 - A schedule whose last success was recorded while the Mac's clock was set ahead is retried
   after a partial run, instead of waiting until that date. (#284)
 - Importing a CSV in the Adopt EAs walkthrough no longer freezes the window while a large file

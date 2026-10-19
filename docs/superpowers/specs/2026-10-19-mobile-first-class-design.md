@@ -6,7 +6,7 @@ accepted). It replaces that spec's section 10, the multi-environment view, as se
 explains. Epic #207 L5 (carried into #284) is the backlog item.
 
 The sidebar step is done in 297b4c04: the Fleet group sits under Reports and holds Computers,
-Mobile Fleet, Device Lookup, Jamf Protect and Groups & Searches.
+Mobile Devices, Device Lookup, Jamf Protect and Groups & Searches.
 
 ## 1. Rules
 
@@ -66,7 +66,7 @@ Notes:
   4. Needs attention: jailbreaks + unmanaged + update errors, as one number that links to the
      Audit's Mobile Devices section (section 5). The line is hidden when the number is 0.
 
-  The section opens Mobile Fleet. Its subtitle names the snapshot date. The `isHalfWidth`
+  The section opens Mobile Devices. Its subtitle names the snapshot date. The `isHalfWidth`
   pairing puts it beside macOS Distribution. A saved layout gets it at the end, shown
   (`OverviewLayout.normalized`).
 - Score cards: mobile metrics (section 4) join the picker. None is in the default selection
@@ -75,7 +75,7 @@ Notes:
   mobile devices exist.
 
 Left off the Overview on purpose: supervision breakdown, Activation Lock, data protection,
-enrollment method, the per-version OS table and the device list. Mobile Fleet holds them, one
+enrollment method, the per-version OS table and the device list. Mobile Devices holds them, one
 click away.
 
 ### 3.2 Mobile-only environment (no Macs)
@@ -184,7 +184,7 @@ the main actor, after the first paint.
 ## 5. Health Audit
 
 A **Mobile Devices** section, app-computed like `ContactGapSection`, hidden when the environment
-has no mobile devices. Each finding names a count and opens Mobile Fleet filtered to those
+has no mobile devices. Each finding names a count and opens Mobile Devices filtered to those
 devices (the donut filter pattern from #207 A3).
 
 | Finding | Severity | From |
@@ -198,13 +198,13 @@ devices (the donut filter pattern from #207 A3).
 | No inventory update in more than `stale_device_days` | low | GENERAL `lastInventoryUpdateDate` |
 
 - Unsupervised and Activation Lock are not findings: either can be intended. They stay as counts on
-  Mobile Fleet.
+  Mobile Devices.
 - Tracking: each finding's count is the matching `mobile` summary figure, so the Audit
   compares today with the previous summary ("3 fewer than on 2026-10-18"). Trends and
   alert rules get the history with nothing extra. The audit AI insight
   (`FleetInsightInput.audit`) counts them by name with no device names.
 - `classic-ios-profiles` carries `{id, name}` only, so it yields no finding. It stays as the
-  profile count on Mobile Fleet.
+  profile count on Mobile Devices.
 - `pro audit` (jamf-cli 1.31.1) returned five findings on the test tenant. None is mobile by
   name. Whether "Unencrypted devices" counts mobile devices is not known. If it does, its row is
   superseded by the data protection finding here, as `withoutSupersededRows` does for MDM
@@ -254,7 +254,7 @@ the environment spec's P1. Each phase is one PR with its caller.
 | M2 | Summary `mobile` object written by the summary step and `mobileOnlySummary`, from `MobileFleetService` facts. `filling(from:)`, `freshSummaryIsBetter`, range checks. Alert keys and their config.example.yaml comment | Fixtures from a real jamf-cli `mobile-devices-list` answer (not hand-written). Absent object for no mobile, absent pair when unreported, `met <= of`, an alert on an absent pair never fires. OS current against a SOFA iOS fixture, untracked major unknown |
 | M3 | Trends mobile metrics and the two-line Managed Devices hero. Same-day backfill with the 21-day cap and per-session cache | Backfill takes the same-day snapshot only, never `osCurrent`, conflict copies skipped. `isOffered` by composition |
 | M4 | Overview `mobileDevices` section, `availability(in:)`, left-out sections in Customize, score card filtering with the mobile default set, insight facts | Mixed, mobile-only and Mac-only layouts. Selection never rewritten. Needs visual verification |
-| M5 | Audit Mobile Devices section, HTML "Needs attention" mobile rules, Mobile Fleet filters for each finding | Each finding from fixtures. Hidden with no mobile devices. Change against the previous summary |
+| M5 | Audit Mobile Devices section, HTML "Needs attention" mobile rules, Mobile Devices filters for each finding | Each finding from fixtures. Hidden with no mobile devices. Change against the previous summary |
 | M6 | Fleet Overview device tiles and product cards (after the environment spec's P9 and P10 for storage, App Installers and the aggregate maps) | No cross-product totals. A one-type tile. Left-out tiles. Needs visual verification |
 
 ### Changes to the environment spec's phases
@@ -270,7 +270,7 @@ the environment spec's P1. Each phase is one PR with its caller.
 
 ## 8. Decisions
 
-Each has one recommendation.
+All 13 recommendations were accepted on 2026-10-19.
 
 | # | Decision | Recommendation |
 |---|---|---|

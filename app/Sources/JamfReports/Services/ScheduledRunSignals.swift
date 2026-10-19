@@ -382,6 +382,8 @@ let deviceScanNotWrittenMarkerSuffix = "— not written"
 final class CollectHonestyWatcher: @unchecked Sendable {
     private let lock = NSLock()
     private var standDown = false
+    /// The stand-down was for a peer's recent collect, not its live claim.
+    private var freshnessStandDown = false
     private var summaryFailed = false
     private var partial = false
     /// Sources the `[partial]` lines named as not landed.
@@ -400,7 +402,9 @@ final class CollectHonestyWatcher: @unchecked Sendable {
             let liveClaim = line.hasSuffix(ReportEngine.liveClaimStandDownSuffix)
             lock.withLock {
                 standDown = true
-                if liveClaim { partial = true; unexplainedPartial = true }
+                if liveClaim { partial = true; unexplainedPartial = true } else {
+                    freshnessStandDown = true
+                }
             }
             return
         }
@@ -465,7 +469,13 @@ final class CollectHonestyWatcher: @unchecked Sendable {
 
     /// The rule self-remediation uses (`WorkspaceStore.lastFailureRepeatsOnRetry`), read from
     /// `profile`'s state files, except that exit 3 still retries (#226 5a).
-    func retryCouldHelp(profile: String) -> Bool {
+    ///
+    /// A stand-down because a peer collected recently is also worth a retry while `profile` has
+    /// no summary for today: if that peer is off, a later wake finds its data older than the
+    /// window and collects.
+    func retryCouldHelp(profile: String, now: Date = Date()) -> Bool {
+        if lock.withLock({ freshnessStandDown }),
+           !SummaryJSONParser.hasSummary(profile: profile, on: now) { return true }
         guard let stateDir = try? WorkspacePaths.stateDir(for: profile) else { return incomplete }
         let store = StateFileStore(directory: stateDir)
         return retryCouldHelp {

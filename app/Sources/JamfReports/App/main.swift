@@ -244,6 +244,24 @@ private func scheduledRunSingleBody(
         return 1
     }
 
+    // A profile of another product (Protect, Security Cloud, organization level) can never run
+    // a Jamf Pro schedule, so every retry would fail the same way. Refused before the recorder
+    // creates anything in the workspace; like a School backup, it ends the run as a success
+    // so the tick does not retry it and no failure webhook is posted. jamf-cli-only reads the
+    // cache and sends no command.
+    if mode != .jamfCLIOnly, let refusal = CollectRouter.proRunRefusal(
+        profile: profile, operation: "Scheduled \(mode.rawValue) run",
+        config: try? ConfigLoader.load(
+            from: workspace.appendingPathComponent("config.yaml"))
+    ) {
+        let message = "[skip] scheduled \(mode.rawValue) run skipped for '\(profile)': "
+            + "\(refusal). Not a failure. Exclude this profile from the schedule to stop "
+            + "scheduling it."
+        fputs(message + "\n", stderr)
+        AppLogger.schedule.notice("\(LogRedactor.redact(message), privacy: .public)")
+        return 0
+    }
+
     // Per-run record in <workspace>/automation/ — this is what Run History
     // and the Schedules "Last Run" column read. The launchd stdout/stderr
     // redirect to ~/Library/Logs/JamfReports/<label>/ is unchanged (raw

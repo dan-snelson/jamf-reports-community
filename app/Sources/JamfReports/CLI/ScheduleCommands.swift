@@ -55,6 +55,13 @@ struct Schedules: AsyncParsableCommand {
                 throw Invalid(description: "unknown mode '\(mode)'")
             }
             _ = try LaunchAgentWriter.calendarIntervals(for: cadence)
+            // A schedule for a base profile of another product would only ever be skipped.
+            if !allProfiles, runMode != .jamfCLIOnly, let refusal = CollectRouter.proRunRefusal(
+                profile: profile, operation: "A \(runMode.rawValue) schedule",
+                config: collectRoutingConfig(profile: profile)
+            ) {
+                throw Invalid(description: refusal)
+            }
             let tierSet: Set<CollectionTier>? = tiers.map(CLIRun.parseTiers)
             let excluded = exclude?.split(separator: ",")
                 .map(ProfileName.name(fromListElement:)).filter { !$0.isEmpty }

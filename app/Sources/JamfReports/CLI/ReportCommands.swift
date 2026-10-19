@@ -97,6 +97,12 @@ struct Collect: AsyncParsableCommand {
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
         let config = collectRoutingConfig(profile: profile)
+        // Before the run record, the signals and the tick lock: nothing is created for a
+        // profile that belongs to another product.
+        if let refusal = CollectRouter.proRunRefusal(
+            profile: profile, operation: "Collect", config: config) {
+            CLIRun.fail(refusal)
+        }
         try await CLIRun.exclusively {
             // Trust signals — a CLI collect now records to Run History, evaluates
             // metric alerts, and posts the notify digest exactly like a snapshot-only

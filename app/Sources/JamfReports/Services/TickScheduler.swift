@@ -253,13 +253,14 @@ final class TickLockHold: @unchecked Sendable {
     }
 
     /// Runs `body` while touching the lock every `interval`; beats stop after `limit`, which
-    /// releases the lock (see `heartbeat`). Stopped before returning.
+    /// releases the lock and calls `onGiveUp` (see `heartbeat`). Stopped before returning.
     func keepingAlive<T: Sendable>(
         every interval: Duration = TickLock.heartbeatInterval,
         limit: Duration = TickLock.heartbeatLimit,
+        onGiveUp: (@Sendable () -> Void)? = nil,
         _ body: () async -> T
     ) async -> T {
-        let beats = heartbeat(every: interval, limit: limit)
+        let beats = heartbeat(every: interval, limit: limit, onGiveUp: onGiveUp)
         let result = await body()
         beats.cancel()
         await beats.value
@@ -269,11 +270,13 @@ final class TickLockHold: @unchecked Sendable {
     /// `keepingAlive`'s beats, for a holder whose body runs on the main actor and so cannot
     /// be handed over: touches the lock every `interval` until cancelled. At `limit` it gives
     /// up the lock instead: no real run lasts that long, and a wedged live holder must not
-    /// silence the ticker for good. The limit counts awake time only (`SuspendingClock`): a
+    /// silence the ticker for good. `onGiveUp` runs right after the release, for a holder that is
+    /// its own process and must not outlive its lock (the tick exits). The limit counts awake time only (`SuspendingClock`): a
     /// Mac that slept through the run must not give the lock up while the run goes on.
     func heartbeat(
         every interval: Duration = TickLock.heartbeatInterval,
-        limit: Duration = TickLock.heartbeatLimit
+        limit: Duration = TickLock.heartbeatLimit,
+        onGiveUp: (@Sendable () -> Void)? = nil
     ) -> Task<Void, Never> {
         Task.detached(priority: .utility) { [self] in
             let clock = SuspendingClock()
@@ -284,6 +287,7 @@ final class TickLockHold: @unchecked Sendable {
                 guard clock.now < deadline else {
                     AppLogger.schedule.warning("tick lock given up: the run passed its time limit")
                     release()
+                    onGiveUp?()
                     return
                 }
                 touch()

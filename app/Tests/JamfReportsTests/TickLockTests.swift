@@ -84,6 +84,26 @@ final class TickLockTests: XCTestCase {
         next.release()
     }
 
+    /// A tick must not outlive its lock: the caller's hook runs after the lock is released.
+    func testGivingUpTheLockRunsTheCallersHookAfterTheRelease() async throws {
+        let lock = TickLock(url: lockURL())
+        let hold = try XCTUnwrap(lock.claimedHold(pid: 100))
+        let seen = LockedFlag()
+        let beats = hold.heartbeat(
+            every: .milliseconds(10), limit: .milliseconds(50),
+            onGiveUp: { seen.set(!hold.isHeld) })
+        await beats.value
+        XCTAssertTrue(seen.value, "the hook ran, and the lock was already given up")
+        // A run that finishes inside its limit never reaches the hook.
+        let second = try XCTUnwrap(lock.claimedHold(pid: 7))
+        defer { second.release() }
+        let calledEarly = LockedFlag()
+        _ = await second.keepingAlive(
+            every: .milliseconds(10), limit: .seconds(60), onGiveUp: { calledEarly.set(true) }
+        ) { () async -> Int in 1 }
+        XCTAssertFalse(calledEarly.value)
+    }
+
     func testALockFileThatIsASymlinkIsRefused() throws {
         let target = lockURL()
         try Data("untouched".utf8).write(to: target)
@@ -423,4 +443,11 @@ final class TickLockTests: XCTestCase {
         XCTAssertLessThan(abs(modified.timeIntervalSince(old)), 1,
                           "a wedged run must stop refreshing the lock once the limit passes")
     }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = false
+    func set(_ value: Bool) { lock.withLock { stored = value } }
+    var value: Bool { lock.withLock { stored } }
 }

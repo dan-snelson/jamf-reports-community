@@ -76,7 +76,7 @@ func runTick(
         clearRunNowMarker: { TickRunner.clearRunNowMarker(label: $0) },
         perform: { run in
             hold.touch()
-            return await hold.keepingAlive {
+            return await hold.keepingAlive(onGiveUp: { exitAfterLockGiveUp(profiles: profiles) }) {
                 // A same-day retry must not be answered by the once-a-day collect guard.
                 await ReportEngine.$isSameDayRetry.withValue(run.reason == .retry) {
                     await runSchedule(run.schedule, verbose: false)
@@ -89,7 +89,7 @@ func runTick(
         // reported overdue by the same process. Inside the heartbeat like the runs, so a slow
         // webhook send cannot let the lock read as stale.
         notifyOverdue: {
-            await hold.keepingAlive {
+            await hold.keepingAlive(onGiveUp: { exitAfterLockGiveUp(profiles: profiles) }) {
                 await notifyOverdueSchedulesHeadless(
                     profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
             }
@@ -114,6 +114,20 @@ func summaryMissing(for schedule: Schedule, profiles: [JamfCLIProfile], now: Dat
         ProfileProductType.detect(from: collectRoutingConfig(profile: name), profile: name)
             .type == .jamfPro && !SummaryJSONParser.hasSummary(profile: name, on: now)
     }
+}
+
+/// The heartbeat gave the lock up after `TickLock.heartbeatLimit`, so a call that never
+/// answered is still running with no lock. The next wake would start a second run beside it, so
+/// the process ends, which ends the call; the run's own record is left without a footer and
+/// reads as interrupted, and this adds the reason to every workspace's Run History.
+private func exitAfterLockGiveUp(profiles: [JamfCLIProfile]) {
+    let message = "a run passed the tick lock's \(TickLock.heartbeatLimit.components.seconds / 3600)"
+        + "-hour limit and was stopped so it cannot run beside the next wake"
+    reportTickError(message)
+    let failures = TickFailureLog(profiles: profiles)
+    failures.recordInEveryWorkspace(message)
+    failures.finish()
+    exit(1)
 }
 
 private func saveLastTick(_ state: TickState) {

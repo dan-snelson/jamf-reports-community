@@ -479,7 +479,7 @@ golden command-line test from 3.3 runs in every phase from P1.
 
 | # | PR | Tests |
 |---|---|---|
-| P1 | `ProfilesConfig` decode, `EnvironmentProfiles.resolve` with legacy derivation. Replaces `ConnectedProducts` and the Protect, School and `jamf_cli.profile` reads in `CollectRouter` and `ProfileProductType.detect` | One test per old shape in 3.3. Golden test: identical command lines for each shape |
+| P1 | `ProfilesConfig` decode, `EnvironmentProfiles.resolve` with legacy derivation. Replaces `ConnectedProducts` and the Protect, School and `jamf_cli.profile` reads in `CollectRouter` and `ProfileProductType.detect`. Documents `profiles:` in config.example.yaml (CLAUDE.md: a key is documented in the change that adds its reader) | One test per old shape in 3.3. Golden test: identical command lines for each shape |
 | P2 | `WorkspaceID`. `ReportEngine.workspace` for folders, per-family profiles for `-p`. `profileMismatch` removed. Schedules, report groups, pins and Run History renamed to workspace, same values | Folders from the workspace ID, `-p` from the slot. A schedule record with the old JSON key decodes. Golden test still green |
 | P3 | Collect across products: `collectCommandMatrix` per family, `[plan]` lines, per-product verdicts, add-on products follow the environment gate, finalize once, `collect_skip` for whole products | Stub jamf-cli through the `locateJamfCLI` seam (not named `jamf-cli`): MDM auth-dead and Protect still runs; stand-down stops all; Platform kinds skipped with no `platform`; host mismatch skips Platform kinds |
 | P4 | Data Sources Environment card, `ProfilesConfigWriter`, retired keys dropped on save, pin coverage and seeding, Doctor rows (`two_mdms`, `profile_shared`, `platform_host`, retired keys) | Writer keeps comments outside the block and backs up. Pin drift on a peer edit. Protect pin seeding. Each Doctor row. Needs visual verification at `PageScaffold.minSupportedWidth` |
@@ -491,14 +491,14 @@ golden command-line test from 3.3 runs in every phase from P1.
 | P10 | New collection: `computer-storage` reduced kind, mobile storage and battery readers, the App Installers kind | Fixtures taken from real jamf-cli output, never written by hand from documentation. The reducer drops every field outside the allow-list |
 | P11 | Fleet view: selector, tiles, environment rows, `FleetRollup` for the new fields | Device-weighted percentages, "N of M environments", no cross-product totals, mixed-date note. Needs visual verification |
 | P12 | Security Cloud: `security_cloud` slot setup, Radar collect, gateway half on `platform` | Blocked on a tenant (#283). Plugs into P3, P4 and P9 |
-| P13 | Docs: wiki (Data Sources, Getting Started, Automation, Security), README, config.example.yaml, CLAUDE.md/AGENTS.md, CHANGELOG | — |
+| P13 | Docs: wiki (Data Sources, Getting Started, Automation, Security), README, CLAUDE.md/AGENTS.md, CHANGELOG | — |
 
 Order: P1 → P2 → P3. P4 needs P2. P5, P6 and P7 need P4. P8 needs P3. P9 needs P8. P10 can
 start after P1. P11 needs P9 and P10.
 
-## 14. Decisions still needed
+## 14. Decisions
 
-Each has one recommendation.
+All 14 recommendations were accepted on 2026-10-19.
 
 | # | Decision | Recommendation |
 |---|---|---|

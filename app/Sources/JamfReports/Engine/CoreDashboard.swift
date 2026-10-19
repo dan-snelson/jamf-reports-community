@@ -104,12 +104,12 @@ struct CoreDashboard: Sendable {
             ("DDM Device Status", writeDDMDeviceStatus),
             ("MDM Command Health", writeMDMCommandHealth),
             // --- Protect (sheets 35–40, optional) ---
-            ("Protect Overview", writeProtectOverview),
-            ("Protect Alerts", writeProtectAlerts),
-            ("Protect Computers", writeProtectComputers),
-            ("Protect Insights", writeProtectInsights),
-            ("Protect Plans", writeProtectPlans),
-            ("Protect Threat Overview", writeProtectThreatOverview),
+            ("Protect Overview", gatedOnProtect(writeProtectOverview)),
+            ("Protect Alerts", gatedOnProtect(writeProtectAlerts)),
+            ("Protect Computers", gatedOnProtect(writeProtectComputers)),
+            ("Protect Insights", gatedOnProtect(writeProtectInsights)),
+            ("Protect Plans", gatedOnProtect(writeProtectPlans)),
+            ("Protect Threat Overview", gatedOnProtect(writeProtectThreatOverview)),
             // --- Parity / detail sheets (sheets 41–44) ---
             ("Patch Summary Dashboard", writePatchSummaryDashboard),
             ("Patch Velocity", writePatchVelocity),
@@ -121,6 +121,16 @@ struct CoreDashboard: Sendable {
             ("mSCP Compliance", writeMSCPCompliance),
             ("Compliance Trend", writeComplianceTrend),
         ]
+    }
+
+    /// A Protect tab is written only while protect.enabled is on, as in the HTML report: a
+    /// workspace that turned Protect off keeps its old `protect-*` snapshots on disk.
+    private func gatedOnProtect(_ write: @escaping () throws -> Void) -> () throws -> Void {
+        let enabled = config.protect?.isEnabled == true
+        return {
+            guard enabled else { throw CoreDashboardError.protectDisabled }
+            try write()
+        }
     }
 
     // MARK: - Sheet title helper
@@ -3733,9 +3743,12 @@ struct CoreDashboard: Sendable {
 
 enum CoreDashboardError: Error, LocalizedError, SheetSkippable {
     case noCachedData(names: [String])
+    case protectDisabled
 
     var errorDescription: String? {
         switch self {
+        case .protectDisabled:
+            return "protect.enabled is off"
         case .noCachedData(let names):
             return "No cached jamf-cli snapshot found for: \(names.joined(separator: ", "))"
         }

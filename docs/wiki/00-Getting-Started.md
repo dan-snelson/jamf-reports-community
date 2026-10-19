@@ -37,9 +37,8 @@ dedicated path that skips the Jamf Pro Authenticate and Validate steps and conne
 Jamf School tenant (Network ID + API key) directly, then routes reports to the Jamf School
 engine (see [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School)).
 jamf-cli still has to be *installed* to pass the Install CLI step (a free Homebrew binary,
-no Jamf Pro server access needed), but you never enter Jamf Pro credentials. Jamf School
-support ships community-validated — the maintainer has no Jamf School tenant to test
-against, so please report anything that looks off.
+no Jamf Pro server access needed), but you never enter Jamf Pro credentials. If anything in
+Jamf School support looks off, please report it.
 
 **No CSV mode.** Reports are built from jamf-cli data. The CSV report mode, the CSV
 mapping step and the `csv-inbox` folder were retired in 2.11; see

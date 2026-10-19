@@ -39,8 +39,7 @@ later collect route to the Jamf School engine. `jamf-cli` must still be installe
 the Install CLI step (a free Homebrew binary, no server access needed), but you never enter
 Jamf Pro credentials.
 
-Jamf School support ships community-validated — the maintainer has no Jamf School tenant to
-test against. If you run Jamf School, please
+If you run Jamf School, please
 [open an issue or pull request](https://github.com/tonyyo11/jamf-reports-community/issues)
 with feedback.
 

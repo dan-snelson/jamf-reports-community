@@ -744,7 +744,7 @@ struct OnboardingView: View {
                     }
 
                     InlineBanner(icon: "info.circle.fill", tone: .info) {
-                        Text("Jamf School support ships community-validated — the maintainer has no Jamf School tenant to test against. If something looks off, please open an issue or pull request.")
+                        Text("If something in Jamf School support looks off, please open an issue or pull request.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Colors.fg2)
                             .fixedSize(horizontal: false, vertical: true)

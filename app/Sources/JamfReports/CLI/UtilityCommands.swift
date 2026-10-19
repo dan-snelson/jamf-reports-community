@@ -214,7 +214,7 @@ struct Device: AsyncParsableCommand {
 struct SchoolCheck: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "school-check",
-        abstract: "Validate a Jamf School profile (community-feedback-driven; provided as-is)."
+        abstract: "Validate a Jamf School profile."
     )
     @Option(help: "Workspace profile slug.") var profile: String
 

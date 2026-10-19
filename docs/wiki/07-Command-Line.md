@@ -142,9 +142,7 @@ A few behaviors worth knowing:
 
 ### Jamf School commands
 
-`school-check` is a first-class command, but it ships **untested** — the
-maintainer has no Jamf School tenant to validate against. If you run Jamf School,
-please try it and
+`school-check` is a first-class command. If you run Jamf School, please
 [open an issue or pull request](https://github.com/tonyyo11/jamf-reports-community/issues)
 with feedback.
 

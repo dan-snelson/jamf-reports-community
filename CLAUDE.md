@@ -1288,8 +1288,7 @@ async root (they print help and exit 0). The `@available` wrapper supplies the
 context that makes the async overloads win. `JamfReportsCLI` carries the same
 annotation.
 
-**The School command ships untested** — `school-check` is first-class but
-unvalidated (no Jamf School tenant); it invites community feedback.
+`school-check` is first-class; School feedback comes through GitHub issues.
 `school-scaffold` was removed after 2.8.0: the `school_columns` block it wrote had
 no reader. Install the `jamf-reports` symlink via `CLIInstaller` (Settings →
 "Command-line tool"). User guide: `docs/wiki/07-Command-Line.md`.

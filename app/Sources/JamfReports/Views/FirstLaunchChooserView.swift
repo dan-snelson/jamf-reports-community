@@ -117,7 +117,7 @@ struct FirstLaunchChooserView: View {
             chooserCard(
                 icon: "graduationcap.fill",
                 title: "Connect Jamf School",
-                body: "Sets up a Jamf School-only workspace — jamf-cli auth with your Network ID and API key, then reports from Jamf School data. Ships community-validated.",
+                body: "Sets up a Jamf School-only workspace — jamf-cli auth with your Network ID and API key, then reports from Jamf School data.",
                 pills: [
                     ("API key", "key.fill", Pill.Tone.teal),
                     ("K-12 / EDU", "building.columns", Pill.Tone.muted),

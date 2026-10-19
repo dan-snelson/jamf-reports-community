@@ -4,6 +4,18 @@ import Foundation
 /// the Platform API or Jamf School, Jamf Protect added to the current workspace, and the jamf-cli
 /// profiles no workspace uses. Pure; `AddSheetDiscovery.load` supplies the disk and jamf-cli facts.
 enum AddSheetPlan {
+    /// What the sheet says once Set up workspace finished for `name`: the workspace exists, so
+    /// the row leaves the list, and a first collect that failed must be said here instead.
+    static func adoptionOutcome(
+        name: String, status: ExistingCLISetupFlow.ProfileStatus?
+    ) -> (message: String?, error: String?) {
+        if case .failed(let reason) = status {
+            return (nil, "\(name)'s workspace was created, but its first collect failed "
+                + "(\(reason)). Fix the cause, then collect from that workspace.")
+        }
+        return ("\(name) is set up. Switch to it from the workspace menu.", nil)
+    }
+
     enum Choice: Equatable, Sendable {
         case newWorkspace
         case addToCurrent

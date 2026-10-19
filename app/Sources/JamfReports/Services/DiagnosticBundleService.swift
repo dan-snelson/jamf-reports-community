@@ -164,7 +164,6 @@ final class DiagnosticRedactor {
         }
         // Before the serial pattern, which would otherwise cut a UUID's last segment out of it.
         out = redactScopeIDs(in: out)
-        out = redactWorkspaceNames(in: out)
         if redactHostnames {
             out = replaceMatches(hostnameURLRE, in: out) { g in
                 (g[1] ?? "") + self.placeholder("host", g[2] ?? "")
@@ -180,6 +179,9 @@ final class DiagnosticRedactor {
                 }
             }
         }
+        // After the hosts: a profile named after a label of its server (`jamf`, for
+        // `jamf.agency.gov`) would otherwise break the host match and leave the domain.
+        out = redactWorkspaceNames(in: out)
         // `ip` has no keep-flag, like the key-based rule and the seeded literals.
         out = replaceMatches(ipv4RE, in: out) { g in self.placeholder("ip", g[0] ?? "") }
         for re in [phoneE164RE, phoneNANPRE] {

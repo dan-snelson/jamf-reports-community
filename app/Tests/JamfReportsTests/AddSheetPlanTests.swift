@@ -17,6 +17,20 @@ final class AddSheetPlanTests: XCTestCase {
             profiles: profiles, workspaces: workspaces, paired: paired, unusable: unusable)
     }
 
+    // MARK: - Adoption outcome
+
+    func testAFailedFirstCollectIsReportedNotCalledSetUp() {
+        let failed = AddSheetPlan.adoptionOutcome(
+            name: "alpha", status: .failed("collect exited 3"))
+        XCTAssertNil(failed.message)
+        XCTAssertEqual(failed.error, "alpha's workspace was created, but its first collect "
+            + "failed (collect exited 3). Fix the cause, then collect from that workspace.")
+
+        let done = AddSheetPlan.adoptionOutcome(name: "alpha", status: .done)
+        XCTAssertEqual(done.message, "alpha is set up. Switch to it from the workspace menu.")
+        XCTAssertNil(done.error)
+    }
+
     // MARK: - Unassigned profiles
 
     func testProfilesWithAWorkspaceOrNamedByOneAreLeftOut() {

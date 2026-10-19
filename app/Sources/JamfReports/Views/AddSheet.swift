@@ -474,7 +474,8 @@ struct AddSheet: View {
             return
         }
         workspace.reloadFromDisk()
-        message = "\(row.name) is set up. Switch to it from the workspace menu."
+        (message, errorText) = AddSheetPlan.adoptionOutcome(
+            name: row.name, status: flow.statuses[row.name])
         await recheck()
     }
 

@@ -82,6 +82,15 @@ final class SchoolFleetServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.collectedAt, snapshot.depDate)
     }
 
+    /// A count of 0 or 1 printed as a JSON number is a number, not a boolean.
+    func test_overviewNumbersZeroAndOneReadAsText() throws {
+        let rows = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data("""
+        [{"resource":"iBeacons","value":0},{"resource":"Classes","value":1},
+         {"resource":"Flag","value":true}]
+        """.utf8)) as? [[String: Any]])
+        XCTAssertEqual(rows.compactMap(SchoolFleetService.overviewRow).map(\.value), ["0", "1", ""])
+    }
+
     func test_platformCounts_largestFirst() {
         var snapshot = SchoolFleetService.Snapshot()
         snapshot.devices = ["iOS 27", "iPadOS 27", "iPadOS 26", "macOS 26"].enumerated().map {

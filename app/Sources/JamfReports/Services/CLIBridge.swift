@@ -1096,11 +1096,13 @@ final class CLIBridge {
     }
 
     /// The refusal, after one `[error]` line, when `profile` is a Jamf School (API-key)
-    /// profile: no `pro` command may run against it. Nil for any other profile.
+    /// profile: no `pro` command may run against it. Nil for any other profile. The lookup
+    /// runs `jamf-cli config list`, so it runs detached: most callers are on the main actor.
     nonisolated static func refusesProCommand(
-        profile: String, operation: String, onLine: (@Sendable (LogLine) -> Void)?
-    ) -> String? {
-        guard usesAPIKey(profile: profile) else { return nil }
+        profile: String, operation: String, onLine: (@Sendable (LogLine) -> Void)?,
+        isSchoolProfile: @escaping @Sendable (String) -> Bool = { CLIBridge.usesAPIKey(profile: $0) }
+    ) async -> String? {
+        guard await Task.detached(operation: { isSchoolProfile(profile) }).value else { return nil }
         let refusal = "\(operation) is a Jamf Pro command; '\(profile)' is a Jamf School profile"
         onLine?(.init(timestamp: Date(), level: .fail, text: "[error] \(refusal)"))
         return refusal
@@ -1296,7 +1298,7 @@ final class CLIBridge {
             AppLogger.cli.warning("device detail: rejecting leading-dash identifier")
             return nil
         }
-        if Self.refusesProCommand(
+        if await Self.refusesProCommand(
             profile: profile, operation: "Device lookup", onLine: onLine
         ) != nil {
             return nil
@@ -1454,7 +1456,7 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] invalid profile name: \(profile)"))
             throw CLIBridgeError.invalidProfile(profile)
         }
-        if let refusal = Self.refusesProCommand(
+        if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Backup diff", onLine: onLine
         ) {
             throw CLIBridgeError.invalidArgument(refusal)
@@ -1723,7 +1725,7 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] audit category may not start with '-'"))
             throw CLIBridgeError.invalidArgument("audit category may not start with '-'")
         }
-        if let refusal = Self.refusesProCommand(
+        if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Health audit", onLine: onLine
         ) {
             throw CLIBridgeError.invalidArgument(refusal)
@@ -1762,7 +1764,7 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] invalid profile name: \(profile)"))
             throw CLIBridgeError.invalidProfile(profile)
         }
-        if let refusal = Self.refusesProCommand(
+        if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Group analysis", onLine: onLine
         ) {
             throw CLIBridgeError.invalidArgument(refusal)
@@ -1871,7 +1873,7 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] backup label may not start with '-'"))
             throw CLIBridgeError.invalidArgument("backup label may not start with '-'")
         }
-        if let refusal = Self.refusesProCommand(
+        if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Backup", onLine: onLine
         ) {
             throw CLIBridgeError.invalidArgument(refusal)

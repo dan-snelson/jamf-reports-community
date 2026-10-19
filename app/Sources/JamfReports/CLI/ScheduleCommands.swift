@@ -19,8 +19,16 @@ struct Schedules: AsyncParsableCommand {
             for r in records {
                 let target = r.allProfiles ? "all-profiles" : r.profile
                 let flag = r.enabled ? "" : " (disabled)"
-                print("\(r.label)\t\(target)\t\(r.mode)\t\(r.schedule)\(flag)")
+                print("\(r.label)\t\(target)\t\(Self.effectiveMode(of: r))\t\(r.schedule)\(flag)")
             }
+        }
+
+        /// The mode a run uses: a pre-2.11 csv-assisted record runs as jamf-cli-full. An
+        /// unknown future mode prints as stored.
+        static func effectiveMode(of record: ScheduleRecord) -> String {
+            guard let mode = Schedule.RunMode(stored: record.mode) else { return record.mode }
+            return record.mode == Schedule.RunMode.retiredCSVAssistedRaw
+                ? "\(mode.rawValue) (was \(record.mode))" : mode.rawValue
         }
     }
 
@@ -56,11 +64,17 @@ struct Schedules: AsyncParsableCommand {
             }
             _ = try LaunchAgentWriter.calendarIntervals(for: cadence)
             // A schedule for a base profile of another product would only ever be skipped.
-            if !allProfiles, runMode != .jamfCLIOnly, let refusal = CollectRouter.proRunRefusal(
-                profile: profile, operation: "A \(runMode.rawValue) schedule",
-                config: collectRoutingConfig(profile: profile)
-            ) {
-                throw Invalid(description: refusal)
+            if !allProfiles, runMode != .jamfCLIOnly {
+                let config = collectRoutingConfig(profile: profile)
+                // A School workspace collects and generates, but has nothing for `pro backup`.
+                if runMode == .backup,
+                   ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
+                    throw Invalid(description: CollectRouter.schoolBackupReason(profile: profile)
+                        + "; there is nothing to back up")
+                }
+                if let refusal = CollectRouter.proRunRefusal(
+                    profile: profile, operation: "A \(runMode.rawValue) schedule", config: config
+                ) { throw Invalid(description: refusal) }
             }
             let tierSet: Set<CollectionTier>? = tiers.map(CLIRun.parseTiers)
             let excluded = exclude?.split(separator: ",")

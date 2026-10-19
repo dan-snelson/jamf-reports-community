@@ -2,11 +2,19 @@ import ArgumentParser
 import Foundation
 
 struct Backup: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Back up Jamf Pro config objects for a profile.")
+    static let configuration = CommandConfiguration(abstract: "Back up a Jamf Pro profile's config objects, and Jamf Protect too when connected. "
+            + "Refuses a Jamf School or other-product profile.")
     @Option(help: "Workspace profile slug.") var profile: String
+
+    static func refusal(profile: String) -> String? {
+        CollectRouter.backupRefusal(profile: profile, config: collectRoutingConfig(profile: profile))
+    }
 
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
+        // Before the tick lock and before anything is written, once: the bridge would print
+        // the same refusal and ArgumentParser would print it again as an error.
+        if let refusal = Self.refusal(profile: profile) { CLIRun.fail(refusal) }
         let code = try await CLIRun.exclusively { () -> Int32 in
             let bridge = await MainActor.run { CLIBridge() }
             // Label like the GUI/scheduled path so a cron'd `backup` participates in
@@ -191,13 +199,19 @@ struct DiagnosticBundleCommand: AsyncParsableCommand {
 }
 
 struct Device: AsyncParsableCommand {
-    static let configuration =
-        CommandConfiguration(abstract: "Look up one device by serial number or id.")
+    static let configuration = CommandConfiguration(
+        abstract: "Look up one device by serial number or id. Refuses a profile of another product.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Device serial number or id.") var id: String
 
+    /// No onLine: `CLIRun.fail` is the one place the text is printed.
+    static func refusal(profile: String) async -> String? {
+        await CLIBridge.refusesProCommand(profile: profile, operation: "Device lookup", onLine: nil)
+    }
+
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
+        if let refusal = await Self.refusal(profile: profile) { CLIRun.fail(refusal) }
         let bridge = await MainActor.run { CLIBridge() }
         guard let result = await bridge.deviceDetailWithProvenance(
             profile: profile, deviceID: id, onLine: CLIRun.printLogLine) else {
@@ -214,7 +228,7 @@ struct Device: AsyncParsableCommand {
 struct SchoolCheck: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "school-check",
-        abstract: "Validate a Jamf School profile."
+        abstract: "Validate a Jamf School workspace. Refuses a profile that is not one."
     )
     @Option(help: "Workspace profile slug.") var profile: String
 

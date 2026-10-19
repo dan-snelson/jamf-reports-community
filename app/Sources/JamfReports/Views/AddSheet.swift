@@ -218,8 +218,7 @@ struct AddSheet: View {
     }
 
     private func productCard(_ product: AddSheetPlan.NewProduct) -> some View {
-        let highlighted = product == requested
-        return VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
             productIcon(product.icon, size: 36)
             Text(product.title).font(.headline).foregroundStyle(Theme.Colors.fg)
             Text(product.summary)
@@ -227,8 +226,7 @@ struct AddSheet: View {
                 .foregroundStyle(Theme.Colors.fg2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            PNPButton(title: "Connect new", icon: "arrow.right",
-                      style: highlighted ? .gold : .neutral, size: .sm) {
+            PNPButton(title: "Connect new", icon: "arrow.right", size: .sm) {
                 startOnboarding(product)
             }
             .disabled(isAdopting)
@@ -237,9 +235,7 @@ struct AddSheet: View {
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
         .background(Theme.Colors.winBG2, in: RoundedRectangle(cornerRadius: 10))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(highlighted ? Theme.Colors.gold : Theme.Colors.hairlineStrong,
-                              lineWidth: highlighted ? 2 : 1))
+            RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.Colors.hairlineStrong))
     }
 
     private func startOnboarding(_ product: AddSheetPlan.NewProduct) {

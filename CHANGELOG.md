@@ -107,6 +107,17 @@ versions in this repository map to git tags.
 - Dates are read the same way in every report. A date that cannot be read now shows as
   Unknown or a dash instead of 0 or -1 days, and a Jamf School device with an unreadable
   check-in is no longer listed as stale on the Stale Devices tab.
+- Jamf Reports no longer runs a Jamf Pro (`pro`) command against a Jamf School profile.
+  Generate with Include Health Audit ticked skips the audit for the School template, and the
+  health audit, group analysis, backup, backup diff and device lookup refuse a School profile
+  with one line saying why, instead of a failed jamf-cli call.
+- A Jamf School workspace no longer shows "Auth may be expired" in Generate or "Token: not
+  authenticated" in Settings. School signs in with an API key, which has no token to check.
+- `jamf-reports generate` and scheduled report runs on a Jamf School workspace now write the
+  School workbook. They used to write an empty Jamf Pro workbook. `jamf-reports html` now says a
+  School workspace has no HTML report instead of writing an empty one.
+- A new Jamf School workspace's first report now collects before it writes the workbook. It
+  used to write a workbook with no sheets.
 
 ### Removed
 
@@ -160,6 +171,9 @@ versions in this repository map to git tags.
   run or the backup prune. (#284)
 - A backup manifest with an out-of-range Jamf Protect object count no longer crashes the Backups
   screen. A count that is not a whole number from 0 to 2,147,483,647 is ignored. (#284)
+- A diagnostic bundle now replaces the workspace (profile) name with a placeholder in every
+  file and in the file names, the zip's own name included, since the name is often the
+  organisation's.
 
 ## [2.10.1] - 2026-10-17
 

@@ -98,11 +98,15 @@ final class GenerateSheetRequestTests: XCTestCase {
     /// School has its own workbook generator and no narrative; its HTML and PDF still take the
     /// School template's sections, not Full Instance's.
     func testSchoolUsesTheSchoolGeneratorWithoutANarrative() {
+        UserDefaults.standard.removeObject(forKey: GenerateSheetState.includeAuditKey)
+        defer { UserDefaults.standard.removeObject(forKey: GenerateSheetState.includeAuditKey) }
         let state = GenerateSheetState()
+        state.includeAudit = true
         state.selectedTemplateID = SchoolTemplate().identifier
         var request = state.request()
         XCTAssertTrue(request.schoolMode)
         XCTAssertFalse(request.asksForNarrative)
+        XCTAssertFalse(request.runsAudit, "pro audit cannot run against a School profile")
         XCTAssertEqual(request.template.identifier, SchoolTemplate().identifier)
         state.selectedTemplateID = FullInstanceTemplate().identifier
         request = state.request()

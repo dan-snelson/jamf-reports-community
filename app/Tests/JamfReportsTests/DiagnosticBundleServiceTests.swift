@@ -471,6 +471,43 @@ final class DiagnosticBundleServiceTests: XCTestCase {
         XCTAssertTrue(log.contains("Environment 'org-"), "got: \(log)")
     }
 
+    /// The profile name is often the organisation's: no file name or content keeps it.
+    func testBuildBundleReplacesTheWorkspaceNameEverywhere() throws {
+        let workspace = try makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace.root) }
+        let label = "com.example.reports.Acme-School.cli-collect.20261019-120000.log"
+        try ("[info] routing Acme-School → Jamf School collect\n"
+            + "keychain:jamf-cli/Acme-School/api-key\n")
+            .write(to: workspace.sources.logsDir.appendingPathComponent(label),
+                   atomically: true, encoding: .utf8)
+        var sources = workspace.sources
+        sources.cliProfile = "Acme-School"
+        let folderName = sources.workspaceName
+        let outputDir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+
+        let zip = try DiagnosticBundleService.buildBundle(
+            sources: sources, outputDir: outputDir,
+            profileSlug: "acme-school", options: .init(), now: Date())
+        XCTAssertFalse(zip.lastPathComponent.lowercased().contains("acme"), zip.lastPathComponent)
+        let extracted = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: extracted) }
+        try unzip(zip, into: extracted)
+
+        let files = FileManager.default.enumerator(at: extracted, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL } ?? []
+        let logs = files.filter { $0.path.contains("/logs/") && $0.path.contains("cli-collect") }
+        XCTAssertEqual(logs.count, 1, "the label's profile part is replaced, not the rest")
+        for file in files where !file.hasDirectoryPath {
+            XCTAssertFalse(file.lastPathComponent.lowercased().contains("acme"), file.path)
+            let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+            XCTAssertFalse(text.lowercased().contains("acme-school"), file.lastPathComponent)
+            XCTAssertFalse(text.contains(folderName), file.lastPathComponent)
+        }
+        let log = try String(contentsOf: try XCTUnwrap(logs.first), encoding: .utf8)
+        XCTAssertTrue(log.contains("routing workspace-"), log)
+    }
+
     /// The bundle's log pass matches `LogRedactor.redactedForSharing`: the log redactor
     /// first, then the bundle redactor.
     func testBuildBundleLogsGetBothRedactionPasses() throws {

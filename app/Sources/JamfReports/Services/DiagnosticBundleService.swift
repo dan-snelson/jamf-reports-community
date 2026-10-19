@@ -51,6 +51,7 @@ final class DiagnosticRedactor {
     private var seededRegexes: [String: [NSRegularExpression]] = [:]
     private var scopeIDRegex: NSRegularExpression?
     private var serverHostRegex: NSRegularExpression?
+    private var workspaceNameRegex: NSRegularExpression?
 
     private let secretPatterns: [(NSRegularExpression, String)]
     private let hostnameURLRE: NSRegularExpression
@@ -163,6 +164,7 @@ final class DiagnosticRedactor {
         }
         // Before the serial pattern, which would otherwise cut a UUID's last segment out of it.
         out = redactScopeIDs(in: out)
+        out = redactWorkspaceNames(in: out)
         if redactHostnames {
             out = replaceMatches(hostnameURLRE, in: out) { g in
                 (g[1] ?? "") + self.placeholder("host", g[2] ?? "")
@@ -254,13 +256,31 @@ final class DiagnosticRedactor {
     /// Registers the profile's configured Jamf server (`host:port` and `host`) to remove
     /// wherever it appears, with or without a scheme. Applied only while hostname redaction is on.
     func seedServerHosts(_ hosts: [String]) {
-        let literals = Set(hosts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
-            .filter { $0.count >= Self.minSeedLen }
+        serverHostRegex = Self.boundedLiteralRegex(hosts)
+    }
+
+    /// Registers the workspace's profile name, as typed and as the app writes it in folder,
+    /// label and file names. It is often the organisation's name, so it is removed wherever it
+    /// appears, file names included.
+    func seedWorkspaceNames(_ names: [String]) {
+        workspaceNameRegex = Self.boundedLiteralRegex(names)
+    }
+
+    func redactWorkspaceNames(in text: String) -> String {
+        guard let workspaceNameRegex else { return text }
+        return replaceMatches(workspaceNameRegex, in: text) { g in
+            self.placeholder("workspace", (g[0] ?? "").lowercased())
+        }
+    }
+
+    /// Any of `literals` (4 characters or more), in any case, not inside a longer name.
+    private static func boundedLiteralRegex(_ literals: [String]) -> NSRegularExpression? {
+        let kept = Set(literals.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .filter { $0.count >= minSeedLen }
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 }
-        serverHostRegex = literals.isEmpty ? nil : Self.mustCompile(
+        return kept.isEmpty ? nil : mustCompile(
             "(?<![A-Za-z0-9-])(?:"
-                + literals.map { NSRegularExpression.escapedPattern(for: $0) }
-                    .joined(separator: "|")
+                + kept.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
                 + ")(?![A-Za-z0-9-])",
             [.caseInsensitive])
     }
@@ -714,6 +734,12 @@ enum DiagnosticBundleService {
         redactor?.seedFromWorkspace(sources.dataDir)
         redactor?.seedScopeIDs(sources.scopeIDs)
         redactor?.seedServerHosts(sources.serverHosts)
+        if !sources.cliProfile.isEmpty {
+            redactor?.seedWorkspaceNames(
+                [sources.cliProfile, sources.workspaceName, profileSlug]
+                    + [ProfileName.pathComponent, ProfileName.labelComponent]
+                        .map { $0(sources.cliProfile) })
+        }
 
         let entries = try stageFiles(
             sources: sources, into: staging, redactor: redactor, options: options, now: now)
@@ -723,8 +749,9 @@ enum DiagnosticBundleService {
             withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         try manifestData.write(to: staging.appendingPathComponent("manifest.json"))
 
+        let zipSlug = redactor?.redactWorkspaceNames(in: profileSlug) ?? profileSlug
         let zipURL = outputDir.appendingPathComponent(
-            "jamf-reports-diagnostic-\(profileSlug)-\(stamp).zip")
+            "jamf-reports-diagnostic-\(zipSlug)-\(stamp).zip")
         try? fm.removeItem(at: zipURL)
         try archive(staging: staging, to: zipURL)
         // 0o600: zip holds potentially sensitive diagnostic content; restrict to
@@ -795,7 +822,8 @@ enum DiagnosticBundleService {
             if values?.isSymbolicLink == true { continue }
             guard values?.isRegularFile == true else { continue }
             if let mtime = values?.contentModificationDate, mtime < cutoff { continue }
-            let arcname = "logs/\(relativePath(of: url, under: logsDir))"
+            let relative = relativePath(of: url, under: logsDir)
+            let arcname = "logs/\(redactor?.redactWorkspaceNames(in: relative) ?? relative)"
             guard let data = try? Data(contentsOf: url) else {
                 entries.append(.skipped(path: arcname, reason: "could not read log"))
                 continue
@@ -1026,7 +1054,8 @@ enum DiagnosticBundleService {
         return [
             "schema_version": schemaVersion,
             "generated_at": iso8601(now),
-            "workspace": sources.workspaceName,
+            "workspace": redactor?.redactWorkspaceNames(in: sources.workspaceName)
+                ?? sources.workspaceName,
             "log_lookback_days": options.logLookbackDays,
             "summary_limit": options.summaryLimit,
             "redaction_policy": policy,

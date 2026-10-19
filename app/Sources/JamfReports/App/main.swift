@@ -488,24 +488,35 @@ private func scheduledRunSingleBody(
         defer { if holdsGenerateClaim { SharedWorkspace.release(profile: profile) } }
 
         let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
+        // A School workspace has no Jamf Pro snapshots: the Pro engine would write a
+        // workbook with every sheet skipped.
+        let isSchool = ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool
         let outputURL = try engine.resolveOutputURL(
-            stem: "report", profile: profile, onLine: onLine)
+            stem: ExportNaming.reportKind(for: .xlsx, schoolMode: isSchool),
+            profile: profile, onLine: onLine)
         // onLine only carries CLIBridge.LogLine progress during generate; per-sheet
         // [fail] lines are raw `print` calls in SheetRegistry and bypass both onLine
         // and the recorder — they reach the console/launchd log only, not Run History.
         let template = FullInstanceTemplate()
-        let failures = try await engine.generate(
-            outputURL: outputURL,
-            template: template,
-            onLine: onLine
-        )
+        let failures: [SheetFailure]
+        if isSchool {
+            failures = try await ReportEngine.schoolGenerate(
+                config: config, dataDir: dataDir, outputURL: outputURL, onLine: onLine)
+        } else {
+            failures = try await engine.generate(
+                outputURL: outputURL, template: template, onLine: onLine)
+        }
         if !failures.isEmpty {
             let partialMsg = partialRunMarker(sheetFailures: failures.count)
             recorder?.record(partialMsg)
         }
         // html.with_workbook: a failure is one [warn] line and leaves this run's result alone.
-        let htmlURL = await engine.writeHTMLWithWorkbook(
-            besideWorkbook: outputURL, template: template, onLine: onLine)
+        // There is no School HTML report.
+        var htmlURL: URL?
+        if !isSchool {
+            htmlURL = await engine.writeHTMLWithWorkbook(
+                besideWorkbook: outputURL, template: template, onLine: onLine)
+        }
         let message = "[ok] scheduled run complete for '\(profile)': \(outputURL.lastPathComponent)"
         print(message)
         recorder?.record(message)

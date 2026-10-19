@@ -838,6 +838,8 @@ struct OnboardingView: View {
                 }
             }
 
+            automationAndWebhookCard
+
             skipFinishCard
 
             logViewer(
@@ -845,6 +847,51 @@ struct OnboardingView: View {
                 lines: flow.firstReportOutput,
                 exitCode: flow.firstReportExitCode
             )
+        }
+    }
+
+    /// "Run automatically" (on by default) and the optional webhook, applied when setup
+    /// finishes, whether by the first report or by Skip & finish. Disabled in demo mode, where
+    /// finishing applies neither.
+    private var automationAndWebhookCard: some View {
+        let locked = flow.isRunningFirstReport || workspaceStore.demoMode
+        return Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Run automatically").font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.fg)
+                AutomationChoiceFields(choice: $flow.automation, isLocked: locked)
+                Divider().background(Theme.Colors.hairline)
+                Text("Webhook (optional)").font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.fg)
+                Text("Scheduled runs post digests and failure alerts to a Teams or Slack "
+                    + "incoming webhook. Leave empty to skip; change it anytime under "
+                    + "Automation › Notifications.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.fgMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Picker("Service", selection: $flow.webhookProvider) {
+                    ForEach(NotifyConfig.Provider.allCases, id: \.self) { provider in
+                        Text(provider == .teams ? "Microsoft Teams" : "Slack").tag(provider)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 260, alignment: .leading)
+                .disabled(locked)
+                TextField("https://...", text: $flow.webhookURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.body.monospaced())
+                    .frame(maxWidth: 420, alignment: .leading)
+                    .disabled(locked)
+                    .accessibilityLabel("Webhook URL")
+                if NotifyConfigWriter.showsInsecureURLWarning(enabled: true, url: flow.webhookURL) {
+                    Text("URL must start with https:// — it will not be saved.")
+                        .font(.footnote).foregroundStyle(Theme.Colors.warn)
+                }
+                if workspaceStore.demoMode {
+                    Text(DemoData.liveOnlyHelp)
+                        .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
+                }
+            }
         }
     }
 
@@ -905,12 +952,14 @@ struct OnboardingView: View {
     private func skipAndFinishOnboarding() {
         // Leave demo mode, through its cleanup, so the newly created real
         // profile replaces the demo; otherwise reload to pick it up.
-        flow.finishSetup(in: workspaceStore)
-        NotificationCenter.default.post(
-            name: .navigateToTab,
-            object: nil,
-            userInfo: ["tab": Tab.overview.rawValue]
-        )
+        Task {
+            await flow.finishSetup(in: workspaceStore)
+            NotificationCenter.default.post(
+                name: .navigateToTab,
+                object: nil,
+                userInfo: ["tab": Tab.overview.rawValue]
+            )
+        }
     }
 
     private var privilegesBox: some View {

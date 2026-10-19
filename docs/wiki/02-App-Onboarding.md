@@ -140,6 +140,17 @@ profile has a workspace, for example after the workspace folder is emptied.
    looks off you can **Skip & finish setup** — the workspace is fully configured at this
    point and you can run reports later from the Reports tab.
 
+   The same step carries two last choices, applied when setup finishes (by the first
+   report or by **Skip & finish setup**). **Run automatically** is on by default and is the
+   same choice the adopt-existing-profiles screen offers: it turns on managed automation
+   (a daily collect, a weekly deep scan and reports on the day and time you pick) and
+   registers the background item, so you do not have to open Automation first. Untick it
+   to leave automation as it is; an automation setup you already have is never switched off
+   or changed. **Webhook (optional)** takes a Teams or Slack incoming-webhook URL; leave it
+   empty to skip. Only an `https://` URL is saved, as the workspace's `notify:` block with
+   full detail, and you can change it later under Automation › Notifications. Both controls
+   are disabled in demo mode.
+
 ### Adding more environments from the same integration
 
 A jamf-cli profile holds one environment, so each extra environment of a Jamf Account

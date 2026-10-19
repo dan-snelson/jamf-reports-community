@@ -33,6 +33,12 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- Setting up a workspace from the onboarding wizard now asks, on the last step, whether to run
+  automatically (on by default, same choice as when adopting existing profiles) and offers an
+  optional Teams or Slack webhook. Finishing with the box ticked turns on the daily collection;
+  before, a new workspace had no background item until you opened Automation. An existing
+  automation setup is never switched off or changed.
+
 - **Settings › Add connection** and the workspace menu's **Add workspace or product…** now open
   one **Add** sheet, which replaces Add workspace, Add Jamf School workspace and the Jamf
   Pro-only setup they started. Choose a new Jamf Pro, Platform API or Jamf School workspace, or

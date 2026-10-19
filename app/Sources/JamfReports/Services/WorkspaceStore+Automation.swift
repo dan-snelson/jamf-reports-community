@@ -276,6 +276,18 @@ extension WorkspaceStore {
         }
     }
 
+    /// The user just opted into automation — a ticker Login Items won't run must not be silently
+    /// absorbed into "setup complete". Only the two states an operator can act on:
+    /// `.unavailable` is a dev build with no bundled agent, which the Login Items pane can't fix.
+    func warnIfTickerNeedsApproval() {
+        guard tickerStatus == .requiresApproval || tickerStatus == .notRegistered else { return }
+        toast = Toast(
+            message: "Setup finished — allow JamfReports under Login Items › "
+                + "Allow in the Background to start automation",
+            style: .warning
+        )
+    }
+
     /// The policy changed, or the app launched: make Login Items agree with
     /// it. Registered when anything is scheduled; unregistered when nothing
     /// is. Called from the root view's `.task` at launch AND from the

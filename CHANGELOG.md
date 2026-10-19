@@ -79,10 +79,13 @@ versions in this repository map to git tags.
 
 ### Fixed
 
-- Jamf Pro commands no longer run against a Jamf Protect, Jamf Security Cloud or Jamf School
-  login, or an organization-level Platform API profile. Collect, scheduled runs, backup, audit and
-  device lookup stop with one line naming the product; a scheduled run on such a profile is
-  skipped rather than retried or reported as a failure, and `schedules add` refuses it.
+- Jamf Pro commands no longer run against a Jamf School, Jamf Protect or Jamf Security Cloud
+  login, or an organization-level Platform API profile. Collect, scheduled runs, health audit,
+  group analysis, backup, backup diff and device lookup stop with one line naming the product,
+  instead of a failed jamf-cli call. Generate with Include Health Audit ticked skips the audit
+  for the School template. A scheduled run on such a profile is skipped rather than retried or
+  reported as a failure, shows as failing in Automation with the reason instead of overdue, and
+  `schedules add` refuses it.
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
 - A Jamf Pro collect that fails as a whole (dead credentials, every call failing) no longer
@@ -93,8 +96,6 @@ versions in this repository map to git tags.
   instead of a Protect failure on every run. Config Doctor warns about the second case, and Data
   Sources lists the Protect commands as skipped. (#284)
 - The workbook no longer keeps Protect tabs from old data after Protect is turned off. (#284)
-- Health audit, group analysis, backup and backup diff on a profile of another product now say
-  that plainly instead of "Invalid argument". (#284)
 - A schedule whose last success was recorded while the Mac's clock was set ahead is retried
   after a partial run, instead of waiting until that date. (#284)
 - Importing a CSV in the Adopt EAs walkthrough no longer freezes the window while a large file
@@ -139,10 +140,6 @@ versions in this repository map to git tags.
 - Dates are read the same way in every report. A date that cannot be read now shows as
   Unknown or a dash instead of 0 or -1 days, and a Jamf School device with an unreadable
   check-in is no longer listed as stale on the Stale Devices tab.
-- Jamf Reports no longer runs a Jamf Pro (`pro`) command against a Jamf School profile.
-  Generate with Include Health Audit ticked skips the audit for the School template, and the
-  health audit, group analysis, backup, backup diff and device lookup refuse a School profile
-  with one line saying why, instead of a failed jamf-cli call.
 - A Jamf School workspace no longer shows "Auth may be expired" in Generate or "Token: not
   authenticated" in Settings. School signs in with an API key, which has no token to check.
 - `jamf-reports generate` and scheduled report runs on a Jamf School workspace now write the

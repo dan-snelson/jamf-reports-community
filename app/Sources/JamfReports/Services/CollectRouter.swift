@@ -111,6 +111,8 @@ enum CollectRouter {
     ///   - proCollect: Closure wrapping `ReportEngine.collect`. Defaults to the real static.
     ///   - schoolCollect: Closure wrapping `ReportEngine.schoolCollect`. Defaults to the real static.
     ///   - protectCollect: Closure wrapping `ReportEngine.protectCollect`. Defaults to the real static.
+    ///   - resolved: The profile's resolved auth method and product (`ProfileAuthMethod.resolve`).
+    ///     Nil means "could not ask" and runs the collect.
     ///   - onLine: Progress log callback.
     static func run(
         profile: String,
@@ -122,8 +124,21 @@ enum CollectRouter {
         proCollect: ProCollect = defaultProCollect,
         schoolCollect: SchoolCollect = defaultSchoolCollect,
         protectCollect: ProtectCollect = defaultProtectCollect,
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved? = {
+            ProfileAuthMethod.resolve(profile: $0)
+        },
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
+        // First, before anything touches the workspace: jamf-cli never checks a profile against
+        // the command's product, so a Protect, Security Cloud or organization-level profile
+        // would send Jamf Pro commands. A Jamf School workspace is routed to School collect
+        // below and is not a Pro run.
+        let detected = ProfileProductType.detect(from: config, profile: profile)
+        if detected.type == .jamfPro, let refusal = await CLIBridge.refusesProCommand(
+            profile: profile, operation: "Collect", onLine: onLine, resolved: resolved
+        ) {
+            throw CLIBridgeError.wrongProduct(refusal)
+        }
         // Every collect path passes through here; the GUI's also checks when it
         // binds the workspace, but the CLI and schedules load config directly.
         if let owner = config?.jamfCli?.resolvedProfile,
@@ -136,7 +151,6 @@ enum CollectRouter {
         // Shared workspace: say which pinned config.yaml keys changed on this Mac before any
         // collect reads them, for Jamf Pro, Protect and Jamf School alike.
         SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
-        let detected = ProfileProductType.detect(from: config, profile: profile)
         switch detected.type {
         case .jamfSchool:
             onLine(.init(timestamp: Date(), level: .info,
@@ -179,6 +193,16 @@ enum CollectRouter {
                     text: "\(ReportEngine.protectCollectFailedMarker)\(error.localizedDescription)"))
             }
         }
+    }
+
+    /// Why a Jamf Pro run on `profile` must not start, or nil. For entry points that name a
+    /// profile themselves (a schedule, the CLI) and must refuse before they create anything in
+    /// its workspace. A Jamf School workspace (`school_cli`) is not a Pro run; `run` applies the
+    /// same rule. Can spawn `jamf-cli config list`.
+    static func proRunRefusal(profile: String, operation: String, config: ReportConfig?) -> String? {
+        guard ProfileProductType.detect(from: config, profile: profile).type == .jamfPro
+        else { return nil }
+        return ProfileAuthMethod.refusal(profile: profile, operation: operation)
     }
 
     // MARK: - Default closures (production)

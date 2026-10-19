@@ -309,6 +309,74 @@ final class CollectRouterTests: XCTestCase {
                        "a throw (no jamf-cli, bad profile) repeats on a same-day retry")
     }
 
+    // MARK: - Product guard
+
+    private func resolved(
+        _ product: JamfCLIProduct, org: Bool = false
+    ) -> @Sendable (String) -> ProfileAuthMethod.Resolved? {
+        { _ in .init(authMethod: "oauth2", isTenantLevel: false,
+                     isOrganizationLevel: org, product: product) }
+    }
+
+    /// A Protect, Security Cloud, School (without school_cli) or organization-level profile in
+    /// a Jamf Pro workspace sends nothing: not Pro, not Protect, and one `[error]` line.
+    func test_router_anotherProduct_collectsNothing() async throws {
+        let config = try ConfigLoader.loadFromString("""
+        protect:
+          enabled: true
+          profile: my-protect
+        """)
+        let answers: [(JamfCLIProduct, Bool)] = [
+            (.protect, false), (.securityCloud, false), (.school, false), (.pro, true),
+        ]
+        for (product, org) in answers {
+            let spy = RouterSpy()
+            let lines = ProductGuardLines()
+            do {
+                try await CollectRouter.run(
+                    profile: "other", config: config, workspacePaths: WorkspacePaths.self,
+                    proCollect: spy.proCollect, schoolCollect: spy.schoolCollect,
+                    protectCollect: spy.protectCollect, resolved: resolved(product, org: org),
+                    onLine: lines.add)
+                XCTFail("\(product) org=\(org) was not refused")
+            } catch CLIBridgeError.wrongProduct(let refusal) {
+                XCTAssertTrue(refusal.hasPrefix("Collect is a Jamf Pro command; 'other' is"))
+            }
+            XCTAssertEqual(
+                [spy.proCallCount, spy.schoolCallCount, spy.protectCallCount], [0, 0, 0])
+            XCTAssertEqual(lines.all.count, 1, "\(lines.all)")
+            XCTAssertTrue(lines.all[0].hasPrefix("[error] Collect is a Jamf Pro command"))
+        }
+    }
+
+    /// Nothing known about the profile, or Jamf Pro, runs as before.
+    func test_router_unresolvedUnknownAndProRun() async throws {
+        let answers: [@Sendable (String) -> ProfileAuthMethod.Resolved?] = [
+            { _ in nil }, resolved(.unknown), resolved(.pro),
+        ]
+        for answer in answers {
+            let spy = RouterSpy()
+            try await CollectRouter.run(
+                profile: "fine", config: nil, workspacePaths: WorkspacePaths.self,
+                proCollect: spy.proCollect, schoolCollect: spy.schoolCollect,
+                protectCollect: spy.protectCollect, resolved: answer, onLine: { _ in })
+            XCTAssertEqual(spy.proCallCount, 1)
+        }
+    }
+
+    /// A Jamf School workspace (school_cli) on a School profile is the School collect, not a
+    /// Pro run, so the product guard leaves it alone.
+    func test_router_schoolWorkspaceOnASchoolProfileStillCollectsSchool() async throws {
+        let config = try ConfigLoader.loadFromString(
+            "school_cli:\n  enabled: true\n  profile: sch\n")
+        let spy = RouterSpy()
+        try await CollectRouter.run(
+            profile: "sch", config: config, workspacePaths: WorkspacePaths.self,
+            proCollect: spy.proCollect, schoolCollect: spy.schoolCollect,
+            protectCollect: spy.protectCollect, resolved: resolved(.school), onLine: { _ in })
+        XCTAssertEqual([spy.proCallCount, spy.schoolCallCount], [0, 1])
+    }
+
     /// Nil config must degrade to Jamf Pro without crashing (regression guard).
     func test_router_nilConfig_degradesToPro() async throws {
         let spy = RouterSpy()

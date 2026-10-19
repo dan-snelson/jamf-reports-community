@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import JamfReports
 
-/// No `pro` command runs on a Jamf School profile, and asking jamf-cli which kind a profile
+/// No `pro` command runs on a profile of another product, and asking jamf-cli which kind a profile
 /// is (`config list`) never blocks the main thread.
 final class SchoolProCommandRefusalTests: XCTestCase {
     private final class Lines: @unchecked Sendable {
@@ -12,28 +12,53 @@ final class SchoolProCommandRefusalTests: XCTestCase {
         var all: [String] { lock.withLock { stored } }
     }
 
-    @MainActor
-    func testASchoolProfileIsRefusedWithOneErrorLineAndTheLookupRunsOffMain() async {
-        let lines = Lines()
-        let onMain = Lines()
-        let refusal = await CLIBridge.refusesProCommand(
-            profile: "school-a", operation: "Backup",
-            onLine: { lines.add($0.text) },
-            isSchoolProfile: { _ in
-                if Thread.isMainThread { onMain.add("main") }
-                return true
-            })
-        XCTAssertEqual(refusal, "Backup is a Jamf Pro command; 'school-a' is a Jamf School profile")
-        XCTAssertEqual(lines.all, ["[error] \(refusal ?? "")"])
-        XCTAssertTrue(onMain.all.isEmpty, "the profile lookup ran on the main thread")
+    private func resolved(
+        _ product: JamfCLIProduct, org: Bool = false
+    ) -> @Sendable (String) -> ProfileAuthMethod.Resolved? {
+        { _ in
+            if Thread.isMainThread { XCTFail("the profile lookup ran on the main thread") }
+            return .init(
+                authMethod: "oauth2", isTenantLevel: false, isOrganizationLevel: org,
+                product: product)
+        }
     }
 
-    func testAJamfProProfileIsNotRefusedAndLogsNothing() async {
+    @MainActor
+    func testAnotherProductIsRefusedWithOneErrorLineAndTheLookupRunsOffMain() async {
+        let cases: [(JamfCLIProduct, String)] = [
+            (.school, "Jamf School"), (.protect, "Jamf Protect"),
+            (.securityCloud, "Jamf Security Cloud"),
+        ]
+        for (product, name) in cases {
+            let lines = Lines()
+            let refusal = await CLIBridge.refusesProCommand(
+                profile: "other", operation: "Backup", onLine: { lines.add($0.text) },
+                resolved: resolved(product))
+            XCTAssertEqual(refusal, "Backup is a Jamf Pro command; 'other' is a \(name) profile")
+            XCTAssertEqual(lines.all, ["[error] \(refusal ?? "")"])
+        }
+    }
+
+    func testAnOrganizationLevelProfileIsRefused() async {
         let lines = Lines()
         let refusal = await CLIBridge.refusesProCommand(
-            profile: "pro-a", operation: "Health audit",
-            onLine: { lines.add($0.text) }, isSchoolProfile: { _ in false })
-        XCTAssertNil(refusal)
+            profile: "org", operation: "Health audit", onLine: { lines.add($0.text) },
+            resolved: resolved(.pro, org: true))
+        XCTAssertTrue(refusal?.contains("'org' is an organization-level profile") == true)
+        XCTAssertEqual(lines.all.count, 1)
+    }
+
+    func testJamfProUnknownAndUnresolvedProfilesAreNotRefusedAndLogNothing() async {
+        let lines = Lines()
+        for answer: ProfileAuthMethod.Resolved? in [
+            .init(authMethod: "oauth2", isTenantLevel: false, product: .pro),
+            .init(authMethod: "oauth2", isTenantLevel: false, product: .unknown), nil,
+        ] {
+            let refusal = await CLIBridge.refusesProCommand(
+                profile: "pro-a", operation: "Health audit", onLine: { lines.add($0.text) },
+                resolved: { _ in answer })
+            XCTAssertNil(refusal)
+        }
         XCTAssertTrue(lines.all.isEmpty)
     }
 }

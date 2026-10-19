@@ -35,6 +35,9 @@ enum CLIBridgeError: Error, LocalizedError, Equatable, Sendable {
     case executableNotFound
     /// An argument value is invalid (e.g. leading-dash injection risk).
     case invalidArgument(String)
+    /// The profile belongs to another product, so a Jamf Pro command was not run; the text is
+    /// the refusal (`ProfileAuthMethod.Resolved.proRefusal`).
+    case wrongProduct(String)
     /// A required directory could not be created or a file move failed.
     /// `path` is for private logging only — never interpolated into user-visible strings.
     case directoryOperationFailed(path: String)
@@ -97,6 +100,8 @@ enum CLIBridgeError: Error, LocalizedError, Equatable, Sendable {
             return "jamf-cli not found — install via Homebrew: brew install jamf-cli"
         case .invalidArgument(let detail):
             return "Invalid argument: \(detail)"
+        case .wrongProduct(let refusal):
+            return refusal
         case .directoryOperationFailed:
             // Path omitted: may contain the home directory or workspace layout.
             return "A required directory could not be created or moved — check available disk space and folder permissions."

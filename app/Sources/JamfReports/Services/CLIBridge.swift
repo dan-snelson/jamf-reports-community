@@ -1047,7 +1047,7 @@ final class CLIBridge {
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> Bool {
         AppLogger.auth.debug("auth probe profile=\(profile, privacy: .public)")
-        guard !Self.usesAPIKey(profile: profile) else { return true }
+        guard !ProfileAuthMethod.skipsProAuthProbe(profile: profile) else { return true }
         let probe = await probeToken(
             for: profile, executable: _testExecutable, timeout: probeTimeout
         )
@@ -1087,23 +1087,21 @@ final class CLIBridge {
         JamfCLIAuthMethod(raw: authMethod) == .apiKey
     }
 
-    /// Whether jamf-cli lists `profile` with API-key auth (`shouldSkipAuthProbe`).
-    nonisolated static func usesAPIKey(profile: String) -> Bool {
-        let authMethod = ProfileService.discoverLocal()
-            .first(where: { $0.name == profile })?
-            .auth?.rawValue ?? ""
-        return shouldSkipAuthProbe(for: authMethod)
-    }
-
-    /// The refusal, after one `[error]` line, when `profile` is a Jamf School (API-key)
-    /// profile: no `pro` command may run against it. Nil for any other profile. The lookup
-    /// runs `jamf-cli config list`, so it runs detached: most callers are on the main actor.
+    /// The refusal, after one `[error]` line, when `profile` is known to belong to another
+    /// product (Jamf School, Protect, Security Cloud) or is an organization-level integration:
+    /// no `pro` command may run against it. Nil for a Jamf Pro profile and for one that cannot
+    /// be resolved. The lookup can run `jamf-cli config list`, so it runs detached: most
+    /// callers are on the main actor. `resolved` is the test seam.
     nonisolated static func refusesProCommand(
         profile: String, operation: String, onLine: (@Sendable (LogLine) -> Void)?,
-        isSchoolProfile: @escaping @Sendable (String) -> Bool = { CLIBridge.usesAPIKey(profile: $0) }
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved? = {
+            ProfileAuthMethod.resolve(profile: $0)
+        }
     ) async -> String? {
-        guard await Task.detached(operation: { isSchoolProfile(profile) }).value else { return nil }
-        let refusal = "\(operation) is a Jamf Pro command; '\(profile)' is a Jamf School profile"
+        let refusal = await Task.detached {
+            resolved(profile)?.proRefusal(profile: profile, operation: operation)
+        }.value
+        guard let refusal else { return nil }
         onLine?(.init(timestamp: Date(), level: .fail, text: "[error] \(refusal)"))
         return refusal
     }
@@ -1146,10 +1144,11 @@ final class CLIBridge {
     /// - JSON is missing or malformed
     /// - the probe did not answer within `tokenProbeTimeout`
     ///
-    /// Returns nil for an API-key profile (Jamf School), which has no bearer token: the
-    /// probe would fail and read as "not authenticated" for working credentials.
+    /// Returns nil for an API-key profile (Jamf School) or one known to be another product,
+    /// which has no `pro` bearer token: the probe would fail and read as "not authenticated"
+    /// for working credentials.
     nonisolated func tokenStatus(for profile: String) async -> TokenStatus? {
-        guard !Self.usesAPIKey(profile: profile) else { return nil }
+        guard !ProfileAuthMethod.skipsProAuthProbe(profile: profile) else { return nil }
         switch await probeToken(for: profile, executable: nil, timeout: Self.tokenProbeTimeout) {
         case .status(let status): return status
         case .timedOut: return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)
@@ -1235,6 +1234,9 @@ final class CLIBridge {
         deviceID: String,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async -> DeviceDetailResult? {
+        if await Self.refusesProCommand(profile: profile, operation: "Device lookup", onLine: onLine) != nil {
+            return nil
+        }
         guard await authGuard(profile: profile, onLine: { line in
             AppLogger.auth.warning("deviceDetail auth: \(line.text, privacy: .private)")
         }) else { return nil }
@@ -1255,6 +1257,9 @@ final class CLIBridge {
         deviceID: String,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async -> DeviceDetailResult? {
+        if await Self.refusesProCommand(profile: profile, operation: "Mobile device lookup", onLine: onLine) != nil {
+            return nil
+        }
         guard await authGuard(profile: profile, onLine: { line in
             AppLogger.auth.warning("mobileDeviceDetail auth: \(line.text, privacy: .private)")
         }) else { return nil }

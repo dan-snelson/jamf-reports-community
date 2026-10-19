@@ -23,6 +23,9 @@ enum ProfileAuthMethod {
         /// The product the profile logs in to (`ProfileService.derivedProduct`); `.unknown` when
         /// nothing says, which runs like Jamf Pro.
         var product: JamfCLIProduct = .unknown
+        /// `product` is the "file was read, so Jamf Pro" default, not something the profile
+        /// says (`ProfileService.explicitProduct` found nothing).
+        var productIsDefaulted = false
 
         /// Why a Jamf Pro command must not run on this profile, or nil: only a product known
         /// to be another one (School, Protect, Security Cloud) or an organization-level
@@ -37,10 +40,11 @@ enum ProfileAuthMethod {
             return nil
         }
 
-        /// Why this profile cannot be the `protect.profile` login, or nil: only a product known
-        /// to be another one refuses. `.protect` and `.unknown` (nothing says) run.
+        /// Why this profile cannot be the `protect.profile` login, or nil: only a product an
+        /// explicit signal names as another one refuses. `.protect`, `.unknown` and the Jamf Pro
+        /// default (a hand-made Protect login has no `product:` key and a plain host) run.
         func protectRefusal(profile: String) -> String? {
-            guard product != .protect, product != .unknown else { return nil }
+            guard product != .protect, product != .unknown, !productIsDefaulted else { return nil }
             return "'\(profile)' is a \(product.displayName) profile, not a Jamf Protect profile"
         }
     }
@@ -75,7 +79,9 @@ enum ProfileAuthMethod {
             isOrganizationLevel: isOrganizationLevel(data: data, profile: profile, entry: entry),
             product: ProfileService.derivedProduct(
                 configProduct: entry?.product, authMethod: method, url: entry?.url,
-                configFileRead: entry != nil)
+                configFileRead: entry != nil),
+            productIsDefaulted: ProfileService.explicitProduct(
+                configProduct: entry?.product, authMethod: method, url: entry?.url) == nil
         )
 
         cacheLock.lock()

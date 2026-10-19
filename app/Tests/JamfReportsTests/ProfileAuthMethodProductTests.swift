@@ -76,6 +76,29 @@ final class ProfileAuthMethodProductTests: XCTestCase {
         XCTAssertNil(refusal(.unknown))
     }
 
+    /// A hand-made Protect login (plain oauth2, no `product:` key, no Protect host) reads as
+    /// Jamf Pro only by default, which must not stop Protect from using it.
+    func testProtectIsRefusedOnlyForAnExplicitOtherProduct() throws {
+        func resolved(_ name: String, auth: String = "oauth2", file: String?)
+            throws -> ProfileAuthMethod.Resolved? {
+            ProfileAuthMethod.invalidateCache()
+            return try ProductGuardSeed.seed(profile: name, authMethod: auth, product: file, in: dir)
+        }
+        let handMade = try XCTUnwrap(resolved("hand", file: nil))
+        XCTAssertEqual(handMade.product, .pro)
+        XCTAssertTrue(handMade.productIsDefaulted)
+        XCTAssertNil(handMade.protectRefusal(profile: "hand"))
+        XCTAssertNotNil(try XCTUnwrap(resolved("keyed", file: "pro")).protectRefusal(profile: "keyed"))
+        XCTAssertNotNil(
+            try XCTUnwrap(resolved("gw", auth: "platform", file: nil)).protectRefusal(profile: "gw"),
+            "the auth method says Jamf Pro")
+        XCTAssertNotNil(
+            try XCTUnwrap(resolved("sc", auth: "apikey", file: nil)).protectRefusal(profile: "sc"))
+        XCTAssertNil(try XCTUnwrap(resolved("pr", file: "protect")).protectRefusal(profile: "pr"))
+        XCTAssertNil(handMade.proRefusal(profile: "hand", operation: "x"),
+                     "a defaulted Pro login still runs Jamf Pro commands")
+    }
+
     func testOrganizationLevelPlatformProfileIsRefused() throws {
         ProfileAuthMethod.invalidateCache()
         let resolved = try ProductGuardSeed.seed(

@@ -113,9 +113,19 @@ enum ProfileAuthMethod {
     }
 
     /// Whether `pro auth token` has no meaning for `profile`: API-key auth (Jamf School) or a
-    /// product known to be another one. Unresolved profiles are probed as before.
-    static func skipsProAuthProbe(profile: String) -> Bool {
-        guard let resolved = resolve(profile: profile) else { return false }
+    /// product known to be another one. When `config list` cannot be read, a School workspace
+    /// (`school_cli` in its config.yaml) or an `apikey` entry in jamf-cli's config file decides;
+    /// otherwise the profile is probed as before.
+    static func skipsProAuthProbe(
+        profile: String, configFile: URL? = ProfileService.defaultConfigFileURL
+    ) -> Bool {
+        guard let resolved = resolve(profile: profile, configFile: configFile) else {
+            let entry = ProfileService.readConfigFile(at: configFile)?.first { $0.name == profile }
+            return JamfCLIAuthMethod(raw: entry?.authMethod) == .apiKey
+                || ProfileProductType.detect(
+                    from: collectRoutingConfig(profile: profile), profile: profile
+                ).type == .jamfSchool
+        }
         return resolved.method == .apiKey || !resolved.product.canBeProWorkspace
     }
 

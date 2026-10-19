@@ -99,4 +99,41 @@ final class ProfileAuthMethodProductTests: XCTestCase {
         _ = try product("sc", auth: "apikey", file: nil)
         XCTAssertTrue(ProfileAuthMethod.skipsProAuthProbe(profile: "sc"))
     }
+
+    // MARK: - config list unreadable
+
+    private func schoolWorkspace(_ name: String) throws {
+        let workspaces = dir.appendingPathComponent("Jamf-Reports", isDirectory: true)
+        let workspace = workspaces.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try "school_cli:\n  enabled: true\n  profile: \"\(name)\"\n".write(
+            to: workspace.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        setenv("JRC_TEST_WORKSPACES_ROOT", workspaces.path, 1)
+        addTeardownBlock { unsetenv("JRC_TEST_WORKSPACES_ROOT") }
+    }
+
+    /// With no `config list` answer, an API-key login or a School workspace still has no
+    /// bearer token to probe, while an unknown profile is probed as before.
+    func testTheProbeIsStillSkippedForSchoolWhenConfigListCannotBeRead() throws {
+        let file = dir.appendingPathComponent("jamf-cli-config.yaml")
+        try "profiles:\n    campus:\n        auth-method: apikey\n    corp:\n        auth-method: oauth2\n"
+            .write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertTrue(ProfileAuthMethod.skipsProAuthProbe(profile: "campus", configFile: file),
+                      "apikey entry in jamf-cli's config file")
+        XCTAssertFalse(ProfileAuthMethod.skipsProAuthProbe(profile: "corp", configFile: file))
+        XCTAssertFalse(ProfileAuthMethod.skipsProAuthProbe(profile: "absent", configFile: file))
+
+        try schoolWorkspace("school-ws")
+        XCTAssertTrue(ProfileAuthMethod.skipsProAuthProbe(profile: "school-ws", configFile: nil),
+                      "school_cli in the workspace's config.yaml")
+    }
+
+    @MainActor
+    func testAuthGuardLetsASchoolWorkspaceThroughWithNoJamfCLI() async throws {
+        try schoolWorkspace("school-ws")
+        let lines = ProductGuardLines()
+        let proceed = await CLIBridge().authGuard(profile: "school-ws", onLine: lines.add)
+        XCTAssertTrue(proceed, "no jamf-cli to ask must not read as rejected credentials")
+        XCTAssertTrue(lines.all.isEmpty, "\(lines.all)")
+    }
 }

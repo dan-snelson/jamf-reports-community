@@ -1,0 +1,187 @@
+import XCTest
+@testable import JamfReports
+
+/// The Jamf School daily summary (`ReportEngine.writeSchoolSummary`): written from the newest
+/// `school-devices` snapshot, in jamf-cli's flattened row shape, when a collect landed it.
+final class SchoolSummaryTests: XCTestCase {
+    private var root: URL!
+    private var dataDir: URL!
+    private var summariesDir: URL!
+    private let landed: Set<String> = [SchoolFleetService.devicesKind]
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("school-summary-\(UUID().uuidString)", isDirectory: true)
+        dataDir = root.appendingPathComponent("data", isDirectory: true)
+        summariesDir = root.appendingPathComponent("summaries", isDirectory: true)
+        try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func day(_ text: String) -> Date { DateParser().parse(text)! }
+
+    private func writeDevices(_ json: String, stamp: String = "20261019T080000") throws {
+        let kind = SchoolFleetService.devicesKind
+        let dir = dataDir.appendingPathComponent(kind, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(json.utf8).write(to: dir.appendingPathComponent("\(kind)_\(stamp).json"))
+    }
+
+    @discardableResult
+    private func write(
+        landed kinds: Set<String>? = nil, staleDays: Int = 30, at now: String = "2026-10-19 09:00:00"
+    ) -> ReportEngine.SummaryEmitOutcome {
+        ReportEngine.writeSchoolSummary(
+            dataDir: dataDir, summariesDir: summariesDir, landedKinds: kinds ?? landed,
+            staleDays: staleDays, day: day(now), onLine: { _ in })
+    }
+
+    private func summary(_ date: String = "2026-10-19") throws -> DailySummary {
+        let file = summariesDir.appendingPathComponent("summary_\(date).json")
+        return try SummaryJSONParser.decode(Data(contentsOf: file))
+    }
+
+    private let fleet = """
+    [{"name":"Lab Mac 01","serialNumber":"M1","model":"MacBook Air","os":"macOS 14.3",
+      "isManaged":true,"isSupervised":false,"lastCheckin":"2026-10-18 09:00:00",
+      "inTrash":false,"udid":"u1"},
+     {"name":"Lab Mac 02","serialNumber":"M2","model":"MacBook Air","os":"macOS 26.6.2",
+      "isManaged":true,"isSupervised":false,"lastCheckin":"2026-08-01 09:00:00",
+      "inTrash":false,"udid":"u2"},
+     {"name":"Cart iPad 01","serialNumber":"I1","model":"iPad (10th generation)",
+      "os":"iPadOS 27.0.1","isManaged":true,"isSupervised":true,
+      "lastCheckin":"2026-10-19 08:00:00","inTrash":false,"udid":"u3"},
+     {"name":"Cart iPad 02","serialNumber":"I2","model":"iPad (9th generation)",
+      "os":"iPadOS 18.1","isManaged":true,"isSupervised":true,
+      "lastCheckin":"2026-07-01 09:00:00","inTrash":false,"udid":"u4"},
+     {"name":"Office iPhone","serialNumber":"I3","os":"iOS 27.0","isManaged":true,
+      "lastCheckin":"2026-10-17 09:00:00","inTrash":false},
+     {"name":"Front Desk TV","serialNumber":"T1","os":"tvOS 18.0","isManaged":true,
+      "inTrash":false},
+     {"name":"Retired iPad","serialNumber":"I4","os":"iPadOS 17.0",
+      "lastCheckin":"2025-01-01 09:00:00","inTrash":true}]
+    """
+
+    func testCollectThatLandedDevicesWritesCountsAndLeavesMacSecurityNil() throws {
+        try writeDevices(fleet)
+        XCTAssertEqual(write(), .wrote)
+
+        let s = try summary()
+        XCTAssertEqual(s.totalDevices, 2, "Macs only")
+        XCTAssertEqual(s.mobileDeviceCount, 4, "iPadOS, iOS and tvOS; the trashed iPad is left out")
+        XCTAssertEqual(s.staleCount, 2, "Mac 02 and iPad 02; the TV has no check-in; trash skipped")
+        XCTAssertEqual(s.source, "jamf-cli")
+        XCTAssertEqual(s.collectionSources, [SchoolFleetService.devicesKind: "live"])
+        let macFigures: [Double?] = [
+            s.fileVaultPct, s.compliancePct, s.osCurrentPct, s.crowdstrikePct, s.patchPct,
+            s.sipPct, s.firewallPct, s.gatekeeperPct, s.secureBootPct, s.bootstrapPct,
+            s.xprotectPct, s.securityScore,
+        ]
+        XCTAssertTrue(macFigures.allSatisfy { $0 == nil }, "unmeasured is nil, never 0")
+    }
+
+    func testRunThatLandedNoDevicesWritesNothing() throws {
+        try writeDevices(fleet)
+        XCTAssertEqual(write(landed: ["school-users"]), .nothingToSummarize)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: summariesDir.appendingPathComponent("summary_2026-10-19.json").path),
+            "a cached snapshot is not dated today")
+    }
+
+    func testRunThatLandedNoDevicesLeavesTodaysSummary() throws {
+        try writeDevices(fleet)
+        write()
+        try writeDevices("[]", stamp: "20261019T100000")
+        XCTAssertEqual(write(landed: [], at: "2026-10-19 10:00:00"), .nothingToSummarize)
+        XCTAssertEqual(try summary().totalDevices, 2)
+    }
+
+    func testLaterSameDayCollectRebuildsTheSummary() throws {
+        try writeDevices(fleet)
+        write()
+        try writeDevices("""
+        [{"name":"Cart iPad 01","serialNumber":"I1","os":"iPadOS 27.0.1","isManaged":true,
+          "lastCheckin":"2026-10-19 11:00:00","inTrash":false}]
+        """, stamp: "20261019T120000")
+        XCTAssertEqual(write(at: "2026-10-19 12:00:00"), .wrote)
+
+        let s = try summary()
+        XCTAssertEqual(s.totalDevices, 0)
+        XCTAssertEqual(s.mobileDeviceCount, 1)
+        XCTAssertEqual(s.staleCount, 0)
+    }
+
+    func testStaleIsMoreThanTheThresholdInWholeDays() throws {
+        try writeDevices("""
+        [{"name":"Lab Mac","serialNumber":"M1","os":"macOS 14.3","isManaged":true,
+          "lastCheckin":"2026-10-01 09:00:00","inTrash":false}]
+        """)
+        write(staleDays: 30, at: "2026-10-31 09:00:00")
+        XCTAssertEqual(try summary("2026-10-31").staleCount, 0, "exactly 30 days is not stale")
+        write(staleDays: 29, at: "2026-10-31 09:00:00")
+        XCTAssertEqual(try summary("2026-10-31").staleCount, 1)
+    }
+
+    func testMacOnlyFleetRecordsNoMobileCount() throws {
+        try writeDevices("""
+        [{"name":"Lab Mac","serialNumber":"M1","os":"macOS 14.3","inTrash":false}]
+        """)
+        write()
+        let s = try summary()
+        XCTAssertEqual(s.totalDevices, 1)
+        XCTAssertNil(s.mobileDeviceCount)
+    }
+
+    func testEmptyFleetWritesNothing() throws {
+        try writeDevices("""
+        [{"name":"Retired iPad","serialNumber":"I4","os":"iPadOS 17.0","inTrash":true}]
+        """)
+        XCTAssertEqual(write(), .nothingToSummarize)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: summariesDir.path))
+    }
+
+    // MARK: - Trends
+
+    func testSchoolTrendsOffersOnlyTheMetricsASchoolSummaryMeasures() throws {
+        try writeDevices(fleet)
+        write()
+        let store = TrendStore(summaries: [try summary()], range: .all)
+
+        for metric in TrendSeries.Metric.schoolMetrics {
+            XCTAssertFalse(store.points(metric: metric).isEmpty, "\(metric.rawValue)")
+        }
+        let others = TrendSeries.Metric.allCases.filter {
+            !TrendSeries.Metric.schoolMetrics.contains($0) && $0 != .activeDevices
+        }
+        for metric in others {
+            XCTAssertTrue(store.points(metric: metric).isEmpty, "\(metric.rawValue)")
+        }
+    }
+
+    func testIPadOnlyDayHeadlinesTheMobileCount() throws {
+        try writeDevices("""
+        [{"name":"Cart iPad 01","serialNumber":"I1","os":"iPadOS 27.0.1","inTrash":false},
+         {"name":"Cart iPad 02","serialNumber":"I2","os":"iPadOS 27.0.1","inTrash":false}]
+        """)
+        write()
+        let store = TrendStore(summaries: [try summary()], range: .all)
+        XCTAssertEqual(store.points(metric: .managedDevices).map(\.value), [2])
+    }
+
+    @MainActor
+    func testAJamfSchoolWorkspaceKeepsTrendsAndOffersSchoolMetrics() {
+        XCTAssertTrue(Tab.schoolTabs.contains(.trends))
+        let store = WorkspaceStore(demoMode: false)
+        store.profiles = [
+            JamfCLIProfile(name: "campus", url: "", schedules: 0, status: .ok, product: .school),
+            JamfCLIProfile(name: "prod", url: "", schedules: 0, status: .ok, product: .pro),
+        ]
+        store.profile = "campus"
+        XCTAssertEqual(store.availableMetrics, TrendSeries.Metric.schoolMetrics)
+        store.profile = "prod"
+        XCTAssertTrue(store.availableMetrics.contains(.fileVault))
+    }
+}

@@ -4,7 +4,8 @@ import Foundation
 /// the Overview and Fleet Overview on a School workspace and the Getting Started checklist read
 /// it. Reads the newest `school-devices`, `school-dep-devices` and `school-overview` snapshots
 /// (jamf-cli's flattened lowerCamelCase rows); a field of an unexpected type reads as unknown.
-/// The P8 School daily summary will add history; until then these are today's counts only.
+/// History comes from the School daily summary (`ReportEngine.writeSchoolSummary`); these are
+/// today's counts.
 enum SchoolFleetService {
 
     static let devicesKind = "school-devices"

@@ -249,8 +249,11 @@ struct AutomationView: View {
                 sectionTitle("Data Freshness")
                 Toggle("Keep data fresh daily", isOn: binding(\.freshnessEnabled))
                     .toggleStyle(.switch)
-                Text("A daily collect (everything except the two heavy per-device scans) so "
-                    + "Trends and reports stay current.")
+                Text(workspace.isSchoolWorkspace
+                    ? "A daily collect of every Jamf School source, so the Overview, Devices and "
+                        + "reports stay current."
+                    : "A daily collect (everything except the two heavy per-device scans) so "
+                        + "Trends and reports stay current.")
                     .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
                 Divider().background(Theme.Colors.hairline)
                 Toggle("Weekly deep scan", isOn: binding(\.scanEnabled))
@@ -258,8 +261,12 @@ struct AutomationView: View {
                 if policy.scanEnabled {
                     weekdayPicker("Scan day", binding(\.scanWeekday))
                 }
-                Text("The two per-device --scan-failures queries (patch + update failures) that "
-                    + "can stall on-prem Jamf Pro — run weekly, never daily.")
+                // The policy covers every profile; only Jamf Pro has a deep scan.
+                Text(workspace.isSchoolWorkspace
+                    ? "Jamf Pro workspaces only. Jamf School has no deep scan: its daily collect "
+                        + "covers every School source."
+                    : "The two per-device --scan-failures queries (patch + update failures) that "
+                        + "can stall on-prem Jamf Pro — run weekly, never daily.")
                     .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
             }
         }

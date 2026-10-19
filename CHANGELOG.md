@@ -33,6 +33,8 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- On a Jamf School workspace the Automation screen's Data Freshness card describes School's
+  daily collect and says the weekly deep scan applies to Jamf Pro workspaces only.
 - A Jamf School workspace no longer shows Jamf Pro parts it has no data for: Fleet Overview,
   the Health Audit option and the `summary.json` line in Generate, the Agents, EAs, Platform API
   and Scoring tabs in Config (Thresholds keeps only the stale threshold), and the Extension

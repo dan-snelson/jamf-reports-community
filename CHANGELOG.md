@@ -56,6 +56,10 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- Jamf Reports no longer runs a Jamf Pro (`pro`) command against a Jamf School profile.
+  Generate with Include Health Audit ticked skips the audit for the School template, and the
+  health audit, group analysis, backup, backup diff and device lookup refuse a School profile
+  with one line saying why, instead of a failed jamf-cli call.
 - A Jamf School workspace no longer shows "Auth may be expired" in Generate or "Token: not
   authenticated" in Settings. School signs in with an API key, which has no token to check.
 - `jamf-reports generate` and scheduled report runs on a Jamf School workspace now write the

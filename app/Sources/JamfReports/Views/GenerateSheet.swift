@@ -139,7 +139,8 @@ final class GenerateSheetState {
         let school = schoolMode
         return Request(
             types: selectedTypes, template: resolvedTemplate, collectFirst: collectFresh,
-            runsAudit: includeAudit, outputDir: customOutputDir,
+            // `pro audit` is a Jamf Pro command; the School workbook reads no audit.
+            runsAudit: includeAudit && !school, outputDir: customOutputDir,
             schoolMode: school, asksForNarrative: !school)
     }
 

@@ -219,8 +219,6 @@ struct Sidebar: View {
     private func badge(for item: Tab) -> String? {
         let count: Int
         switch item {
-        case .fleet:
-            count = workspace.initializedProfiles.count
         case .trends:
             count = workspace.demoMode ? DemoData.trendDates.count : liveTrendCount()
         case .reports:

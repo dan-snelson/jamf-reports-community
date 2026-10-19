@@ -53,6 +53,11 @@ versions in this repository map to git tags.
   sheet, since collected inventory carries no per-Mac compliance count.
 - `branding.logo_path` now puts the logo on the first tab of the workbook. It used to sit on the
   CSV-based tabs only.
+- **Fleet Overview** shows the workspace selected in the sidebar, with its issues, stability
+  trend and summary details, instead of a card for every workspace. Two workspaces can be
+  different Jamf Pro servers, so their figures are no longer averaged or listed together on one
+  screen; switching the workspace in the sidebar changes what it shows. Figures across
+  workspaces stay in the report-group fleet CSV and workbook.
 
 ### Fixed
 

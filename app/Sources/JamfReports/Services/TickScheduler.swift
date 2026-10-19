@@ -11,6 +11,9 @@ struct TickState: Codable, Sendable {
     var lastSucceeded: [String: Date] = [:]
     /// Retries run for the fire `lastStarted` belongs to; a new fire resets it.
     var retryCount: [String: Int] = [:]
+    /// When the previous wake ran. A long gap means the Mac was off or asleep, which is what
+    /// lets a daily schedule run early on the first wake of a day it would otherwise miss.
+    var lastTick: Date?
 
     init() {}
 
@@ -21,6 +24,7 @@ struct TickState: Codable, Sendable {
         lastStarted = try c.decodeIfPresent([String: Date].self, forKey: .lastStarted) ?? [:]
         lastSucceeded = try c.decodeIfPresent([String: Date].self, forKey: .lastSucceeded) ?? [:]
         retryCount = try c.decodeIfPresent([String: Int].self, forKey: .retryCount) ?? [:]
+        lastTick = try c.decodeIfPresent(Date.self, forKey: .lastTick)
     }
 
     static func load(url: URL = TickState.defaultURL) -> TickState {
@@ -93,6 +97,10 @@ enum TickScheduler {
     /// tick alone never re-polls an on-prem server inside an hour.
     static let retryBackoffs: [TimeInterval] = [1 * 3600, 2 * 3600, 4 * 3600]
 
+    /// A longer gap between two wakes than this (the agent wakes every 300 s) means the Mac was
+    /// off or asleep.
+    static let offGap: TimeInterval = 15 * 60
+
     /// Why a run is due — the tick stamps each differently (`TickState.noteStarted`).
     enum Reason: Sendable, Equatable { case runNow, fire, retry }
 
@@ -126,15 +134,38 @@ enum TickScheduler {
                 return nil
             }
             let started = startStamp(label, state: state, now: now)
-            if fire > started {
+            let dayStart = Calendar.current.startOfDay(for: now)
+            let daily = schedule.mode.runsAtLoad && isDaily(entries)
+            // A run today is the day's run: a daily schedule's fire later today (after an early
+            // run below) must not start a second one.
+            let slot = daily && started >= dayStart ? min(fire, started) : fire
+            if slot > started {
                 let catchesUp = schedule.mode.runsAtLoad
-                    || anchor.timeIntervalSince(fire) <= nonCatchUpWindow
+                    || anchor.timeIntervalSince(slot) <= nonCatchUpWindow
                 return catchesUp ? DueRun(schedule: schedule, reason: .fire) : nil
             }
+            // The last fire was a day or more ago and ran, but the Mac was off since: today's
+            // fire may come after it is off again (18:00 fire, Mac on 08:00-17:00), so the
+            // first wake of the day runs it. An always-on Mac has no gap and waits for its fire.
+            if daily, started < dayStart, wasOff(state: state, now: now) {
+                return DueRun(schedule: schedule, reason: .fire)
+            }
             let retry = retryIsDue(
-                mode: schedule.mode, label: label, fire: fire, state: state, now: now)
+                mode: schedule.mode, label: label, fire: slot, state: state, now: now)
             return retry ? DueRun(schedule: schedule, reason: .retry) : nil
         }
+    }
+
+    /// One fire a day: no weekday or day-of-month in any entry.
+    private static func isDaily(_ entries: [[String: Int]]) -> Bool {
+        !entries.isEmpty && entries.allSatisfy { $0["Weekday"] == nil && $0["Day"] == nil }
+    }
+
+    /// The previous wake was more than `offGap` ago. A stamp beyond clock skew ahead is no wake.
+    private static func wasOff(state: TickState, now: Date) -> Bool {
+        guard let last = state.lastTick,
+              last.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance else { return false }
+        return now.timeIntervalSince(last) > offGap
     }
 
     /// When `label` last started, or `.distantPast` for a stamp beyond clock skew in the future

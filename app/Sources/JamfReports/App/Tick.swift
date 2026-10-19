@@ -59,13 +59,17 @@ func runTick(
         TickRunner.clearRunNowMarker(label: label)
     }
 
-    let state = TickState.load()
+    var state = TickState.load()
     let due = TickScheduler.due(
         schedules: schedules, state: state, runNowLabels: runNowLabels, now: now,
         nonCatchUpAnchor: blockedSince)
+    // After the decision, which reads the previous wake. Best-effort: without it a daily
+    // schedule just waits for its fire.
+    state.lastTick = now
+    saveLastTick(state)
     let failures = TickFailureLog(profiles: profiles)
     defer { failures.finish() }
-    return await TickLoop.runDue(
+    let result = await TickLoop.runDue(
         due, state: state,
         save: { try $0.save() },
         clearRunNowMarker: { TickRunner.clearRunNowMarker(label: $0) },
@@ -89,6 +93,20 @@ func runTick(
                     profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
             }
         })
+    // A long run must not read as a gap in the wakes.
+    if !due.isEmpty {
+        var finished = TickState.load()
+        finished.lastTick = Date()
+        saveLastTick(finished)
+    }
+    return result
+}
+
+private func saveLastTick(_ state: TickState) {
+    do { try state.save() } catch {
+        AppLogger.schedule.warning(
+            "tick: wake time not recorded: \(error.localizedDescription, privacy: .public)")
+    }
 }
 
 /// `runSchedule` for a process that is not the tick: `--scheduled-run` from an external

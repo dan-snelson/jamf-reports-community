@@ -1265,7 +1265,10 @@ The CLI lives in `Sources/JamfReports/CLI/` and uses `swift-argument-parser`
 is the `AsyncParsableCommand` root; each of the 11 subcommands is a thin shell
 over an already-tested engine entry point — `generate`/`html`
 (`ReportEngine.generate`, which `generate` follows with `writeHTMLWithWorkbook`, and
-`generateHTML`), `collect` (`ReportEngine.collect`),
+`generateHTML`; `generate` routes a Jamf School workspace to `ReportEngine.schoolGenerate`,
+ignoring `--template` and writing no HTML, and `html` refuses one), `collect`
+(`CollectRouter.run`, after `proRunRefusal`, so School collects School and a Protect-enabled
+Pro workspace also collects Protect),
 `backup`/`device` (`CLIBridge`, MainActor hop), `scaffold` (`ScaffoldService`),
 `check`/`school-check` (the `runCheck`/`runSchoolCheck` helpers in `main.swift`),
 `capabilities` (`CapabilityService` + `DefaultCLIExecutor`), `diagnostic-bundle`
@@ -1275,6 +1278,19 @@ over hand-built schedules; managed ones are policy-derived and not editable
 here).
 `CLIRun` holds the shared helpers (`loadProfile`, `resolveTemplate`, tier
 parsing, log-line stream routing).
+
+**Product guard (2.11).** A Jamf Pro command never runs on another product's profile. `collect`
+(`CollectRouter.proRunRefusal`), `backup` (`CollectRouter.backupRefusal`: a School workspace by
+`school_cli`, which holds with no readable jamf-cli, then `proRunRefusal`), `device`
+(`CLIBridge.refusesProCommand` with no `onLine`) and `schedules add` (a per-profile schedule,
+and `--mode backup` on a School workspace) refuse BEFORE the tick lock, the run record or any
+workspace write, print the reason once on stderr through `CLIRun.fail` and exit 1; passing the
+bridge's own `onLine` as well would print it twice, and a refusal that falls through to the bridge
+reaches ArgumentParser as `Error: …`. `school-check` refuses a workspace without `school_cli`
+the same way. `--scheduled-run` and the tick instead log `[skip]` and exit 0, so nothing
+retries. Only exit codes the bridge returns (`backup` passes jamf-cli's) reach the shell;
+an error thrown out of `run()`, `ReportEngine.authExpired` included, exits 1, never 3.
+`schedules list` prints the effective mode (`Schedules.List.effectiveMode`).
 
 **xlsx + HTML only — no PDF.** PDF generation uses `WKWebView`, which needs an
 AppKit run loop a headless CLI lacks; it stays a GUI feature.

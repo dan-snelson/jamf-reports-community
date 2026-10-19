@@ -145,6 +145,14 @@ versions in this repository map to git tags.
 - `jamf-reports generate` and scheduled report runs on a Jamf School workspace now write the
   School workbook. They used to write an empty Jamf Pro workbook. `jamf-reports html` now says a
   School workspace has no HTML report instead of writing an empty one.
+- In `jamf-reports`, `backup` and `device` on another product's profile now print
+  the reason once and exit 1, where `backup` printed it twice and `device` added "auth, or
+  device not found". `backup` on a Jamf School workspace says so instead of "jamf-cli not found",
+  and `schedules add --mode backup` refuses one, as the scheduled run skips it.
+  `jamf-reports school-check` now refuses a workspace that is not Jamf School instead of listing
+  ten missing sources and exiting 0. `schedules list` shows the mode a schedule runs, so an old
+  csv-assisted one reads `jamf-cli-full (was csv-assisted)`. The command help and the
+  command-line guide now cover Jamf School, Jamf Protect and these refusals.
 - A new Jamf School workspace's first report now collects before it writes the workbook. It
   used to write a workbook with no sheets.
 - On a Jamf School workspace the weekly scan schedule no longer collects School a second time,

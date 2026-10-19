@@ -153,7 +153,8 @@ versions in this repository map to git tags.
   longer fill School run logs, and `jamf-reports school-check` lists all ten School sources.
 - One Jamf School profile on the Mac no longer makes **Test connection**, onboarding's
   **Validate** and **Reauthenticate** fail for your other profiles. They now judge only the
-  config file and the profile being checked.
+  config file and the profile being checked. A Jamf School profile also passes **Test
+  connection** again; jamf-cli 1.33.0 reports its `apikey` sign-in method as invalid.
 - The health banner now reports Jamf Protect data that has gone stale or keeps failing in a
   workspace with Protect connected; before, only Jamf Pro data was checked.
 

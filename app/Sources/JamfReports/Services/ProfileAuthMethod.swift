@@ -36,6 +36,13 @@ enum ProfileAuthMethod {
             }
             return nil
         }
+
+        /// Why this profile cannot be the `protect.profile` login, or nil: only a product known
+        /// to be another one refuses. `.protect` and `.unknown` (nothing says) run.
+        func protectRefusal(profile: String) -> String? {
+            guard product != .protect, product != .unknown else { return nil }
+            return "'\(profile)' is a \(product.displayName) profile, not a Jamf Protect profile"
+        }
     }
 
     nonisolated(unsafe) private static var cache: [String: Resolved] = [:]
@@ -94,6 +101,15 @@ enum ProfileAuthMethod {
     /// `config list` on a cache miss, so callers on the main actor go through `Task.detached`.
     static func refusal(profile: String, operation: String) -> String? {
         resolve(profile: profile)?.proRefusal(profile: profile, operation: operation)
+    }
+
+    /// `Resolved.protectRefusal` for `profile`, nil too when it could not be resolved. Resolving
+    /// can run `config list`, so it runs detached: callers are often on the main actor.
+    static func protectRefusal(
+        profile: String,
+        resolved: @escaping @Sendable (String) -> Resolved? = { resolve(profile: $0) }
+    ) async -> String? {
+        await Task.detached { resolved(profile)?.protectRefusal(profile: profile) }.value
     }
 
     /// Whether `pro auth token` has no meaning for `profile`: API-key auth (Jamf School) or a

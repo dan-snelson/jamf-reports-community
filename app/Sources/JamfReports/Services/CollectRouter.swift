@@ -168,12 +168,14 @@ enum CollectRouter {
                 // its own login and may still answer. The Pro error stays the run's result.
                 await collectProtect(
                     detected: detected, config: config, profile: profile, disposition: .collected,
-                    workspacePaths: workspacePaths, protectCollect: protectCollect, onLine: onLine)
+                    workspacePaths: workspacePaths, protectCollect: protectCollect,
+                    resolved: resolved, onLine: onLine)
                 throw verdict
             }
             await collectProtect(
                 detected: detected, config: config, profile: profile, disposition: disposition,
-                workspacePaths: workspacePaths, protectCollect: protectCollect, onLine: onLine)
+                workspacePaths: workspacePaths, protectCollect: protectCollect,
+                resolved: resolved, onLine: onLine)
         }
     }
 
@@ -186,6 +188,7 @@ enum CollectRouter {
         disposition: ReportEngine.CollectDisposition,
         workspacePaths: WorkspacePaths.Type,
         protectCollect: ProtectCollect,
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved?,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async {
         guard detected.runsProtect else { return }
@@ -205,7 +208,19 @@ enum CollectRouter {
             return
         }
         // Protect augments Pro: a failure does not fail the run, but reads as Partial.
+        // A blank name is not a connection (`ConnectedProducts`); a login of another product
+        // would send Protect commands to the wrong API.
         let protectProfile = config?.protect?.resolvedProfile ?? ""
+        let notCollected: String? = if protectProfile.isEmpty {
+            "protect.profile is blank"
+        } else {
+            await ProfileAuthMethod.protectRefusal(profile: protectProfile, resolved: resolved)
+        }
+        if let notCollected {
+            onLine(.init(timestamp: Date(), level: .warn,
+                         text: "[warn] Jamf Protect not collected: \(notCollected)"))
+            return
+        }
         guard let dataDir = try? workspacePaths.dataDir(for: profile) else {
             onLine(.init(timestamp: Date(), level: .warn,
                 text: "[warn] protect: could not resolve dataDir for \(profile) — skipping"))

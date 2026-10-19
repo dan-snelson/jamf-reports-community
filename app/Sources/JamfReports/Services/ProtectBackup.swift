@@ -134,6 +134,7 @@ enum ProtectBackup {
         config: ReportConfig?,
         workspaceProfile: String,
         pinAllows: () -> Bool,
+        protectRefusal: (String) -> String? = { _ in nil },
         sharedStorage: () -> String?
     ) -> Plan {
         let detected = ProfileProductType.detect(from: config, profile: workspaceProfile)
@@ -149,6 +150,7 @@ enum ProtectBackup {
         guard ProfileService.isValid(protectProfile) else {
             return .skip(reason: "protect.profile is not a usable jamf-cli profile name")
         }
+        if let refusal = protectRefusal(protectProfile) { return .skip(reason: refusal) }
         if let place = sharedStorage() {
             return .skip(reason: "this workspace is \(place), and Protect backup files can hold "
                 + "third-party credentials that would sync to every Mac that shares it")
@@ -227,9 +229,13 @@ extension CLIBridge {
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> BackupProductResult? {
         let config = try? ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        let named = config?.protect?.resolvedProfile ?? ""
+        let refusal = config?.protect?.isEnabled == true && !named.isEmpty
+            ? await ProfileAuthMethod.protectRefusal(profile: named) : nil
         let plan = ProtectBackup.plan(
             config: config, workspaceProfile: profile,
             pinAllows: { SharedConfigPin.protectAllowed(profile: profile) },
+            protectRefusal: { _ in refusal },
             sharedStorage: sharedStorage)
         let protectProfile: String
         switch plan {

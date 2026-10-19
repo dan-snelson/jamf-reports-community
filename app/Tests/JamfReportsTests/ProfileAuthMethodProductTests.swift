@@ -64,6 +64,18 @@ final class ProfileAuthMethodProductTests: XCTestCase {
         XCTAssertNil(refusal(.unknown))
     }
 
+    func testProtectRefusalNamesAKnownOtherProductOnly() {
+        func refusal(_ product: JamfCLIProduct) -> String? {
+            ProfileAuthMethod.Resolved(
+                authMethod: "oauth2", isTenantLevel: false, isOrganizationLevel: false,
+                product: product).protectRefusal(profile: "p")
+        }
+        XCTAssertEqual(refusal(.pro), "'p' is a Jamf Pro profile, not a Jamf Protect profile")
+        XCTAssertEqual(refusal(.school), "'p' is a Jamf School profile, not a Jamf Protect profile")
+        XCTAssertNil(refusal(.protect))
+        XCTAssertNil(refusal(.unknown))
+    }
+
     func testOrganizationLevelPlatformProfileIsRefused() throws {
         ProfileAuthMethod.invalidateCache()
         let resolved = try ProductGuardSeed.seed(

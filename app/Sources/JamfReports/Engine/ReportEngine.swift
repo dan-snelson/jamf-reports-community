@@ -2125,12 +2125,13 @@ struct ReportEngine: Sendable {
                     collectStart: collectStart, onLine: onLine
                 )
             } else if kind == Self.dashboardKind {
+                let dashboardProtect = await Self.dashboardProtect(
+                    SharedConfigPin.protectAllowed(profile: profile) ? loadedConfig?.protect : nil,
+                    bin: bin, onLine: onLine)
                 result = try await Self.collectDashboard(
                     profile: profile,
                     arguments: Self.dashboardArguments(
-                        base: args, profile: profile,
-                        protect: SharedConfigPin.protectAllowed(profile: profile)
-                            ? loadedConfig?.protect : nil),
+                        base: args, profile: profile, protect: dashboardProtect),
                     supportsQuietFlags: supportsQuietFlags, bin: bin, bridge: bridge,
                     dataDir: dataDir, recordManifest: recordManifest,
                     useCachedData: useCachedData, stateStore: stateStore,

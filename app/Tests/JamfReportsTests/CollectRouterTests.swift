@@ -503,6 +503,51 @@ final class CollectRouterTests: XCTestCase {
         XCTAssertEqual([spy.proCallCount, spy.protectCallCount], [0, 0])
     }
 
+    // MARK: - protect.profile must be a Protect login
+
+    /// Answers for the Protect profile only; the workspace's own profile stays unresolved.
+    private func protectLogin(
+        _ product: JamfCLIProduct
+    ) -> @Sendable (String) -> ProfileAuthMethod.Resolved? {
+        let answer = resolved(product)
+        return { $0 == "my-protect" ? answer($0) : nil }
+    }
+
+    /// A blank name is not a connection (ConnectedProducts says so): one `[warn]`, not a
+    /// `[partial] protect collect failed` on every run.
+    func test_router_blankProtectProfile_skipsWithOneWarn() async throws {
+        let (spy, lines, thrown) = try await runProtectEnabledProfile(protectProfile: "")
+        XCTAssertNil(thrown)
+        XCTAssertEqual(spy.protectCallCount, 0)
+        XCTAssertEqual(lines.filter { $0.hasPrefix("[warn] Jamf Protect not collected") },
+                       ["[warn] Jamf Protect not collected: protect.profile is blank"])
+        XCTAssertFalse(lines.contains { $0.hasPrefix("[partial]") })
+    }
+
+    func test_router_protectProfileOfAnotherProduct_skipsWithOneWarn() async throws {
+        for product in [JamfCLIProduct.pro, .school, .securityCloud] {
+            let (spy, lines, thrown) = try await runProtectEnabledProfile(
+                resolved: protectLogin(product))
+            XCTAssertNil(thrown)
+            XCTAssertEqual(spy.protectCallCount, 0, "\(product)")
+            let warns = lines.filter { $0.hasPrefix("[warn] Jamf Protect not collected") }
+            XCTAssertEqual(warns.count, 1, "\(lines)")
+            XCTAssertTrue(warns[0].contains(
+                "'my-protect' is a \(product.displayName) profile, not a Jamf Protect profile"))
+        }
+    }
+
+    /// A Protect login, one nothing is known about, or one that could not be asked, collects.
+    func test_router_protectProfileProtectUnknownOrUnresolved_collects() async throws {
+        let answers: [@Sendable (String) -> ProfileAuthMethod.Resolved?] = [
+            protectLogin(.protect), protectLogin(.unknown), { _ in nil },
+        ]
+        for answer in answers {
+            let (spy, _, _) = try await runProtectEnabledProfile(resolved: answer)
+            XCTAssertEqual(spy.protectCallCount, 1)
+        }
+    }
+
     // MARK: - Helpers
 
     /// Runs the router for a Protect-enabled Pro profile whose workspace exists, so
@@ -511,7 +556,9 @@ final class CollectRouterTests: XCTestCase {
     private func runProtectEnabledProfile(
         proReturning disposition: ReportEngine.CollectDisposition = .collected,
         proThrowing proError: Error? = nil,
-        protectThrowing protectError: Error? = nil
+        protectThrowing protectError: Error? = nil,
+        protectProfile: String = "my-protect",
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved? = { _ in nil }
     ) async throws -> (spy: RouterSpy, lines: [String], thrown: Error?) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CollectRouterTests-\(UUID().uuidString)", isDirectory: true)
@@ -530,7 +577,7 @@ final class CollectRouterTests: XCTestCase {
         let config = try ConfigLoader.loadFromString("""
         protect:
           enabled: true
-          profile: my-protect
+          profile: "\(protectProfile)"
         """)
         let spy = RouterSpy(
             proDisposition: disposition, proError: proError, protectError: protectError)
@@ -545,6 +592,7 @@ final class CollectRouterTests: XCTestCase {
                 proCollect: spy.proCollect,
                 schoolCollect: spy.schoolCollect,
                 protectCollect: spy.protectCollect,
+                resolved: resolved,
                 onLine: { line in lines.append(line.text) }
             )
         } catch {

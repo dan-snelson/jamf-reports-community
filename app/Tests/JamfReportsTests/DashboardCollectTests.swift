@@ -75,6 +75,32 @@ final class DashboardCollectTests: XCTestCase {
                        base + ["--include-profile=prod-protect"])
     }
 
+    /// A `protect.profile` jamf-cli files under another product is left out with one `[warn]`;
+    /// a Protect login, or one nothing is known about, stays.
+    func testTheDashboardLeavesOutAProtectProfileOfAnotherProduct() async throws {
+        ProfileAuthMethod.invalidateCache()
+        addTeardownBlock { ProfileAuthMethod.invalidateCache() }
+        let protect = ProtectConfig(enabled: true, profile: "dashprof-protect")
+        let bin = binDir.appendingPathComponent("unused")
+
+        try ProductGuardSeed.seed(profile: "dashprof-protect", product: "pro", in: binDir)
+        let lines = ProductGuardLines()
+        let left = await ReportEngine.dashboardProtect(protect, bin: bin, onLine: lines.add)
+        XCTAssertNil(left)
+        XCTAssertEqual(lines.all, ["[warn] dashboard: Protect left out: 'dashprof-protect' is a "
+            + "Jamf Pro profile, not a Jamf Protect profile"])
+
+        ProfileAuthMethod.invalidateCache()
+        try ProductGuardSeed.seed(profile: "dashprof-protect", product: "protect", in: binDir)
+        let kept = await ReportEngine.dashboardProtect(protect, bin: bin, onLine: lines.add)
+        XCTAssertEqual(kept?.profile, "dashprof-protect")
+
+        ProfileAuthMethod.invalidateCache()
+        let unresolved = await ReportEngine.dashboardProtect(protect, bin: bin, onLine: lines.add)
+        XCTAssertEqual(unresolved?.profile, "dashprof-protect", "could not ask is not a refusal")
+        XCTAssertEqual(lines.all.count, 1)
+    }
+
     func testTheProtectArgumentIsTheTrailingOneAndOnlyWhenAppended() {
         let base = ["-p", "--include-profile=x", "dashboard", "--output", "json"]
         XCTAssertNil(ReportEngine.dashboardArgumentsWithoutProtect(base),

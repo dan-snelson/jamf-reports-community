@@ -29,6 +29,22 @@ extension ReportEngine {
         return base + ["--include-profile=\(other)"]
     }
 
+    /// `protect` unless its profile is known to be another product's login, which jamf-cli
+    /// would take for a clash or fail on; then one `[warn]` line and the page has no Protect card.
+    static func dashboardProtect(
+        _ protect: ProtectConfig?, bin: URL,
+        onLine: @Sendable (CLIBridge.LogLine) -> Void
+    ) async -> ProtectConfig? {
+        guard let protect, protect.isEnabled, !protect.resolvedProfile.isEmpty else { return protect }
+        let refusal = await ProfileAuthMethod.protectRefusal(
+            profile: protect.resolvedProfile,
+            resolved: { ProfileAuthMethod.resolve(profile: $0, binary: bin) })
+        guard let refusal else { return protect }
+        onLine(.init(timestamp: Date(), level: .warn,
+                     text: "[warn] dashboard: Protect left out: \(refusal)"))
+        return nil
+    }
+
     /// `arguments` without the `--include-profile=<name>` that `dashboardArguments`
     /// appended, nil when it appended none. The flag is last, so it is taken by position:
     /// a main profile can be named `--include-profile=…` and sits after `-p`, where a

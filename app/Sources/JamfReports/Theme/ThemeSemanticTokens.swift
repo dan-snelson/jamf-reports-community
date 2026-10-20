@@ -204,7 +204,7 @@ extension Theme {
             case .critical:      Theme.Colors.danger       // 0xFF453A
             case .high:          Theme.Colors.warn         // 0xFF9F0A
             case .medium:        Theme.Colors.goldBright   // 0xE8B614
-            case .low:           Theme.Colors.teal         // 0x2A6B6B
+            case .low:           Theme.Colors.tealBright   // 0x4FAAAA, 3:1 on the card
             case .informational: Theme.Colors.fgMuted      // 0x8E8E93 — muted, not alarming
             }
         }
@@ -256,7 +256,7 @@ extension Theme {
         /// in both dark in-app and light export canvases.
         static let osVersionInApp: [Color] = [
             Theme.Colors.goldBright,     // 0xE8B614
-            Theme.Colors.teal,           // 0x2A6B6B - promote existing teal token
+            Theme.Colors.tealBright,     // 0x4FAAAA - teal at 3:1 on the card
             Color(hex: 0x7DA3F9),        // soft blue
             Color(hex: 0xC58AF9),        // soft purple
             Color(hex: 0xF98AA3),        // soft pink

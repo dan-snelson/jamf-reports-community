@@ -17,4 +17,9 @@ final class ChartPaletteTokenTests: XCTestCase {
         XCTAssertEqual(hex(MobileFleetView.supervisionColor(for: Role.unsupervised)), 0xD95926)
         XCTAssertEqual(hex(MobileFleetView.supervisionColor(for: Role.unmanaged)), 0x8E8E93)
     }
+
+    func testTealGraphicsUseTheBrightTeal() {
+        XCTAssertEqual(hex(Theme.ChartPalette.osVersionInApp[1]), 0x4FAAAA)
+        XCTAssertEqual(hex(Theme.Severity.low.inApp), 0x4FAAAA)
+    }
 }

@@ -203,7 +203,8 @@ struct FleetOverviewView: View {
                     y: .value("Stability", point.value)
                 )
                 .foregroundStyle(LinearGradient(
-                    colors: [Theme.Colors.teal.opacity(0.35), Theme.Colors.teal.opacity(0)],
+                    colors: [Theme.Colors.tealBright.opacity(0.35),
+                             Theme.Colors.tealBright.opacity(0)],
                     startPoint: .top, endPoint: .bottom
                 ))
                 .interpolationMethod(.catmullRom)
@@ -212,7 +213,7 @@ struct FleetOverviewView: View {
                     x: .value("Date", point.date),
                     y: .value("Stability", point.value)
                 )
-                .foregroundStyle(Theme.Colors.teal)
+                .foregroundStyle(Theme.Colors.tealBright)
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                 .interpolationMethod(.catmullRom)
             }
@@ -268,7 +269,7 @@ struct FleetOverviewView: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.06))
                     Capsule()
-                        .fill(inverse ? Theme.Colors.warn : Theme.Colors.teal)
+                        .fill(inverse ? Theme.Colors.warn : Theme.Colors.tealBright)
                         .frame(width: geo.size.width * normalized)
                 }
             }

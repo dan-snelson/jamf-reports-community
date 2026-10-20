@@ -250,7 +250,7 @@ private func scheduledRunSingleBody(
     let routingNotify = configError == nil ? nil : NotifyConfigLoader.scoped(at: configURL)
     if routingConfig == nil {
         AppLogger.schedule.warning(
-            "[routing] no usable config for \(profile, privacy: .public) — treating it as Jamf Pro")
+            "[routing] no usable config for \(profile, privacy: .public) — treating as Jamf Pro")
     }
 
     let labelProfile = ProfileName.labelComponent(profile)

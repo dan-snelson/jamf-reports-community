@@ -121,8 +121,9 @@ func summaryMissing(for schedule: Schedule, profiles: [JamfCLIProfile], now: Dat
 /// the process ends, which ends the call; the run's own record is left without a footer and
 /// reads as interrupted, and this adds the reason to every workspace's Run History.
 private func exitAfterLockGiveUp(profiles: [JamfCLIProfile]) {
-    let message = "a run passed the tick lock's \(TickLock.heartbeatLimit.components.seconds / 3600)"
-        + "-hour limit and was stopped so it cannot run beside the next wake"
+    let hours = TickLock.heartbeatLimit.components.seconds / 3600
+    let message = "a run passed the tick lock's \(hours)-hour limit and was stopped so it "
+        + "cannot run beside the next wake"
     reportTickError(message)
     let failures = TickFailureLog(profiles: profiles)
     failures.recordInEveryWorkspace(message)

@@ -174,7 +174,8 @@ enum TickScheduler {
     /// The previous wake was more than `offGap` ago. A stamp beyond clock skew ahead is no wake.
     private static func wasOff(state: TickState, now: Date) -> Bool {
         guard let last = state.lastTick,
-              last.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance else { return false }
+              last.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance
+        else { return false }
         return now.timeIntervalSince(last) > offGap
     }
 
@@ -271,8 +272,9 @@ final class TickLockHold: @unchecked Sendable {
     /// be handed over: touches the lock every `interval` until cancelled. At `limit` it gives
     /// up the lock instead: no real run lasts that long, and a wedged live holder must not
     /// silence the ticker for good. `onGiveUp` runs right after the release, for a holder that is
-    /// its own process and must not outlive its lock (the tick exits). The limit counts awake time only (`SuspendingClock`): a
-    /// Mac that slept through the run must not give the lock up while the run goes on.
+    /// its own process and must not outlive its lock (the tick exits). The limit counts awake
+    /// time only (`SuspendingClock`): a Mac that slept through the run must not give the lock up
+    /// while the run goes on.
     func heartbeat(
         every interval: Duration = TickLock.heartbeatInterval,
         limit: Duration = TickLock.heartbeatLimit,

@@ -150,6 +150,8 @@ enum CloudStorage {
         case dropbox
         case box
         case googleDrive
+        /// A folder outside iCloud Drive's own path that iCloud syncs: Desktop and Documents.
+        case iCloudDesktopAndDocuments
         case otherFileProvider
         case detachedVolume
 
@@ -160,6 +162,7 @@ enum CloudStorage {
             case .dropbox: "Dropbox"
             case .box: "Box"
             case .googleDrive: "Google Drive"
+            case .iCloudDesktopAndDocuments: "iCloud Desktop & Documents"
             case .otherFileProvider: "a cloud-sync folder"
             case .detachedVolume: "a mounted volume"
             }
@@ -228,29 +231,83 @@ enum CloudStorage {
         return names
     }
 
-    /// The marker found in `url` or an ancestor, nil when there is none. The walk stops below
-    /// the home folder (never home itself or above), and outside home below the root's own
-    /// children, so a stray `~/.stignore` or `~/.sync` does not make every workspace shared.
-    private static func syncMarker(in url: URL, home: URL) -> String? {
+    /// `url` and its ancestors, nearest first. The walk stops below the home folder (never home
+    /// itself or above), and outside home below the root's own children, so a stray
+    /// `~/.stignore` or an attribute on home does not make every workspace shared.
+    private static func foldersBelowHome(from url: URL, home: URL) -> [URL] {
         let homePaths = Set([home.standardizedFileURL.path, home.resolvingSymlinksInPath().path])
+        var folders: [URL] = []
         var folder = url.resolvingSymlinksInPath().standardizedFileURL
         while folder.path.split(separator: "/").count > 1, !homePaths.contains(folder.path) {
-            if let found = entryNames(in: folder.path).first(where: isSyncMarker) { return found }
+            folders.append(folder)
             folder = folder.deletingLastPathComponent().standardizedFileURL
+        }
+        return folders
+    }
+
+    /// The marker found in `url` or an ancestor below home, nil when there is none.
+    private static func syncMarker(in url: URL, home: URL) -> String? {
+        foldersBelowHome(from: url, home: home).lazy
+            .compactMap { entryNames(in: $0.path).first(where: isSyncMarker) }.first
+    }
+
+    /// How a folder outside a provider's own path is found to sync: the File Provider domain
+    /// attribute macOS sets on a synced folder (iCloud Desktop & Documents sets it on `~/Desktop`
+    /// and `~/Documents`), or `isUbiquitousItem`. Closures so a test can stand in for both: the
+    /// attribute is kernel-protected and ubiquity cannot be set on disk.
+    struct SyncProbe: Sendable {
+        /// The folder's own `com.apple.file-provider-domain-id`, not followed through a link;
+        /// nil when absent or unreadable, "" when present with a value that cannot be read.
+        var fileProviderDomain: @Sendable (URL) -> String?
+        var isUbiquitous: @Sendable (URL) -> Bool
+
+        static let live = SyncProbe(
+            fileProviderDomain: CloudStorage.fileProviderDomain(of:),
+            isUbiquitous: {
+                (try? $0.resourceValues(forKeys: [.isUbiquitousItemKey]))?.isUbiquitousItem == true
+            })
+    }
+
+    @Sendable
+    static func fileProviderDomain(of folder: URL) -> String? {
+        let name = "com.apple.file-provider-domain-id"
+        let size = getxattr(folder.path, name, nil, 0, 0, XATTR_NOFOLLOW)
+        guard size >= 0 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: size)
+        let read = getxattr(folder.path, name, &bytes, size, 0, XATTR_NOFOLLOW)
+        return read >= 0 ? String(decoding: bytes.prefix(read), as: UTF8.self) : ""
+    }
+
+    /// The provider syncing `url` or an ancestor below home by the probe's signals, nil when
+    /// neither says so. Only a positive signal counts: an unreadable folder is not synced.
+    private static func fileProviderFolder(
+        _ url: URL, home: URL, probe: SyncProbe
+    ) -> Provider? {
+        for folder in foldersBelowHome(from: url, home: home) {
+            if let domain = probe.fileProviderDomain(folder) {
+                return domain.hasPrefix("com.apple.CloudDocs")
+                    ? .iCloudDesktopAndDocuments : .otherFileProvider
+            }
+            if probe.isUbiquitous(folder) { return .iCloudDesktopAndDocuments }
         }
         return nil
     }
 
-    /// Whether other Macs can write `url`: a sync-provider path, a volume that is not local
-    /// (NFS, SMB or autofs outside `/Volumes`, probed on the symlink-resolved path), or a sync
-    /// daemon's marker file in the folder or an ancestor below home. A tool that leaves no
-    /// marker is not found; `shared_workspace.enabled: true` covers it.
+    /// Whether other Macs can write `url`: a sync-provider path, a folder a File Provider syncs
+    /// (iCloud Desktop & Documents, `SyncProbe`), a volume that is not local (NFS, SMB or autofs
+    /// outside `/Volumes`, probed on the symlink-resolved path), or a sync daemon's marker file
+    /// in the folder or an ancestor below home. A tool that leaves no marker is not found;
+    /// `shared_workspace.enabled: true` covers it.
     static func sharedStorage(
         for url: URL,
         volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        syncProbe: SyncProbe = .live,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> SharedStorage? {
         if let provider = provider(for: url) { return .provider(provider) }
+        if let provider = fileProviderFolder(url, home: home, probe: syncProbe) {
+            return .provider(provider)
+        }
         if volumeIsLocal(url.resolvingSymlinksInPath()) == false { return .networkVolume }
         return syncMarker(in: url, home: home).map { .syncMarker($0) }
     }
@@ -258,9 +315,11 @@ enum CloudStorage {
     static func isSharedStorage(
         _ url: URL,
         volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        syncProbe: SyncProbe = .live,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> Bool {
-        sharedStorage(for: url, volumeIsLocal: volumeIsLocal, home: home) != nil
+        sharedStorage(for: url, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe, home: home)
+            != nil
     }
 
     private static func providerForCloudStorageFolder(_ folder: String) -> Provider {

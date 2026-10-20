@@ -81,6 +81,24 @@ final class ConfigDoctorCloudStorageTests: XCTestCase {
         XCTAssertTrue(row?.title.contains("OneDrive") == true)
     }
 
+    /// The Documents path names no provider; the detected one names the row and the backups.
+    func testAnICloudDesktopAndDocumentsWorkspaceNamesItsProvider() {
+        var synced = inputs(
+            workspace: URL(fileURLWithPath: "\(home)/Documents/Jamf-Reports/prod"),
+            backups: URL(fileURLWithPath: "\(home)/Documents/Jamf-Reports/prod/backups"),
+            coordinationEnabled: true)
+        XCTAssertNil(ConfigDoctorService.evaluateCloudStorage(synced)
+            .first { $0.id == "cloud.workspace" })
+        synced.workspaceProvider = .iCloudDesktopAndDocuments
+        let rows = ConfigDoctorService.evaluateCloudStorage(synced)
+        XCTAssertEqual(rows.first { $0.id == "cloud.workspace" }?.title,
+                       "Shared workspace on iCloud Desktop & Documents")
+        XCTAssertNotNil(rows.first { $0.id == "cloud.backups" })
+        XCTAssertFalse(rows.contains {
+            $0.title.contains("OneDrive") || $0.detail.contains("OneDrive")
+        })
+    }
+
     func testSharedWorkspaceWithoutCoordinationWarns() {
         let rows = ConfigDoctorService.evaluateCloudStorage(inputs(
             workspace: cloud("Team/Jamf Reports/prod"),

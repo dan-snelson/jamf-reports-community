@@ -42,9 +42,11 @@ enum SharedWorkspace {
     /// the file is writable by every peer, so an `enabled: false` in it cannot switch them off.
     static func isEffectivelyShared(
         workspace: URL, config: SharedWorkspaceConfig?,
-        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        syncProbe: CloudStorage.SyncProbe = .live
     ) -> Bool {
-        let shared = CloudStorage.isSharedStorage(workspace, volumeIsLocal: volumeIsLocal)
+        let shared = CloudStorage.isSharedStorage(
+            workspace, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe)
         return (config ?? SharedWorkspaceConfig()).isEnabled(workspaceIsSynced: shared)
     }
 

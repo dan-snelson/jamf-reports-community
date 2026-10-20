@@ -46,9 +46,11 @@ enum BackupMaintenance {
     /// Mac's.
     static func sharedStorageDescription(
         _ backupsRoot: URL, profile: String,
-        volumeIsLocal: @Sendable (URL) -> Bool?
+        volumeIsLocal: @Sendable (URL) -> Bool?,
+        syncProbe: CloudStorage.SyncProbe = .live
     ) -> String? {
-        switch CloudStorage.sharedStorage(for: backupsRoot, volumeIsLocal: volumeIsLocal) {
+        switch CloudStorage.sharedStorage(
+            for: backupsRoot, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe) {
         case .provider(let provider): return "on \(provider.displayName)"
         case .networkVolume: return "on a network volume"
         case .syncMarker: return "in a folder a sync tool manages"
@@ -85,8 +87,8 @@ enum BackupMaintenance {
     /// 3. **On shared storage, only this machine's own backups are pruned.**
     ///    A shared folder holds every Mac's backups, so an unscoped prune would
     ///    spend this machine's `keep` budget on other people's work and cut
-    ///    everyone's retention. Shared means a sync-provider path, a non-local volume or
-    ///    `shared_workspace.enabled: true` . Ownership comes from the
+    ///    everyone's retention. Shared means `CloudStorage.sharedStorage` or
+    ///    `shared_workspace.enabled: true`. Ownership comes from the
     ///    `.jrc-host` stamp written beside each backup; anything without one — a pre-2.7.0
     ///    backup, or another Mac's — is left alone, because we only delete what
     ///    we can prove is ours. Local storage keeps the original unscoped
@@ -99,11 +101,12 @@ enum BackupMaintenance {
         profile: String,
         keep: Int,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil,
-        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        syncProbe: CloudStorage.SyncProbe = .live
     ) {
         guard let backupsRoot = backupsRoot(for: profile) else { return }
         let sharedWhere = sharedStorageDescription(
-            backupsRoot, profile: profile, volumeIsLocal: volumeIsLocal)
+            backupsRoot, profile: profile, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe)
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
             at: backupsRoot,
@@ -207,14 +210,16 @@ enum BackupMaintenance {
     @discardableResult
     static func cleanStaleTempDirs(
         profile: String, now: Date = Date(),
-        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        syncProbe: CloudStorage.SyncProbe = .live
     ) -> [String] {
         guard let backupsRoot = backupsRoot(for: profile) else { return [] }
         // Staleness here can only come from mtime — a `.tmp-<UUID>` name carries
         // no timestamp. On synced storage that mtime is the provider's, and the
         // directory may belong to another Mac's in-flight backup, so don't sweep.
         if sharedStorageDescription(
-            backupsRoot, profile: profile, volumeIsLocal: volumeIsLocal) != nil {
+            backupsRoot, profile: profile, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe)
+            != nil {
             return []
         }
         let fm = FileManager.default

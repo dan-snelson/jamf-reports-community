@@ -968,6 +968,9 @@ struct CloudStorageInputs: Sendable {
     let otherHosts: [SharedWorkspace.HostActivity]
     let claim: SharedWorkspace.Claim?
     let now: Date
+    /// The provider `CloudStorage.sharedStorage` found syncing the workspace, which includes a
+    /// folder no path shows, such as iCloud Desktop & Documents. Nil falls back to the path.
+    var workspaceProvider: CloudStorage.Provider? = nil
 }
 
 extension ConfigDoctorService {
@@ -1062,7 +1065,8 @@ extension ConfigDoctorService {
 
     private static func workspaceShapeRows(_ inputs: CloudStorageInputs) -> [DoctorRow] {
         guard let workspace = inputs.workspace,
-              let provider = CloudStorage.provider(for: workspace) else { return [] }
+              let provider = inputs.workspaceProvider ?? CloudStorage.provider(for: workspace)
+        else { return [] }
 
         // The genuinely risky state: the folder syncs to other people's Macs
         // but nothing is coordinating writes to it.
@@ -1251,7 +1255,8 @@ extension ConfigDoctorService {
 
     private static func publishTargetRows(_ inputs: CloudStorageInputs) -> [DoctorRow] {
         var rows: [DoctorRow] = []
-        let workspaceProvider = inputs.workspace.flatMap(CloudStorage.provider(for:))
+        let workspaceProvider = inputs.workspaceProvider
+            ?? inputs.workspace.flatMap(CloudStorage.provider(for:))
         let outputProvider = inputs.outputDir.flatMap(CloudStorage.provider(for:))
         let archiveProvider = inputs.archiveDir.flatMap(CloudStorage.provider(for:))
 
@@ -1280,7 +1285,8 @@ extension ConfigDoctorService {
             ))
         }
 
-        if inputs.backupsDir.flatMap(CloudStorage.provider(for:)) != nil {
+        if workspaceProvider != nil
+            || inputs.backupsDir.flatMap(CloudStorage.provider(for:)) != nil {
             rows.append(DoctorRow(
                 id: "cloud.backups",
                 severity: .suggest,
@@ -1345,7 +1351,12 @@ extension ConfigDoctorService {
         let conflicts = scanRoots.flatMap { CloudStorage.conflictCopies(in: $0) }
 
         let shared = config?.sharedWorkspace ?? SharedWorkspaceConfig()
-        let synced = workspace.flatMap(CloudStorage.provider(for:)) != nil
+        let workspaceProvider = workspace.flatMap { folder -> CloudStorage.Provider? in
+            guard case .provider(let provider)? = CloudStorage.sharedStorage(for: folder)
+            else { return nil }
+            return provider
+        }
+        let synced = workspaceProvider != nil
         let coordinating = shared.isEnabled(workspaceIsSynced: synced)
 
         return CloudStorageInputs(
@@ -1362,7 +1373,8 @@ extension ConfigDoctorService {
             minCollectInterval: shared.minCollectInterval,
             otherHosts: coordinating ? SharedWorkspace.otherHosts(profile: profile) : [],
             claim: coordinating ? SharedWorkspace.readClaim(profile: profile) : nil,
-            now: Date()
+            now: Date(),
+            workspaceProvider: workspaceProvider
         )
     }
 }

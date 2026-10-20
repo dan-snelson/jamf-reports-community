@@ -329,13 +329,15 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     /// holds now (the values the operator set up with) and reports no drift. `persist: false`
     /// writes nothing: the pin a first sight or an upgrade would write is only compared against.
     static func check(
-        profile: String, appSupport: URL = AppSupport.directory(), persist: Bool = true
+        profile: String, appSupport: URL = AppSupport.directory(), persist: Bool = true,
+        syncProbe: CloudStorage.SyncProbe = .live
     ) -> Check {
         guard let workspace = ProfileService.workspaceURL(for: profile) else {
             return Check(workspace: nil, pinned: nil, drifts: [])
         }
         guard let current = sharedCurrent(
-            profile: profile, workspace: workspace, appSupport: appSupport) else {
+            profile: profile, workspace: workspace, appSupport: appSupport, syncProbe: syncProbe)
+        else {
             return Check(workspace: workspace, pinned: nil, drifts: [])
         }
         switch read(profile: profile, appSupport: appSupport) {
@@ -399,13 +401,13 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
 
     /// `current(workspace:)` for a workspace that is pinned; nil for a local one.
     private static func sharedCurrent(
-        profile: String, workspace: URL, appSupport: URL
+        profile: String, workspace: URL, appSupport: URL, syncProbe: CloudStorage.SyncProbe = .live
     ) -> SharedConfigPin? {
         let sharedConfig = (try? ConfigLoader.load(
             from: workspace.appendingPathComponent("config.yaml")))?.sharedWorkspace
         guard appliesTo(
             sharedEnabled: sharedConfig?.enabled,
-            onSharedStorage: CloudStorage.isSharedStorage(workspace),
+            onSharedStorage: CloudStorage.isSharedStorage(workspace, syncProbe: syncProbe),
             pinExists: FileManager.default.fileExists(
                 atPath: storeURL(profile: profile, appSupport: appSupport).path))
         else { return nil }

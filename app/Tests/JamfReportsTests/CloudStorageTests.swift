@@ -106,6 +106,87 @@ final class CloudStorageTests: XCTestCase {
         XCTAssertNil(CloudStorage.sharedStorage(for: tempDir, volumeIsLocal: { _ in true }))
     }
 
+    // MARK: - Folders a File Provider syncs (iCloud Desktop & Documents)
+
+    private static let iCloudDomain = "com.apple.CloudDocs.iCloudDriveFileProvider/B463EF00"
+
+    /// A probe answering only for the folder at `domainAt` (attribute) or `ubiquitousAt`.
+    private func probe(
+        domainAt: URL? = nil, domain: String = iCloudDomain, ubiquitousAt: URL? = nil
+    ) -> CloudStorage.SyncProbe {
+        let domainPath = domainAt?.resolvingSymlinksInPath().path
+        let ubiquitousPath = ubiquitousAt?.resolvingSymlinksInPath().path
+        return CloudStorage.SyncProbe(
+            fileProviderDomain: { $0.path == domainPath ? domain : nil },
+            isUbiquitous: { $0.path == ubiquitousPath })
+    }
+
+    private func documentsWorkspace() throws -> (home: URL, documents: URL, workspace: URL) {
+        let home = tempDir.appendingPathComponent("home", isDirectory: true)
+        let documents = home.appendingPathComponent("Documents", isDirectory: true)
+        let workspace = documents.appendingPathComponent("Jamf-Reports/p", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        return (home, documents, workspace)
+    }
+
+    func testAFileProviderDomainOnTheFolderIsICloudDesktopAndDocuments() throws {
+        let (home, _, workspace) = try documentsWorkspace()
+        XCTAssertEqual(
+            CloudStorage.sharedStorage(
+                for: workspace, volumeIsLocal: { _ in true },
+                syncProbe: probe(domainAt: workspace), home: home),
+            .provider(.iCloudDesktopAndDocuments))
+        XCTAssertEqual(CloudStorage.Provider.iCloudDesktopAndDocuments.displayName,
+                       "iCloud Desktop & Documents")
+    }
+
+    func testAFileProviderDomainOnAnAncestorBelowHomeCounts() throws {
+        let (home, documents, workspace) = try documentsWorkspace()
+        XCTAssertEqual(
+            CloudStorage.sharedStorage(
+                for: workspace, volumeIsLocal: { _ in true },
+                syncProbe: probe(domainAt: documents), home: home),
+            .provider(.iCloudDesktopAndDocuments))
+        // Another provider's domain is still a synced folder, named generically.
+        XCTAssertEqual(
+            CloudStorage.sharedStorage(
+                for: workspace, volumeIsLocal: { _ in true },
+                syncProbe: probe(domainAt: documents, domain: "com.example.Sync/1"), home: home),
+            .provider(.otherFileProvider))
+    }
+
+    func testAFileProviderDomainOnHomeOrAboveDoesNotCount() throws {
+        let (home, _, workspace) = try documentsWorkspace()
+        for folder in [home, tempDir!] {
+            XCTAssertNil(CloudStorage.sharedStorage(
+                for: workspace, volumeIsLocal: { _ in true },
+                syncProbe: probe(domainAt: folder), home: home), folder.path)
+            XCTAssertNil(CloudStorage.sharedStorage(
+                for: workspace, volumeIsLocal: { _ in true },
+                syncProbe: probe(ubiquitousAt: folder), home: home), folder.path)
+        }
+    }
+
+    func testAUbiquitousFolderIsICloudDesktopAndDocuments() throws {
+        let (home, _, workspace) = try documentsWorkspace()
+        XCTAssertEqual(
+            CloudStorage.sharedStorage(
+                for: workspace, volumeIsLocal: { _ in true },
+                syncProbe: probe(ubiquitousAt: workspace), home: home),
+            .provider(.iCloudDesktopAndDocuments))
+    }
+
+    func testNeitherSignalLeavesTheFolderLocal() throws {
+        let (home, _, workspace) = try documentsWorkspace()
+        XCTAssertNil(CloudStorage.sharedStorage(
+            for: workspace, volumeIsLocal: { _ in true }, syncProbe: probe(), home: home))
+        // The live probe reads no attribute on a fresh temporary folder.
+        XCTAssertNil(CloudStorage.fileProviderDomain(of: workspace))
+        XCTAssertFalse(CloudStorage.SyncProbe.live.isUbiquitous(workspace))
+        XCTAssertNil(CloudStorage.sharedStorage(
+            for: workspace, volumeIsLocal: { _ in true }, home: home))
+    }
+
     // MARK: - Canonical filename stamps
 
     func testSnapshotTimestampParsesCanonicalStem() {
@@ -269,4 +350,11 @@ final class CloudStorageTests: XCTestCase {
         XCTAssertNil(date("summary_2026-02-31.json"), "no rolling over into March")
         XCTAssertNil(date("computers_20260820T000000.json"))
     }
+}
+
+extension CloudStorage.SyncProbe {
+    /// Every folder reads as synced by iCloud Desktop & Documents, for the callers' tests.
+    static let iCloudEverywhere = CloudStorage.SyncProbe(
+        fileProviderDomain: { _ in "com.apple.CloudDocs.iCloudDriveFileProvider/B463EF00" },
+        isUbiquitous: { _ in false })
 }

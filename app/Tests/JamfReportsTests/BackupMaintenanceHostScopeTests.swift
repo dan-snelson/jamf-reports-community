@@ -178,6 +178,15 @@ final class BackupMaintenanceHostScopeTests: XCTestCase {
         try assertOnlyOwnBackupPruned()
     }
 
+    /// iCloud Desktop & Documents syncs `~/Documents` with no path that says so.
+    func testAnICloudDesktopAndDocumentsFolderIsScopedToThisMachine() throws {
+        try seedMixedOwnerBackups()
+        BackupMaintenance.pruneScheduledBackups(
+            profile: profile, keep: 0, volumeIsLocal: { _ in true },
+            syncProbe: .iCloudEverywhere)
+        try assertOnlyOwnBackupPruned()
+    }
+
     func testSharedWorkspaceEnabledInConfigYamlIsRead() throws {
         try seedMixedOwnerBackups()
         try "shared_workspace:\n  enabled: true\n".write(

@@ -22,9 +22,27 @@ final class CollectSourcesPlanTests: XCTestCase {
         let school = plan(.jamfSchool, protect: "prod-protect")
         XCTAssertEqual(school.sources.map(\.kind),
                        ReportEngine.schoolCommandMatrix(profile: "prod").map(\.kind))
-        XCTAssertTrue(school.sources.allSatisfy { $0.product == .school })
+        XCTAssertEqual(school.sources.filter { $0.product == .platformAPI }.map(\.kind),
+                       [ReportEngine.schoolBlueprintsKind])
+        XCTAssertTrue(school.sources.filter { $0.product != .platformAPI }
+            .allSatisfy { $0.product == .school })
         XCTAssertTrue(school.sources.contains { $0.command == "school devices list" })
         XCTAssertFalse(school.sources.contains { $0.command.hasPrefix("pro ") })
+    }
+
+    func testSchoolBlueprintsAreSkippedOnlyWhenTheProfileLacksPlatformFields() {
+        func reason(auth: String?, tenant: Bool) -> String?? {
+            plan(.jamfSchool, auth: auth, tenantLevel: tenant).sources
+                .first { $0.kind == ReportEngine.schoolBlueprintsKind }?.skipReason
+        }
+        XCTAssertEqual(
+            reason(auth: "apikey", tenant: false) ?? nil,
+            "the Jamf School profile has no Platform API fields (Data Sources › Add Platform API)")
+        XCTAssertEqual(reason(auth: "apikey", tenant: true), .some(nil))
+        XCTAssertEqual(reason(auth: nil, tenant: false), .some(nil), "unresolved collects")
+        let school = plan(.jamfSchool, auth: "apikey")
+        XCTAssertTrue(school.sources.filter { $0.product == .school }
+            .allSatisfy { $0.skipReason == nil })
     }
 
     func testTheJamfProListIsTheCollectMatrixPlusTheScanAndTheLateSources() {

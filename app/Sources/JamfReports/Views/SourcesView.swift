@@ -203,6 +203,13 @@ struct SourcesView: View {
             }
         )) {
             VStack(spacing: 0) {
+                if product == .platformAPI, isSchoolWorkspace {
+                    Text("Experimental: Jamf School blueprints through the Platform API")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
                 ForEach(sources) { source in
                     sourceRow(source)
                     if source.id != sources.last?.id {
@@ -720,8 +727,7 @@ struct SourcesView: View {
                     try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
                 }
                 let detected = ProfileProductType.detect(from: config, profile: profile)
-                let auth = detected.type == .jamfPro
-                    ? ProfileAuthMethod.resolve(profile: profile) : nil
+                let auth = ProfileAuthMethod.resolve(profile: profile)
                 let protectProfile = ConnectedProducts.read(profile: profile).protectProfile
                 let plan = CollectSourcesPlan.build(.init(
                     product: detected.type, profile: profile,

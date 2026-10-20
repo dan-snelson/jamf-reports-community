@@ -2054,13 +2054,11 @@ struct ReportEngine: Sendable {
             .map(StateFileStore.init(directory:))
         let collectStart = Date()
 
-        // Gate --no-hints/--no-version-check on the installed binary being >= 1.18.0.
-        // These flags are 1.18-only; passing them to an older binary produces exit 1
-        // (unknown flag) and silently skips every snapshot. Default-off when version
-        // detection fails (nil) — safer than risking unknown flags on an old binary.
+        // --no-hints/--no-version-check only on a binary known to meet the floor: a pre-1.18
+        // binary exits 1 on them and skips every snapshot, and an unknown version may be one.
         // They are global flags: `schoolCollect` passes them under the same gate.
         let supportsQuietFlags = detectedVersion.map {
-            !JamfCLIInstaller.isBelowMinimumRunnable($0)
+            !JamfCLIInstaller.isBelowMinimumSupported($0)
         } ?? false
 
         // Resolved once per run, not per kind — it spawns `config list`.
@@ -2737,7 +2735,7 @@ struct ReportEngine: Sendable {
         // --no-hints suppresses interactive usage tips; --no-version-check
         // suppresses the "new version available" banner that jamf-cli 1.18+
         // emits on stderr. Both keep Runs-screen output signal-to-noise clean
-        // during automated collects. Only appended when the binary is >= 1.18.0
+        // during automated collects. Only appended when the binary meets the floor
         // (see `supportsQuietFlags` at the call site).
         let invokeArgs = supportsQuietFlags
             ? arguments + ["--no-hints", "--no-version-check"]
@@ -3416,9 +3414,9 @@ struct ReportEngine: Sendable {
         for line in collectPlanLines(profile: profile, fixedPlan: plan) {
             onLine(.init(timestamp: Date(), level: .info, text: line))
         }
-        // Same gate as the Pro loop: the flags exist from the runnable floor (1.18) on.
+        // Same gate as the Pro loop.
         let quiet = JamfCLIInstaller.installedVersion(at: bin).map {
-            !JamfCLIInstaller.isBelowMinimumRunnable($0)
+            !JamfCLIInstaller.isBelowMinimumSupported($0)
         } ?? false
         let commands = plan.filter { $0.skip == nil }.map {
             (args: quiet ? $0.args + ["--no-hints", "--no-version-check"] : $0.args, kind: $0.kind)

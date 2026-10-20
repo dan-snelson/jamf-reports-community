@@ -63,16 +63,21 @@ final class NeedsAttentionBannerTests: XCTestCase {
         XCTAssertEqual(ordered.map(\.code), [.webhookRejected, .schoolZeroDevices])
     }
 
-    func testDismissHidesAnItemUntilItIsSeenAgain() throws {
+    func testDismissHidesAnItemUntilItClearsAndOpensAgain() throws {
         let suite = "attention-dismiss-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let open = item(.webhookRejected, "HTTP 404")
         AttentionDismissals.dismiss([open], in: defaults)
         XCTAssertTrue(AttentionDismissals.isDismissed(open, in: defaults))
-        var again = open
-        again.lastSeen = open.lastSeen.addingTimeInterval(3600)
-        XCTAssertFalse(AttentionDismissals.isDismissed(again, in: defaults))
+        var repeated = open
+        repeated.lastSeen = open.lastSeen.addingTimeInterval(3600)
+        repeated.count = 2
+        XCTAssertTrue(AttentionDismissals.isDismissed(repeated, in: defaults),
+                      "an hourly repeat of the same open item stays hidden")
+        let reopened = item(.webhookRejected, "HTTP 404", seen: 7200)
+        XCTAssertFalse(AttentionDismissals.isDismissed(reopened, in: defaults),
+                       "cleared and opened again, it shows")
         XCTAssertFalse(AttentionDismissals.isDismissed(
             item(.schoolZeroDevices, "x"), in: defaults))
     }

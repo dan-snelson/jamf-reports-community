@@ -14,7 +14,7 @@ versions in this repository map to git tags.
   unreadable Extension Attribute snapshot, a large Fleet Drift change and a mobile device list
   that could not be saved now show as "Needs attention" in the health strip, with a button to the
   screen that fixes it. Each clears itself once the next run's check passes, and Dismiss hides it
-  on this Mac until it happens again. (#284)
+  on this Mac until it clears and happens again. (#284)
 - A Jamf Pro backup now also backs up Jamf Protect when Protect is connected to the workspace.
   On shared storage it is skipped by default, since the files hold action configurations with
   request headers and data-forwarding settings; if your organization's storage policy allows

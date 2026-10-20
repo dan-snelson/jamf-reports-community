@@ -1072,8 +1072,9 @@ without the keys is no record, an unknown code is skipped. The banner entry rank
 collects and the Doctor-driven entries, above stale data ("2 things need attention: …"); its
 button follows the newest item's code (`AttentionCode.destination`: Automation for the webhook,
 Backups for Protect, Run History on that run's log, `openRunLogRequested`, for the rest), and
-its Dismiss hides the items on this Mac until each one's `last_seen` moves
-(`AttentionDismissals`, UserDefaults). No 2.11 code routes to Config Doctor. Demo mode shows none;
+its Dismiss hides the items on this Mac until each one clears and opens again, keyed by profile,
+code and `first_seen`, so an hourly or daily repeat stays hidden (`AttentionDismissals`,
+UserDefaults). No 2.11 code routes to Config Doctor. Demo mode shows none;
 the included CLI records none.
 
 **Tile grids (2.8.1).** `Theme/TileGrid.swift`'s `EqualHeightTileGrid` is a `Layout` that fits as many columns as the width allows (never more than there are tiles) and gives every tile in a row the row's tallest height; a `StatTile` passes `fillsHeight: true` to use it. The Overview score cards and agents use it, so a tile with a longer sub-line no longer leaves its neighbours short. `TileGridMetrics` holds the pure arithmetic the tests cover.

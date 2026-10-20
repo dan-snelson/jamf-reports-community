@@ -97,19 +97,20 @@ struct AttentionItem: Codable, Sendable, Equatable {
     }
 }
 
-/// Items the admin dismissed on this Mac, each until it is seen again (its `lastSeen` moves).
-/// Per Mac in UserDefaults, never in the workspace.
+/// Items the admin dismissed on this Mac, each until it clears and opens again (a new
+/// `firstSeen`); a repeat of the same open item stays hidden. Per Mac in UserDefaults, never in
+/// the workspace.
 enum AttentionDismissals {
     static let key = "dismissedAttentionItems"
 
     static func isDismissed(_ item: AttentionItem, in defaults: UserDefaults = .standard) -> Bool {
         (defaults.dictionary(forKey: key)?[id(item)] as? Double)
-            == item.lastSeen.timeIntervalSince1970
+            == item.firstSeen.timeIntervalSince1970
     }
 
     static func dismiss(_ items: [AttentionItem], in defaults: UserDefaults = .standard) {
         var stored = defaults.dictionary(forKey: key) ?? [:]
-        for item in items { stored[id(item)] = item.lastSeen.timeIntervalSince1970 }
+        for item in items { stored[id(item)] = item.firstSeen.timeIntervalSince1970 }
         defaults.set(stored, forKey: key)
     }
 

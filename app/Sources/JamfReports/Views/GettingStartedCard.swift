@@ -29,22 +29,34 @@ struct GettingStartedCard: View {
     @ViewBuilder
     private func row(_ step: GettingStartedStep, isActive: Bool) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: step.done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(step.done ? Theme.Colors.ok : Theme.Text.tertiary(contrast))
-                    .accessibilityHidden(true)
-                Text(step.title)
-                    .font(.callout.weight(isActive ? .semibold : .regular))
-                    .foregroundStyle(step.done ? Theme.Text.tertiary(contrast) : Theme.Colors.fg)
-                    .strikethrough(step.done, color: Theme.Text.tertiary(contrast))
+            // The button is outside the combined element so VoiceOver can activate it.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: step.done ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(
+                            step.done ? Theme.Colors.ok : Theme.Text.tertiary(contrast)
+                        )
+                        .accessibilityHidden(true)
+                    Text(step.title)
+                        .font(.callout.weight(isActive ? .semibold : .regular))
+                        .foregroundStyle(
+                            step.done ? Theme.Text.tertiary(contrast) : Theme.Colors.fg
+                        )
+                        .strikethrough(step.done, color: Theme.Text.tertiary(contrast))
+                }
+                if !step.done {
+                    Text(step.detail)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .padding(.leading, 24)
+                }
             }
-            if !step.done {
-                Text(step.detail)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .padding(.leading, 24)
-            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(step.title): \(step.done ? "complete" : "incomplete"). "
+                    + (step.done ? "" : step.detail)
+            )
             if isActive {
                 PNPButton(title: step.actionLabel, style: .gold, size: .sm) {
                     onAction(step)
@@ -53,10 +65,5 @@ struct GettingStartedCard: View {
                 .padding(.top, 2)
             }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(step.title): \(step.done ? "complete" : "incomplete"). "
-                + (step.done ? "" : step.detail)
-        )
     }
 }

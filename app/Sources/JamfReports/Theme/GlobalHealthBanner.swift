@@ -98,10 +98,11 @@ struct GlobalHealthBanner: View {
                         .foregroundStyle(Theme.Colors.fgMuted)
                 }
             }
+            // Combine the text only; the banner's action button stays its own element.
+            .accessibilityElement(children: .combine)
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Pure action derivation

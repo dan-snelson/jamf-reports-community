@@ -89,4 +89,73 @@ final class ServerHostRedactionTests: XCTestCase {
         XCTAssertEqual(DiagnosticBundleService.serverHosts(
             profile: "onprem", configURL: dir.appendingPathComponent("absent.yaml")), [])
     }
+
+    /// jamf-cli config with three servers, and workspaces `prod` (Pro + Protect) and `edu`
+    /// (School + Protect) under a scratch workspaces root.
+    private func protectFixture() throws -> (config: URL, root: URL) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let root = dir.appendingPathComponent("ws", isDirectory: true)
+        let school = "school_cli:\n  enabled: true\n  profile: edu\n"
+        for (name, product) in [("prod", ""), ("edu", school)] {
+            let folder = root.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try (product + "protect:\n  enabled: true\n  profile: shield\n")
+                .write(to: folder.appendingPathComponent("config.yaml"), atomically: true,
+                       encoding: .utf8)
+        }
+        let config = dir.appendingPathComponent("config.yaml")
+        try """
+        profiles:
+            prod:
+                url: https://jss.example.org:8443
+            edu:
+                url: https://school.example.net
+            shield:
+                url: https://acme-label.protect.example.com
+            elsewhere:
+                url: https://other.example.com
+        """.write(to: config, atomically: true, encoding: .utf8)
+        return (config, root)
+    }
+
+    func testServerHostsAddsTheWorkspacesProtectProfile() throws {
+        let (config, root) = try protectFixture()
+        let prod = DiagnosticBundleService.serverHosts(
+            profile: "prod", configURL: config, workspacesRoot: root)
+        XCTAssertEqual(prod, ["jss.example.org:8443", "jss.example.org",
+                              "acme-label.protect.example.com"])
+        let edu = DiagnosticBundleService.serverHosts(
+            profile: "edu", configURL: config, workspacesRoot: root)
+        XCTAssertEqual(edu, ["school.example.net", "acme-label.protect.example.com"])
+        XCTAssertFalse(DiagnosticBundleService.serverHosts(
+            profile: "elsewhere", configURL: config, workspacesRoot: root)
+            .contains("acme-label.protect.example.com"))
+    }
+
+    func testSharedLogRedactsTheProtectHost() throws {
+        let (config, root) = try protectFixture()
+        let shared = LogRedactor.redactedForSharing(
+            "[error] protect alerts failed at acme-label.protect.example.com", profile: "prod",
+            scopeIDs: { _ in [] },
+            serverHosts: {
+                DiagnosticBundleService.serverHosts(
+                    profile: $0, configURL: config, workspacesRoot: root)
+            })
+        XCTAssertFalse(shared.contains("acme-label"), "got: \(shared)")
+    }
+
+    func testLoggingExportRedactsEveryProfilesHostAndID() {
+        let id = "3f2b8c1e-5d4a-4e7b-9c10-a1b2c3d4e5f6"
+        let text = "[collect] a: jss.example.org down\n[collect] b: school.example.net "
+            + "Environment '\(id)' not found"
+        let shared = LogRedactor.redactedForSharing(
+            text, profiles: ["a", "b"],
+            scopeIDs: { $0 == "b" ? [id] : [] },
+            serverHosts: { $0 == "a" ? ["jss.example.org"] : ["school.example.net"] })
+        XCTAssertFalse(shared.contains("jss.example.org"), "got: \(shared)")
+        XCTAssertFalse(shared.contains("school.example.net"), "got: \(shared)")
+        XCTAssertFalse(shared.contains("3f2b8c1e"), "got: \(shared)")
+    }
 }

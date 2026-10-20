@@ -1206,8 +1206,12 @@ struct SettingsView: View {
                      + "Settings) cannot be hidden.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
-                ForEach(SettingsView.toggleableGroups(school: workspace.isSchoolWorkspace),
-                        id: \.label) { group in
+                ForEach(
+                    SettingsView.toggleableGroups(
+                        school: workspace.isSchoolWorkspace,
+                        protectConnected: workspace.protectConnected),
+                    id: \.label
+                ) { group in
                     visibilityGroupRow(label: group.label, tabs: group.tabs)
                 }
             }
@@ -1220,8 +1224,10 @@ struct SettingsView: View {
     /// does not have (a Jamf School workspace's Jamf Pro tabs), so a tab added to
     /// `Tab.navGroups` gets a switch here with no second list to forget (Groups & Searches
     /// had none). A group left with no tab to switch is dropped.
-    nonisolated static func toggleableGroups(school: Bool) -> [(label: String, tabs: [Tab])] {
-        let available = TabVisibility().limited(toSchool: school)
+    nonisolated static func toggleableGroups(
+        school: Bool, protectConnected: Bool = false
+    ) -> [(label: String, tabs: [Tab])] {
+        let available = TabVisibility().limited(toSchool: school, protectConnected: protectConnected)
         return Tab.navGroups.compactMap { group in
             let tabs = group.items.filter { !$0.isCoreTab && available.isAvailable($0) }
             return tabs.isEmpty ? nil : (label: group.label, tabs: tabs)

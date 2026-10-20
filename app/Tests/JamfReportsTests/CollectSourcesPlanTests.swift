@@ -20,7 +20,7 @@ final class CollectSourcesPlanTests: XCTestCase {
     }
 
     func testASchoolWorkspaceListsSchoolCommandsOnly() {
-        let school = plan(.jamfSchool, protect: "prod-protect")
+        let school = plan(.jamfSchool)
         XCTAssertEqual(school.sources.map(\.kind),
                        ReportEngine.schoolCommandMatrix(profile: "prod").map(\.kind))
         XCTAssertEqual(school.sources.filter { $0.product == .platformAPI }.map(\.kind),
@@ -29,6 +29,16 @@ final class CollectSourcesPlanTests: XCTestCase {
             .allSatisfy { $0.product == .school })
         XCTAssertTrue(school.sources.contains { $0.command == "school devices list" })
         XCTAssertFalse(school.sources.contains { $0.command.hasPrefix("pro ") })
+    }
+
+    /// Protect follows a School collect (2.11), so a connected Protect is listed after School.
+    func testASchoolWorkspaceWithProtectListsTheProtectCommands() {
+        let school = plan(.jamfSchool, protect: "prod-protect")
+        XCTAssertEqual(
+            school.sources(for: .protect).map(\.kind),
+            ReportEngine.protectCommandMatrix(profile: "prod-protect").map(\.kind))
+        XCTAssertEqual(school.sources.prefix(ReportEngine.schoolCommandMatrix(profile: "prod")
+            .count).map(\.product).contains(.protect), false)
     }
 
     func testSchoolBlueprintsAreSkippedOnlyWhenTheProfileLacksPlatformFields() {

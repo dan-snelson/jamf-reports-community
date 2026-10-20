@@ -45,6 +45,37 @@ final class SchoolWorkspaceTests: XCTestCase {
         XCTAssertFalse(pro.isVisible(.schoolDevices))
     }
 
+    /// Protect works with Jamf School (2.11): its tab shows on a School workspace only while
+    /// Protect is connected, and a Jamf Pro workspace is unchanged.
+    func testASchoolWorkspaceShowsProtectOnlyWhenConnected() {
+        let connected = TabVisibility().limited(toSchool: true, protectConnected: true)
+        XCTAssertTrue(connected.isVisible(.protectDashboard))
+        XCTAssertFalse(connected.isVisible(.patch))
+        XCTAssertFalse(TabVisibility().limited(toSchool: true).isVisible(.protectDashboard))
+        XCTAssertFalse(TabVisibility.parse("protectDashboard")
+            .limited(toSchool: true, protectConnected: true)
+            .isVisible(.protectDashboard), "the user's hidden choice still applies")
+        XCTAssertFalse(TabVisibility().limited(toSchool: false, protectConnected: true)
+            .isVisible(.schoolDevices))
+    }
+
+    func testTheStoreReadsWhetherTheActiveWorkspaceHasProtect() throws {
+        let workspace = tempRoot.appendingPathComponent("campus", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let config = workspace.appendingPathComponent("config.yaml")
+        try Data("school_cli:\n  enabled: true\n".utf8).write(to: config)
+        let store = WorkspaceStore(demoMode: false)
+        store.profiles = [profile("campus", product: .school)]
+        store.profile = "campus"
+        store.refreshProtectConnection()
+        XCTAssertFalse(store.tabVisibility(hiddenRaw: "").isVisible(.protectDashboard))
+        try Data("school_cli:\n  enabled: true\nprotect:\n  enabled: true\n  profile: p\n".utf8)
+            .write(to: config)
+        store.refreshProtectConnection()
+        XCTAssertTrue(store.protectConnected)
+        XCTAssertTrue(store.tabVisibility(hiddenRaw: "").isVisible(.protectDashboard))
+    }
+
     func testTheProductFilterIsNeverStoredAsTheUsersChoice() {
         var visibility = TabVisibility.parse("patch")
         let raw = visibility.serialize()

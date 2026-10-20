@@ -68,11 +68,10 @@ struct SourcesView: View {
             doctorCard
             if isSchoolWorkspace { schoolPlatformCard }
             ConnectionCard()
-            // Both are Jamf Pro: the matrix lists `pro` commands, and a School workspace never
-            // collects Protect (`ProfileProductType.detect`).
+            // The matrix lists `pro` commands, which a School workspace never runs.
             if !isSchoolWorkspace { capabilityCard }
             familiesCard
-            if !isSchoolWorkspace { additionalProductsCard }
+            additionalProductsCard
         }
         .sheet(isPresented: $showingProtectConnect, onDismiss: reloadConnectedProducts) {
             ProductConnectSheetView(profileSlug: workspace.profile)
@@ -710,6 +709,7 @@ struct SourcesView: View {
     private func reloadConnectedProducts() {
         connectedProducts = workspace.demoMode
             ? .none : ConnectedProducts.read(profile: workspace.profile)
+        workspace.refreshProtectConnection()
         guard let named = connectedProducts.protectProfile else {
             cliProfileNames = nil
             return
@@ -931,6 +931,12 @@ struct SourcesView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                     .fixedSize(horizontal: false, vertical: true)
+                if isSchoolWorkspace {
+                    Text(Self.schoolProtectNote)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 // Sets up a real jamf-cli connection and writes config.yaml.
                 ProtectProductControl(
@@ -942,15 +948,23 @@ struct SourcesView: View {
                     onConnect: { showingProtectConnect = true },
                     onDisconnected: reloadConnectedProducts)
 
-                Text("Jamf School uses its own workspace: add one with Settings › Add "
-                    + "connection.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .fixedSize(horizontal: false, vertical: true)
+                if !isSchoolWorkspace {
+                    Text("Jamf School uses its own workspace: add one with Settings › Add "
+                        + "connection.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .frame(maxWidth: .infinity)
     }
+
+    /// Jamf Protect on a Jamf School workspace (2.11): collected and reported as on Jamf Pro,
+    /// but not backed up, since a School workspace has no backups.
+    nonisolated static let schoolProtectNote =
+        "Experimental: Jamf Protect with Jamf School. Protect is collected and reported; "
+            + "it is not backed up, as a Jamf School workspace has no backups."
 
     /// JSON snapshots, and the jamf-cli dashboard's page, the one kind saved as HTML.
     private nonisolated static func cacheDates(

@@ -39,5 +39,9 @@ final class SidebarVisibilityListTests: XCTestCase {
         XCTAssertEqual(Set(school), Tab.schoolTabs.filter { !$0.isCoreTab })
         XCTAssertTrue(school.contains(.schoolDevices))
         XCTAssertFalse(school.contains(.fleet))
+        XCTAssertFalse(school.contains(.protectDashboard))
+        let withProtect = SettingsView.toggleableGroups(school: true, protectConnected: true)
+            .flatMap(\.tabs)
+        XCTAssertEqual(Set(withProtect), Set(school).union([.protectDashboard]))
     }
 }

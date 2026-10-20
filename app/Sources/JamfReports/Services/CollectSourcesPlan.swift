@@ -59,7 +59,7 @@ struct CollectSourcesPlan: Equatable, Sendable {
                 Source(product: $0.kind == ReportEngine.schoolBlueprintsKind
                         ? .platformAPI : .school,
                        kind: $0.kind, command: command($0.args), skipReason: $0.skip.map(text))
-            })
+            } + protect(inputs))
         case .jamfPro:
             return CollectSourcesPlan(
                 sources: matrix(inputs) + deviceScan(inputs) + afterMatrix(inputs)

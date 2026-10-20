@@ -37,7 +37,8 @@ switcher** at the bottom of the sidebar and choose **Add workspace or product…
 
 - **New workspace**: Jamf Pro (OAuth2), Platform API or Jamf School. **Connect new** starts
   that product's onboarding.
-- **Add to** the current workspace: Jamf Protect, on a Jamf Pro workspace.
+- **Add to** the current workspace: Jamf Protect, on a Jamf Pro or (experimental) Jamf School
+  workspace.
 - **Profiles jamf-cli already has**: the sheet reads jamf-cli's profiles when it opens and on
   **Re-check**, and lists the ones no workspace uses, including profiles made in Terminal since
   the app started. **Set up workspace** creates the workspace and runs its first collection; a

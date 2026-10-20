@@ -69,14 +69,14 @@ struct AddSheet: View {
     @State private var errorText: String?
     @State private var showingProtectConnect = false
 
-    /// The active workspace takes Jamf Protect: a live Jamf Pro workspace on disk.
-    private var currentIsProWorkspace: Bool {
-        !workspace.demoMode && !workspace.isSchoolWorkspace
-            && workspace.initializedProfiles.contains { $0.name == workspace.profile }
+    private var currentTakesProtect: Bool {
+        AddSheetPlan.currentTakesProtect(
+            demoMode: workspace.demoMode, current: workspace.profile,
+            initialized: workspace.initializedProfiles.map(\.name))
     }
 
     private var currentAcceptsProtect: Bool {
-        currentIsProWorkspace && discovery != nil && discovery?.currentProtect == nil
+        currentTakesProtect && discovery != nil && discovery?.currentProtect == nil
     }
 
     private var isAdopting: Bool { adoptFlow?.isRunning == true }
@@ -87,7 +87,7 @@ struct AddSheet: View {
             Divider().background(Theme.Colors.hairlineStrong)
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if currentIsProWorkspace { choiceRow }
+                    if currentTakesProtect { choiceRow }
                     productsSection
                     existingProfilesSection
                 }
@@ -152,7 +152,8 @@ struct AddSheet: View {
             choiceCard(
                 .addToCurrent, icon: "plus.rectangle.on.rectangle",
                 title: "Add to \(workspace.profile)",
-                body: "Jamf Protect alerts and analytics beside this workspace's Jamf Pro data.")
+                body: "Jamf Protect alerts and analytics beside this workspace's "
+                    + "\(workspace.isSchoolWorkspace ? "Jamf School" : "Jamf Pro") data.")
         }
     }
 
@@ -205,7 +206,7 @@ struct AddSheet: View {
 
     @ViewBuilder
     private var productsSection: some View {
-        if choice == .addToCurrent && currentIsProWorkspace {
+        if choice == .addToCurrent && currentTakesProtect {
             protectCard
         } else {
             LazyVGrid(
@@ -277,7 +278,7 @@ struct AddSheet: View {
 
     private var visibleRows: [AddSheetPlan.UnassignedProfile] {
         let rows = discovery?.unassigned ?? []
-        if choice == .addToCurrent && currentIsProWorkspace {
+        if choice == .addToCurrent && currentTakesProtect {
             return currentAcceptsProtect ? rows.filter { $0.use == .addToCurrent } : []
         }
         return rows.filter { $0.use != .addToCurrent }
@@ -333,7 +334,7 @@ struct AddSheet: View {
     }
 
     private var emptyText: String {
-        if choice == .addToCurrent && currentIsProWorkspace {
+        if choice == .addToCurrent && currentTakesProtect {
             return currentAcceptsProtect
                 ? "No Jamf Protect profile in jamf-cli is free to add. Connect new above."
                 : "This workspace already has Jamf Protect."
@@ -447,13 +448,13 @@ struct AddSheet: View {
         guard !workspace.demoMode, !isChecking else { return }
         isChecking = true
         defer { isChecking = false }
-        let current = currentIsProWorkspace ? workspace.profile : nil
+        let current = currentTakesProtect ? workspace.profile : nil
         let found = await Task.detached { AddSheetDiscovery.load(currentWorkspace: current) }.value
         discovery = found
         guard !choiceTouched else { return }
         choice = AddSheetPlan.preselection(
             unassigned: found.unassigned ?? [],
-            currentAcceptsProtect: currentIsProWorkspace && found.currentProtect == nil,
+            currentAcceptsProtect: currentTakesProtect && found.currentProtect == nil,
             requested: requested)
     }
 
@@ -481,7 +482,7 @@ struct AddSheet: View {
 
     /// Names a Protect profile jamf-cli already has in this workspace's config.yaml.
     private func addProtect(_ row: AddSheetPlan.UnassignedProfile) {
-        guard currentIsProWorkspace else { return }
+        guard currentTakesProtect else { return }
         message = nil
         errorText = nil
         do {

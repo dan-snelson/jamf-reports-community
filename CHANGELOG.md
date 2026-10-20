@@ -210,6 +210,10 @@ versions in this repository map to git tags.
 - A Jamf School collect that gets an empty device list now logs a warning ("Jamf School returned
   0 devices") instead of an info line, so an empty tenant or a wrong login stands out in Run
   History. (#284)
+- When an `ea-results` or Extension Attribute definitions snapshot exists but cannot be read, the
+  report now logs a warning and lists each custom EA on the EA Warnings tab as "snapshot
+  unreadable" with the reason, instead of leaving out the EA tabs and the warnings tab with no
+  message. (#284)
 
 ### Removed
 

@@ -199,6 +199,62 @@ final class EASheetsTests: XCTestCase {
         XCTAssertEqual(written, ["EA Warnings"])
     }
 
+    // MARK: - Unreadable snapshots
+
+    private func rawSnapshot(_ kind: String, _ text: String) throws {
+        let dir = dataDir.appendingPathComponent(kind, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: dir.appendingPathComponent("\(kind)_20261004T100000.json"))
+    }
+
+    private func writeLogged(_ eas: [CustomEAConfig]) throws -> (Workbook, [String], [String]) {
+        var config = ReportConfig()
+        config.customEas = eas
+        let workbook = Workbook()
+        let lines = LineBox()
+        let sheets = try XCTUnwrap(EASheets.load(
+            config: config, workbook: workbook, dataDir: dataDir, onLine: lines.append),
+            "an unreadable snapshot must not drop the EA tabs without a word")
+        return (workbook, sheets.writeAll(sheets: SheetsConfig()), lines.texts)
+    }
+
+    func testUnreadableResultsWarnsAndNamesTheReasonPerEA() throws {
+        try rawSnapshot("ea-results", "this is not json")
+        let (wb, written, log) = try writeLogged([
+            CustomEAConfig(name: "One", column: "One", type: .text),
+        ])
+        XCTAssertEqual(written, ["EA Warnings"])
+        XCTAssertEqual(log.filter { $0.hasPrefix("[warn] ea-results") }.count, 1, "\(log)")
+        let reason = try XCTUnwrap(try row(try grid(wb, "EA Warnings"), "One")[2])
+        XCTAssertTrue(reason.hasPrefix("snapshot unreadable: ea-results"), reason)
+    }
+
+    func testUnreadableDefinitionsAreNotReportedAsNoValuesCollected() throws {
+        try results([("A", "Present", "x")])
+        try rawSnapshot("computer-extension-attributes", #"{"not": "a list"}"#)
+        let (wb, written, log) = try writeLogged([
+            CustomEAConfig(name: "Has Rows", column: "present", type: .text),
+            CustomEAConfig(name: "Empty", column: "other", type: .text),
+        ])
+        XCTAssertEqual(written, ["Has Rows", "EA Warnings"])
+        XCTAssertEqual(
+            log.filter { $0.hasPrefix("[warn] computer-extension-attributes") }.count, 1, "\(log)")
+        let reason = try XCTUnwrap(try row(try grid(wb, "EA Warnings"), "Empty")[2])
+        XCTAssertTrue(
+            reason.hasPrefix("snapshot unreadable: computer-extension-attributes"), reason)
+        XCTAssertFalse(reason.contains("No values collected"))
+    }
+
+    func testBothSnapshotsUnreadableStillWritesTheWarningsTab() throws {
+        try rawSnapshot("ea-results", "{")
+        try rawSnapshot("computer-extension-attributes", "{")
+        let (_, written, log) = try writeLogged([
+            CustomEAConfig(name: "One", column: "One", type: .text),
+        ])
+        XCTAssertEqual(written, ["EA Warnings"])
+        XCTAssertEqual(log.filter { $0.hasPrefix("[warn]") }.count, 2, "\(log)")
+    }
+
     // MARK: - generate
 
     func testSheetsOnlyCanSelectAnEATab() async throws {
@@ -218,5 +274,22 @@ final class EASheetsTests: XCTestCase {
         try await ReportEngine(config: config, dataDir: dataDir)
             .generate(outputURL: out, locateJamfCLI: { nil })
         return try SheetsSettingsTests.tabs(of: out)
+    }
+}
+
+private final class LineBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var append: @Sendable (CLIBridge.LogLine) -> Void {
+        { line in
+            self.lock.lock(); defer { self.lock.unlock() }
+            self.lines.append(line.text)
+        }
+    }
+
+    var texts: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return lines
     }
 }

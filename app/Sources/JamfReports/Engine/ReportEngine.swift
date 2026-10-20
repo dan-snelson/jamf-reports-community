@@ -89,7 +89,8 @@ struct ReportEngine: Sendable {
         }
         // The EA results are read first so `sheets.only` is judged against every tab this
         // workbook can have.
-        let eaSheets = EASheets.load(config: config, workbook: workbook, dataDir: dataDir)
+        let eaSheets = EASheets.load(
+            config: config, workbook: workbook, dataDir: dataDir, onLine: onLine)
         let sheets = Self.sheetSettings(
             config, tabs: template.includedSheets.map(\.rawValue)
                 + (eaSheets?.sheetPlan.map(\.name) ?? [])

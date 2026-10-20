@@ -58,7 +58,7 @@ final class AttentionLog: Sendable {
 
     /// Runs `body` with a log for `profile` bound, then commits it. Inside a run already
     /// recording for `profile`, `body` joins that run instead.
-    static func recording<T>(
+    static func recording<T: Sendable>(
         profile: String,
         usesAppRecord: Bool = true,
         isolation: isolated (any Actor)? = #isolation,
@@ -67,7 +67,7 @@ final class AttentionLog: Sendable {
         if current?.profile == profile { return try await body() }
         let log = AttentionLog(profile: profile, usesAppRecord: usesAppRecord)
         defer { log.commit() }
-        return try await $current.withValue(log) { try await body() }
+        return try await $current.withValue(log, operation: body)
     }
 
     /// Writes this run's changes; nothing when there are none or nowhere to write them.

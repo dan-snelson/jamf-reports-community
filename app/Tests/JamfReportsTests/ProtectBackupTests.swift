@@ -456,7 +456,7 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertEqual(left, ["20260504T010101", "20260505T010101", "20260506T010101"],
                        "incomplete parts newer than the last complete one stay; the partial "
                        + "older than it is counted and pruned; of the rest the newest is kept")
-        XCTAssertTrue(lines.texts.contains { $0.contains("2 scheduled backup(s) whose Jamf Protect") },
+        XCTAssertTrue(lines.texts.contains { $0.contains("keeping 2 scheduled backup(s) with an incomplete") },
                       "\(lines.texts)")
     }
 
@@ -522,6 +522,94 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertEqual(protect.exitCode, CLIBridge.exitCodeTimedOut)
         XCTAssertTrue(lines.texts.contains {
             $0.hasPrefix("[error] protect backup stopped after the 1 s limit") }, "\(lines.texts)")
+    }
+
+    // MARK: - backup(): Jamf Pro failed
+
+    func test_backup_proFailedKeepsAFolderHoldingOnlyTheProtectPart() async throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .ok, proExit: 1)
+        let lines = Lines()
+        let exit = try await CLIBridge().backup(
+            profile: ctx.profile, label: "scheduled-t", _testExecutable: ctx.stub
+        ) { lines.append($0) }
+
+        XCTAssertEqual(exit, 1, "the run's exit stays Jamf Pro's")
+        XCTAssertEqual(try ctx.calls().count, 2, "Protect still runs")
+        let final = try ctx.onlyBackup()
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: final.appendingPathComponent("computers.json").path),
+            "the unfinished Jamf Pro files are not kept")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: final.appendingPathComponent("protect/plans/a.yaml").path))
+        let pro = try XCTUnwrap(BackupProductResult.pro(inBackup: final))
+        XCTAssertEqual(pro.state, .failed)
+        XCTAssertEqual(pro.exitCode, 1)
+        XCTAssertEqual(BackupProductResult.protect(inBackup: final)?.state, .ok)
+        XCTAssertEqual(BackupMaintenance.ownerHostID(of: final), SharedWorkspace.currentHost.id)
+        XCTAssertTrue(lines.texts.contains {
+            $0.hasPrefix("[error] Jamf Pro backup failed; kept the Jamf Protect part") },
+            "\(lines.texts)")
+    }
+
+    func test_backup_proFailedWithNoProtectObjectsLeavesNoFolder() async throws {
+        for (config, protect) in [(connectedConfig, ProtectMode.failed),
+                                  (connectedConfig, .empty), (nil, .ok)] {
+            let ctx = try makeContext(config: config, protect: protect, proExit: 5)
+            let exit = try await CLIBridge().backup(
+                profile: ctx.profile, label: nil, _testExecutable: ctx.stub) { _ in }
+            XCTAssertEqual(exit, 5)
+            let backups = ctx.workspace.appendingPathComponent("backups", isDirectory: true)
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: backups.path), [],
+                           "staging removed, nothing kept (\(protect))")
+        }
+    }
+
+    func test_diffRefusesABackupWhoseJamfProPartFailed() async throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .ok)
+        let backups = ctx.workspace.appendingPathComponent("backups", isDirectory: true)
+        func make(_ name: String, pro: String) throws -> URL {
+            let dir = backups.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: [
+                "label": "x", "products": ["pro": ["state": pro, "exit_code": 0]]])
+                .write(to: dir.appendingPathComponent("manifest.json"))
+            return dir
+        }
+        let good = try make("20260501T010101", pro: "ok")
+        let failed = try make("20260502T010101", pro: "failed")
+        do {
+            _ = try await CLIBridge().diffBackups(
+                profile: ctx.profile, left: good, right: failed) { _ in }
+            XCTFail("diff ran against a backup with no Jamf Pro part")
+        } catch CLIBridgeError.backupWithoutPro(let name) {
+            XCTAssertEqual(name, "20260502T010101")
+        }
+    }
+
+    func test_pruneHoldsAProFailedBackupThenRemovesItWithoutCountingIt() throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .ok)
+        let backups = ctx.workspace.appendingPathComponent("backups", isDirectory: true)
+        let ok = BackupProductResult(state: .ok, exitCode: 0, objectCounts: ["plans": 1])
+        func make(_ name: String, pro: String) throws {
+            let manifest: [String: Any] = ["label": "scheduled-x", "products": [
+                "pro": ["state": pro, "exit_code": pro == "ok" ? 0 : 1],
+                "protect": ok.manifestValue]]
+            let dir = backups.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: manifest)
+                .write(to: dir.appendingPathComponent("manifest.json"))
+        }
+        try make("20260501T010101", pro: "ok")
+        try make("20260502T010101", pro: "ok")
+        try make("20260503T010101", pro: "failed")
+        try make("20260504T010101", pro: "failed")
+
+        BackupMaintenance.pruneScheduledBackups(profile: ctx.profile, keep: 2)
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
+        XCTAssertEqual(left, ["20260501T010101", "20260502T010101", "20260504T010101"],
+                       "the newest Pro-failed one is held, the superseded one is removed, and "
+                       + "neither takes a place from the two Jamf Pro backups")
     }
 
     // MARK: - Manifest compatibility
@@ -651,7 +739,9 @@ final class ProtectBackupTests: XCTestCase {
         }
     }
 
-    private func makeContext(config: String?, protect: ProtectMode) throws -> Context {
+    private func makeContext(
+        config: String?, protect: ProtectMode, proExit: Int32 = 0
+    ) throws -> Context {
         let root = try makeTempDir()
         setenv("JRC_TEST_WORKSPACES_ROOT", root.path, 1)
         addTeardownBlock { unsetenv("JRC_TEST_WORKSPACES_ROOT") }
@@ -664,12 +754,14 @@ final class ProtectBackupTests: XCTestCase {
         }
         let scripts = try makeTempDir()
         let log = scripts.appendingPathComponent("calls.log")
-        let stub = try makeStub(in: scripts, log: log, protect: protect)
+        let stub = try makeStub(in: scripts, log: log, protect: protect, proExit: proExit)
         return Context(profile: profile, workspace: workspace, stub: stub, log: log)
     }
 
     /// Records each call's arguments, then behaves as `pro backup` or `protect backup`.
-    private func makeStub(in dir: URL, log: URL, protect: ProtectMode) throws -> URL {
+    private func makeStub(
+        in dir: URL, log: URL, protect: ProtectMode, proExit: Int32
+    ) throws -> URL {
         let protectBody: String
         let writeFiles = """
         mkdir -p "$out/plans" "$out/action-configs"
@@ -707,7 +799,7 @@ final class ProtectBackupTests: XCTestCase {
         mkdir -p "$out"
         echo '{"a":1}' > "$out/computers.json"
         chmod 644 "$out/computers.json"
-        exit 0
+        exit \(proExit)
         ;;
         esac
         """

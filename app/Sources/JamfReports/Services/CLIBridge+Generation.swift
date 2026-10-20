@@ -38,6 +38,8 @@ enum CLIBridgeError: Error, LocalizedError, Equatable, Sendable {
     /// The profile belongs to another product, so a Jamf Pro command was not run; the text is
     /// the refusal (`ProfileAuthMethod.Resolved.proRefusal`).
     case wrongProduct(String)
+    /// The named backup's Jamf Pro part failed, so it holds only Jamf Protect objects.
+    case backupWithoutPro(String)
     /// A required directory could not be created or a file move failed.
     /// `path` is for private logging only — never interpolated into user-visible strings.
     case directoryOperationFailed(path: String)
@@ -102,6 +104,9 @@ enum CLIBridgeError: Error, LocalizedError, Equatable, Sendable {
             return "Invalid argument: \(detail)"
         case .wrongProduct(let refusal):
             return refusal
+        case .backupWithoutPro(let name):
+            return "Backup \(name) has no Jamf Pro part (its Jamf Pro backup failed), so there "
+                + "is nothing to compare. Choose two backups that hold a Jamf Pro backup."
         case .directoryOperationFailed:
             // Path omitted: may contain the home directory or workspace layout.
             return "A required directory could not be created or moved — check available disk space and folder permissions."

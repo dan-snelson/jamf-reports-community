@@ -187,6 +187,14 @@ final class CloudStorageTests: XCTestCase {
             for: workspace, volumeIsLocal: { _ in true }, home: home))
     }
 
+    /// `DailySummary.collectedByHost` is written wherever the data folder is shared storage.
+    func testTheCollectingHostIsRecordedOnASyncedDataFolder() {
+        XCTAssertNil(ReportEngine.collectingHostLabel(dataDir: tempDir, syncProbe: probe()))
+        XCTAssertEqual(
+            ReportEngine.collectingHostLabel(dataDir: tempDir, syncProbe: .iCloudEverywhere),
+            SharedWorkspace.currentHost.display)
+    }
+
     // MARK: - Canonical filename stamps
 
     func testSnapshotTimestampParsesCanonicalStem() {

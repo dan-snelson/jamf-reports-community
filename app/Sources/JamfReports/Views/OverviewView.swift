@@ -438,7 +438,7 @@ struct OverviewView: View {
     /// again, and this banner is where they land instead.
     private func chooseExistingRoot() {
         guard let url = WorkspaceFolderPicker.choose() else { return }
-        if CloudStorage.provider(for: url) != nil {
+        if CloudStorage.isSharedStorage(url) {
             pendingSharedRoot = url
         } else {
             adoptExistingRoot(url)

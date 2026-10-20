@@ -89,11 +89,28 @@ final class ConfigDoctorCloudStorageTests: XCTestCase {
             coordinationEnabled: true)
         XCTAssertNil(ConfigDoctorService.evaluateCloudStorage(synced)
             .first { $0.id == "cloud.workspace" })
-        synced.workspaceProvider = .iCloudDesktopAndDocuments
+        let documents = "\(home)/Documents/"
+        synced.providerOf = { $0.path.hasPrefix(documents) ? .iCloudDesktopAndDocuments : nil }
         let rows = ConfigDoctorService.evaluateCloudStorage(synced)
         XCTAssertEqual(rows.first { $0.id == "cloud.workspace" }?.title,
                        "Shared workspace on iCloud Desktop & Documents")
         XCTAssertNotNil(rows.first { $0.id == "cloud.backups" })
+
+        // A custom root and a report folder in Documents, with the workspace local.
+        var publish = inputs(
+            workspace: local("prod"),
+            output: URL(fileURLWithPath: "\(home)/Documents/Reports"),
+            rootIsCustom: true)
+        publish.providerOf = synced.providerOf
+        XCTAssertEqual(ConfigDoctorService.evaluateCloudStorage(publish)
+            .first { $0.id == "cloud.output" }?.title,
+            "Reports publish to iCloud Desktop & Documents")
+        var root = inputs(workspace: URL(fileURLWithPath: "\(home)/Documents/JR/prod"),
+                          rootIsCustom: true)
+        root.providerOf = synced.providerOf
+        XCTAssertEqual(ConfigDoctorService.evaluateCloudStorage(root)
+            .first { $0.id == "cloud.root" }?.title,
+            "Workspace is on iCloud Desktop & Documents")
         XCTAssertFalse(rows.contains {
             $0.title.contains("OneDrive") || $0.detail.contains("OneDrive")
         })

@@ -194,6 +194,15 @@ enum CloudStorage {
         case networkVolume
         /// A sync daemon's marker file sits in the folder or one of its ancestors.
         case syncMarker(String)
+
+        /// Where the folder is, for "on …" wording: the provider's name when one is known.
+        var displayName: String {
+            switch self {
+            case .provider(let provider): provider.displayName
+            case .networkVolume: "a network volume"
+            case .syncMarker: "a folder a sync tool manages"
+            }
+        }
     }
 
     /// `URLResourceValues.volumeIsLocal`; nil when the volume cannot be asked. The default of
@@ -320,6 +329,14 @@ enum CloudStorage {
     ) -> Bool {
         sharedStorage(for: url, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe, home: home)
             != nil
+    }
+
+    /// The provider `sharedStorage` names for `url`, by path or by `SyncProbe`; nil for local
+    /// storage, a network volume or a sync marker, which have no provider name.
+    static func syncProvider(for url: URL, syncProbe: SyncProbe = .live) -> Provider? {
+        guard case .provider(let provider)? = sharedStorage(for: url, syncProbe: syncProbe)
+        else { return nil }
+        return provider
     }
 
     private static func providerForCloudStorageFolder(_ folder: String) -> Provider {

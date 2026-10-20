@@ -49,12 +49,10 @@ enum BackupMaintenance {
         volumeIsLocal: @Sendable (URL) -> Bool?,
         syncProbe: CloudStorage.SyncProbe = .live
     ) -> String? {
-        switch CloudStorage.sharedStorage(
+        if let storage = CloudStorage.sharedStorage(
             for: backupsRoot, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe) {
-        case .provider(let provider): return "on \(provider.displayName)"
-        case .networkVolume: return "on a network volume"
-        case .syncMarker: return "in a folder a sync tool manages"
-        case nil: break
+            if case .syncMarker = storage { return "in \(storage.displayName)" }
+            return "on \(storage.displayName)"
         }
         return sharedWorkspaceEnabled(profile: profile) ? "in a shared workspace" : nil
     }

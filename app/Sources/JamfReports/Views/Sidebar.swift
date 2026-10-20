@@ -308,7 +308,15 @@ struct Sidebar: View {
         .focused($chipFocused)
         .onHover { chipHovered = $0 }
         .animation(.easeOut(duration: 0.18), value: engaged)
-        .accessibilityLabel("Workspace: \(workspace.profile). \(workspaceSubtitle). Activate to switch workspace.")
+        .accessibilityLabel(Self.workspaceChipLabel(
+            profile: workspace.profile, subtitle: workspaceSubtitle,
+            hasError: workspace.profiles.first { $0.name == workspace.profile }?.status == .error))
+        .accessibilityHint("Activate to switch workspace")
+    }
+
+    /// Spoken name of the workspace chip; the red dot on the avatar is `hasError`.
+    static func workspaceChipLabel(profile: String, subtitle: String, hasError: Bool) -> String {
+        "Workspace: \(profile). \(subtitle).\(hasError ? " Has an error." : "")"
     }
 
     /// Profiles that belong to a connection sit under a section titled with its name and show

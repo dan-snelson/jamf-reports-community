@@ -24,6 +24,8 @@ struct BackupsView: View {
     @State private var errorMessage: String?
     @State private var pendingDelete: BackupRecord?
     @State private var showDeleteConfirm = false
+    /// Set when Protect is connected and the backups folder is on storage other Macs reach.
+    @State private var syncedChoice: ProtectBackup.SyncedStorageChoice?
 
     private var backupsDirectory: URL {
         let root = ProfileService.workspaceURL(for: workspace.profile)
@@ -131,6 +133,7 @@ struct BackupsView: View {
                 }
             }
             reload()
+            await refreshSyncedChoice()
         }
     }
 
@@ -212,10 +215,12 @@ struct BackupsView: View {
         }
     }
 
-    /// What the latest backup did about Jamf Protect; absent for a workspace without it.
+    /// What the latest backup did about Jamf Protect; absent for a workspace without it. On
+    /// synced storage the storage banner says why Protect was skipped, so the summary does not.
     @ViewBuilder
     private var protectBanner: some View {
-        if let protect = latestBackup?.protect {
+        if let syncedChoice { syncedStorageBanner(syncedChoice) }
+        if let protect = latestBackup?.protect, !isSyncedStorageSkip(protect) {
             InlineBanner(
                 icon: protect.isIncomplete ? "exclamationmark.triangle.fill" : "shield",
                 tone: protect.isIncomplete ? .warn : .info
@@ -225,6 +230,66 @@ struct BackupsView: View {
                     .foregroundStyle(Theme.Text.secondary)
             }
         }
+    }
+
+    private func isSyncedStorageSkip(_ protect: BackupProductResult) -> Bool {
+        guard let syncedChoice, let reason = protect.reason else { return false }
+        return reason == ProtectBackup.syncedStorageReason(place: syncedChoice.place)
+    }
+
+    private func syncedStorageBanner(_ choice: ProtectBackup.SyncedStorageChoice) -> some View {
+        InlineBanner(icon: "lock.shield", tone: choice.allowed ? .info : .warn) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(choice.allowed
+                     ? "Jamf Protect is backed up in this folder, which is \(choice.place). "
+                        + "Its backups contain action configurations with request headers and "
+                        + "data-forwarding settings."
+                     : "Jamf Protect is not backed up: this workspace is \(choice.place), and a "
+                        + "Protect backup contains action configurations with request headers "
+                        + "and data-forwarding settings. Jamf Pro backups are not affected.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("Back up Jamf Protect in this folder", isOn: Binding(
+                    get: { choice.allowed },
+                    set: { setProtectOnSyncedStorage($0) }))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .font(.footnote)
+                    .disabled(workspace.demoMode)
+                    .help(workspace.demoMode ? DemoData.liveOnlyHelp
+                          : SharedConfigPin.Key.protectBackupOnSyncedStorage.rawValue)
+                Text("Your organization's storage and access policy decides whether this "
+                     + "folder may hold them.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+            }
+        }
+    }
+
+    private func setProtectOnSyncedStorage(_ on: Bool) {
+        guard !workspace.demoMode else { return }
+        do {
+            try ProtectBackupConfigWriter.save(onSyncedStorage: on, profile: workspace.profile)
+        } catch {
+            errorMessage = "Couldn't save the Jamf Protect backup setting: "
+                + error.localizedDescription
+        }
+        Task { await refreshSyncedChoice() }
+    }
+
+    /// Off the main actor: it decodes config.yaml and probes the volume.
+    private func refreshSyncedChoice() async {
+        guard !workspace.demoMode else { syncedChoice = nil; return }
+        let profile = workspace.profile
+        let choice = await Task.detached(priority: .utility) {
+            let config = ProfileService.workspaceURL(for: profile).flatMap {
+                try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
+            }
+            return ProtectBackup.syncedStorageChoice(profile: profile, config: config)
+        }.value
+        guard profile == workspace.profile else { return }
+        syncedChoice = choice
     }
 
     private var backupsTable: some View {

@@ -243,6 +243,13 @@ protect:
   # jamf-cli protect profile name; empty = jamf-cli's default Protect profile.
   # Distinct from jamf_cli.profile (the Pro profile).
   profile: ""
+  # Back up Jamf Protect even when this workspace is on storage other Macs reach
+  # (a sync provider, a network volume, a shared workspace). A Protect backup
+  # contains action configurations with request headers and data-forwarding
+  # settings, so this is off by default; your organization's storage policy
+  # decides. On a shared workspace each Mac confirms it once (Backups or
+  # Config Doctor) before it applies there.
+  backup_on_synced_storage: false
 
 
 # =============================================================================

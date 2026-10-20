@@ -9,8 +9,12 @@ versions in this repository map to git tags.
 
 ### Added
 
-- A Jamf Pro backup now also backs up Jamf Protect when Protect is connected to the workspace;
-  it is skipped on shared storage, where the files could sync credentials to other Macs. (#284)
+- A Jamf Pro backup now also backs up Jamf Protect when Protect is connected to the workspace.
+  On shared storage it is skipped by default, since the files hold action configurations with
+  request headers and data-forwarding settings; if your organization's storage policy allows
+  it, turn on "Back up Jamf Protect in this folder" on the Backups screen
+  (`protect.backup_on_synced_storage`). On a shared folder each Mac confirms the setting once.
+  (#284)
 - Notifications can send a daily heartbeat: with `notify.heartbeat: true`, or the new "Send a
   daily heartbeat" switch under Notifications, the background item posts one short card a day
   per workspace saying it ran, with the newest summary's date unless detail is minimal; Run now

@@ -89,6 +89,43 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertTrue(reason.contains("on iCloud Desktop & Documents"), reason)
     }
 
+    func test_plan_onSyncedStorageSkipsByDefaultAndRunsWhenThisMacAllowsIt() throws {
+        let config = try loadConfig(connectedConfig)
+        guard case .skip(let reason) = ProtectBackup.plan(
+            config: config, workspaceProfile: "ws",
+            pinAllows: { true }, sharedStorage: { "on a network volume" })
+        else { return XCTFail("skip by default") }
+        XCTAssertEqual(reason, ProtectBackup.syncedStorageReason(place: "on a network volume"))
+        for text in ["this workspace is on a network volume", "request headers",
+                     "data-forwarding", "storage policy", "protect.backup_on_synced_storage"] {
+            XCTAssertTrue(reason.contains(text), text)
+        }
+        XCTAssertFalse(reason.contains("OneDrive"))
+
+        XCTAssertEqual(
+            ProtectBackup.plan(
+                config: config, workspaceProfile: "ws", pinAllows: { true },
+                sharedStorage: { "on a network volume" }, syncedStorageAllowed: { true }),
+            .run(profile: "protect-login"))
+
+        var asked = false
+        XCTAssertEqual(
+            ProtectBackup.plan(
+                config: config, workspaceProfile: "ws", pinAllows: { true },
+                sharedStorage: { nil }, syncedStorageAllowed: { asked = true; return false }),
+            .run(profile: "protect-login"))
+        XCTAssertFalse(asked, "local storage never asks for the opt-in")
+    }
+
+    func test_backupOnSyncedStorage_decodesAndANonBooleanReadsAsOff() throws {
+        XCTAssertFalse(try loadConfig(connectedConfig).protect?.backsUpOnSyncedStorage ?? true)
+        XCTAssertTrue(try loadConfig(connectedConfig + "\n  backup_on_synced_storage: true\n")
+            .protect?.backsUpOnSyncedStorage ?? false)
+        let typo = try loadConfig(connectedConfig + "\n  backup_on_synced_storage: sometimes\n")
+        XCTAssertFalse(typo.protect?.backsUpOnSyncedStorage ?? true)
+        XCTAssertEqual(typo.protect?.resolvedProfile, "protect-login")
+    }
+
     func test_plan_skipsAProfileOfAnotherProduct() throws {
         let config = try loadConfig(connectedConfig)
         let plan = ProtectBackup.plan(
@@ -190,6 +227,8 @@ final class ProtectBackupTests: XCTestCase {
                        protect)
         XCTAssertTrue(lines.texts.contains { $0.hasPrefix("[ok] Jamf Protect") }, "\(lines.texts)")
         XCTAssertFalse(lines.texts.contains { $0.hasPrefix("[partial]") })
+        XCTAssertFalse(lines.texts.contains { $0.contains("to synced storage") },
+                       "local storage logs no synced-storage audit line")
     }
 
     func test_backup_workspaceWithoutProtectIsAsBefore() async throws {
@@ -273,12 +312,46 @@ final class ProtectBackupTests: XCTestCase {
         let warns = lines.texts.filter { $0.hasPrefix("[warn] Jamf Protect not backed up") }
         XCTAssertEqual(warns.count, 1, "\(lines.texts)")
         XCTAssertTrue(warns[0].contains("in a shared workspace"), warns[0])
-        XCTAssertTrue(warns[0].contains("credentials"), warns[0])
+        XCTAssertTrue(warns[0].contains("request headers"), warns[0])
+        XCTAssertTrue(warns[0].contains("protect.backup_on_synced_storage"), warns[0])
         let final = try ctx.onlyBackup()
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: final.appendingPathComponent("protect").path))
         XCTAssertEqual(
             BackupProductResult.protect(inBackup: final)?.state, .skipped)
+    }
+
+    /// The opt-in found already on at first sight waits for this Mac; once confirmed, the backup
+    /// includes Protect and jamf-cli's 0600 on credential files survives.
+    func test_backup_onSharedStorageRunsProtectOnlyOnceTheOptInIsConfirmed() async throws {
+        let ctx = try makeContext(
+            config: "shared_workspace:\n  enabled: true\n" + connectedConfig
+                + "\n  backup_on_synced_storage: true\n", protect: .ok)
+        let first = Lines()
+        _ = try await CLIBridge().backup(
+            profile: ctx.profile, label: nil, _testExecutable: ctx.stub) { first.append($0) }
+        XCTAssertEqual(try ctx.calls().count, 1, "unconfirmed: Jamf Pro only")
+        XCTAssertTrue(first.texts.contains { $0.hasPrefix("[warn] Jamf Protect not backed up") })
+        let skipped = try ctx.onlyBackup()
+        try FileManager.default.removeItem(at: skipped)
+
+        try SharedConfigPin.confirm(profile: ctx.profile, keys: [.protectBackupOnSyncedStorage])
+        let second = Lines()
+        let exit = try await CLIBridge().backup(
+            profile: ctx.profile, label: nil, _testExecutable: ctx.stub) { second.append($0) }
+        XCTAssertEqual(exit, 0)
+        let calls = try ctx.calls()
+        XCTAssertEqual(calls.count, 3, "\(calls)")
+        XCTAssertFalse(second.texts.contains { $0.hasPrefix("[warn] Jamf Protect not backed up") })
+        let audit = second.texts.filter { $0.hasPrefix("[info] backing up Jamf Protect to synced") }
+        XCTAssertEqual(audit.count, 1, "\(second.texts)")
+        XCTAssertTrue(audit[0].contains("in a shared workspace"), audit[0])
+        XCTAssertTrue(audit[0].contains("protect.backup_on_synced_storage allows it"), audit[0])
+        let final = try ctx.onlyBackup()
+        XCTAssertEqual(BackupProductResult.protect(inBackup: final)?.state, .ok)
+        let hook = final.appendingPathComponent("protect/action-configs/hook.yaml")
+        let mode = try FileManager.default.attributesOfItem(atPath: hook.path)[.posixPermissions]
+        XCTAssertEqual(mode as? Int, 0o600)
     }
 
     // MARK: - backup(): Protect fails, Pro stands

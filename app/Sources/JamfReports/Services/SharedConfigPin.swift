@@ -46,6 +46,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     var brandingLogoPath: String = ""
     /// `notify.heartbeat`: whether the tick posts its daily card to the pinned webhook.
     var notifyHeartbeat: Bool = false
+    /// `protect.backup_on_synced_storage`: whether a backup on shared storage includes Protect.
+    var protectBackupOnSyncedStorage: Bool = false
 
     /// One pinned key, named as it is written in config.yaml.
     enum Key: String, CaseIterable, Sendable {
@@ -64,6 +66,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         case notifyHeartbeat = "notify.heartbeat"
         case htmlHistoryFile = "html.history_file"
         case brandingLogoPath = "branding.logo_path"
+        case protectBackupOnSyncedStorage = "protect.backup_on_synced_storage"
 
         /// `text(of:)` with everything a comparison needs: the webhook's full URL hash.
         fileprivate func token(of pin: SharedConfigPin) -> String {
@@ -98,6 +101,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             case .notifyHeartbeat: String(pin.notifyHeartbeat)
             case .htmlHistoryFile: pin.htmlHistoryFile
             case .brandingLogoPath: pin.brandingLogoPath
+            case .protectBackupOnSyncedStorage: String(pin.protectBackupOnSyncedStorage)
             case .notifyURL:
                 pin.notifyURLHash.isEmpty
                     ? pin.notifyURLHost
@@ -121,6 +125,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             case .notifyHeartbeat: pin.notifyHeartbeat = source.notifyHeartbeat
             case .htmlHistoryFile: pin.htmlHistoryFile = source.htmlHistoryFile
             case .brandingLogoPath: pin.brandingLogoPath = source.brandingLogoPath
+            case .protectBackupOnSyncedStorage:
+                pin.protectBackupOnSyncedStorage = source.protectBackupOnSyncedStorage
             case .notifyURL:
                 pin.notifyURLHost = source.notifyURLHost
                 pin.notifyURLHash = source.notifyURLHash
@@ -166,9 +172,10 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     static let unreadableNote = "(pin unreadable)"
 
     /// The pin for a workspace seen for the first time. What is already in the shared file may
-    /// have been written by a peer, so a folder outside the workspace and a `delete` retention
-    /// are pinned as unconfirmed: every run uses the safe value for them until one Confirm.
-    /// The webhook host and the other keys are trust-on-first-use.
+    /// have been written by a peer, so a folder outside the workspace, a `delete` retention and
+    /// Protect backups on synced storage turned on are pinned as unconfirmed: every run uses
+    /// the safe value for them until one Confirm. The webhook host and the other keys are
+    /// trust-on-first-use.
     static func firstPin(current: SharedConfigPin, workspace: URL) -> SharedConfigPin {
         var pin = current
         pin.pinnedKeys = Key.allCases.map(\.rawValue)
@@ -198,6 +205,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         if current.retentionMode == RetentionConfig.Mode.delete.rawValue {
             waiting.append(.retentionMode)
         }
+        if current.protectBackupOnSyncedStorage { waiting.append(.protectBackupOnSyncedStorage) }
         return waiting.filter(keys.contains)
     }
 
@@ -257,7 +265,9 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             notifyURLHash: typedURL.isEmpty ? "" : SharedConfigPin.sha256Hex(typedURL),
             htmlHistoryFile: path("html", "history_file"),
             brandingLogoPath: path("branding", "logo_path"),
-            notifyHeartbeat: (raw("notify", "heartbeat") as? Bool) ?? false
+            notifyHeartbeat: (raw("notify", "heartbeat") as? Bool) ?? false,
+            protectBackupOnSyncedStorage:
+                (raw("protect", "backup_on_synced_storage") as? Bool) ?? false
         )
     }
 
@@ -620,6 +630,16 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         !check(profile: profile, appSupport: appSupport).isDrifted(.protectProfile)
     }
 
+    /// `protect.backup_on_synced_storage` as this Mac may use it: on only while config.yaml
+    /// says true and that matches a confirmed pin. A change to false applies at once; a change
+    /// to true, or a true first seen, waits for a Confirm on this Mac.
+    static func protectBackupOnSyncedStorage(
+        _ configured: Bool, profile: String, appSupport: URL = AppSupport.directory()
+    ) -> Bool {
+        configured && !check(profile: profile, appSupport: appSupport)
+            .isDrifted(.protectBackupOnSyncedStorage)
+    }
+
     // MARK: - Folder overrides
 
     /// Which path keys read as their safe value: the folders and the opt-in that differ from
@@ -868,5 +888,7 @@ extension SharedConfigPin {
         htmlHistoryFile = try c.decodeIfPresent(String.self, forKey: .htmlHistoryFile) ?? ""
         brandingLogoPath = try c.decodeIfPresent(String.self, forKey: .brandingLogoPath) ?? ""
         notifyHeartbeat = try c.decodeIfPresent(Bool.self, forKey: .notifyHeartbeat) ?? false
+        protectBackupOnSyncedStorage = try c.decodeIfPresent(
+            Bool.self, forKey: .protectBackupOnSyncedStorage) ?? false
     }
 }

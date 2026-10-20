@@ -163,14 +163,24 @@ one machine's retention budget on everyone's backups. Backups made before this
 version carry no ownership record and are never auto-removed, so clear those out
 once by hand.
 
-**Jamf Protect backups hold credentials, so they stay off shared storage.** When a Jamf Pro
-workspace has Protect connected, each backup also holds a `protect/` folder from
+**Jamf Protect backups hold credentials, so on shared storage your policy decides.** When a
+Jamf Pro workspace has Protect connected, each backup also holds a `protect/` folder from
 `jamf-cli protect backup`. jamf-cli writes the documents that can carry a third-party
 credential (HTTP action configs' request headers, data forwarding settings) with mode 0600,
-and the app keeps that mode. On a shared workspace those files would sync to every Mac, so the
-backup skips Protect there, and also when `protect.profile` changed in the shared `config.yaml`
-and has not been confirmed on this Mac. Either way the run logs one `[warn]` line saying why
-and the Jamf Pro backup is unaffected. If Protect fails or comes back partial, the Jamf Pro
+and the app keeps that mode. On a shared workspace (a sync provider, a network volume, a sync
+tool's folder, or `shared_workspace.enabled: true`) those files would reach every Mac and
+account that can read the folder, so by default the backup skips Protect there. Many
+organizations require that kind of storage (it is covered by their DLP, EDR, backups and
+sharing audits), so the choice is yours: if your storage and access policy allows it, turn on
+**Back up Jamf Protect in this folder** on the Backups screen, or set
+`protect.backup_on_synced_storage: true`. Because every Mac sharing the folder can write
+`config.yaml`, each Mac confirms the setting once (the Backups switch or Config Doctor) before
+it applies there. Turning it off, on any Mac, applies at once; turning it on again needs that
+confirm. A backup that does include Protect on such storage logs one line saying where and that
+the setting allowed it. The backup also skips
+Protect when `protect.profile` changed in the shared `config.yaml` and has not been confirmed
+on this Mac. Either way the run logs one `[warn]` line saying why and the Jamf Pro backup is
+unaffected. If Protect fails or comes back partial, the Jamf Pro
 backup stands, Run History shows the run as Partial, `protect/_failures.yaml` lists the
 resources that failed, and that backup is never pruned automatically. The app never runs
 `jamf-cli protect restore`.

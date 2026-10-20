@@ -91,6 +91,20 @@ final class SchoolSummaryTests: XCTestCase {
             "a cached snapshot is not dated today")
     }
 
+    /// A devices source that landed empty is a warning, not a `[partial]`: the source did land.
+    func testLandedEmptyDeviceListWarnsAndWritesNothing() throws {
+        try writeDevices("[]")
+        let lines = LineBox()
+        let outcome = ReportEngine.writeSchoolSummary(
+            dataDir: dataDir, summariesDir: summariesDir, landedKinds: landed, staleDays: 30,
+            day: day("2026-10-19 09:00:00"), onLine: lines.append)
+
+        XCTAssertEqual(outcome, .nothingToSummarize)
+        let warns = lines.texts.filter { $0.hasPrefix("[warn] Jamf School returned 0 devices") }
+        XCTAssertEqual(warns.count, 1, "\(lines.texts)")
+        XCTAssertFalse(lines.texts.contains { $0.contains("[partial]") })
+    }
+
     func testRunThatLandedNoDevicesLeavesTodaysSummary() throws {
         try writeDevices(fleet)
         write()
@@ -197,5 +211,22 @@ final class SchoolSummaryTests: XCTestCase {
         XCTAssertEqual(store.availableMetrics, TrendSeries.Metric.schoolMetrics)
         store.profile = "prod"
         XCTAssertTrue(store.availableMetrics.contains(.fileVault))
+    }
+}
+
+private final class LineBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var append: @Sendable (CLIBridge.LogLine) -> Void {
+        { line in
+            self.lock.lock(); defer { self.lock.unlock() }
+            self.lines.append(line.text)
+        }
+    }
+
+    var texts: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return lines
     }
 }

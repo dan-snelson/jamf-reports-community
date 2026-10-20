@@ -207,6 +207,9 @@ versions in this repository map to git tags.
 - If the mobile device list from jamf-cli cannot be read well enough to remove the lost-mode
   phone number, location and message, it is no longer saved with them in it. The previous
   snapshot stays in use and the run logs a warning. (#284)
+- A Jamf School collect that gets an empty device list now logs a warning ("Jamf School returned
+  0 devices") instead of an info line, so an empty tenant or a wrong login stands out in Run
+  History. (#284)
 
 ### Removed
 

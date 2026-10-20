@@ -201,6 +201,9 @@ versions in this repository map to git tags.
   workspace with Protect connected; before, only Jamf Pro data was checked.
 - A Jamf School collect where jamf-cli cannot be started for any source now fails, as the Jamf
   Pro collect does, instead of finishing as Partial with a success exit. (#284)
+- A Jamf School or Jamf Protect collect whose `state` folder is a link or otherwise refused now
+  logs one warning naming the folder, instead of not recording per-source results in silence.
+  (#284)
 
 ### Removed
 

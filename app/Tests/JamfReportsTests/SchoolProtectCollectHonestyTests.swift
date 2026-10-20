@@ -46,4 +46,57 @@ final class SchoolProtectCollectHonestyTests: XCTestCase {
             XCTAssertGreaterThan(failedCount, 0)
         }
     }
+
+    /// A `state` folder that is a link is refused with one `[warn]`, not skipped in silence.
+    private func linkStateFolder() throws -> URL {
+        let data = try WorkspacePaths.dataDir(for: profile)
+        try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
+        let elsewhere = root.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: data.appendingPathComponent("state"), withDestinationURL: elsewhere)
+        return data
+    }
+
+    private func refusals(_ lines: [String]) -> [String] {
+        lines.filter { $0.hasPrefix("[warn] state is not used") }
+    }
+
+    func testSchoolCollectWarnsOnceWhenTheStateFolderIsRefused() async throws {
+        _ = try linkStateFolder()
+        try installStub(executable: true)
+        let stub: URL = bin
+        let seen = LineBox()
+        _ = try? await ReportEngine.schoolCollect(
+            profile: profile, workspacePaths: WorkspacePaths.self, force: true,
+            locateJamfCLI: { stub }, onLine: seen.append)
+        XCTAssertEqual(refusals(seen.texts).count, 1, "\(seen.texts)")
+    }
+
+    func testProtectCollectWarnsOnceWhenTheStateFolderIsRefused() async throws {
+        let data = try linkStateFolder()
+        try installStub(executable: true)
+        let stub: URL = bin
+        let seen = LineBox()
+        try await ReportEngine.protectCollect(
+            profile: profile, dataDir: data, locateJamfCLI: { stub }, onLine: seen.append)
+        XCTAssertEqual(refusals(seen.texts).count, 1, "\(seen.texts)")
+    }
+}
+
+private final class LineBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var append: @Sendable (CLIBridge.LogLine) -> Void {
+        { line in
+            self.lock.lock(); defer { self.lock.unlock() }
+            self.lines.append(line.text)
+        }
+    }
+
+    var texts: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return lines
+    }
 }

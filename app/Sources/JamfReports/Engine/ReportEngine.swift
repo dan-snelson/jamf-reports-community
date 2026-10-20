@@ -3376,7 +3376,9 @@ struct ReportEngine: Sendable {
         }
         let dataDir = try workspacePaths.dataDir(for: profile)
 
-        let stateStore = (try? workspacePaths.stateDir(for: profile)).map(StateFileStore.init(directory:))
+        let stateStore = WorkspacePaths
+            .confinedFolderOrWarn(["state"], under: dataDir, onLine: onLine)
+            .map(StateFileStore.init(directory:))
         let plan = planSchoolCollect(profile: profile, tiers: tiers, force: force) {
             stateStore?.lastRun(report: $0)
         }
@@ -3527,9 +3529,10 @@ struct ReportEngine: Sendable {
     static func protectCollect(
         profile: String,
         dataDir: URL,
+        locateJamfCLI: @Sendable () -> URL? = { ExecutableLocator.locate("jamf-cli") },
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
-        guard let bin = ExecutableLocator.locate("jamf-cli") else {
+        guard let bin = locateJamfCLI() else {
             throw ReportEngineError.jamfCLINotFound
         }
         guard ProfileService.isValid(profile) else {
@@ -3544,7 +3547,8 @@ struct ReportEngine: Sendable {
 
         let bridge = CLIBridge()
         // The state folder sits under the data folder, which is all this call is given.
-        let stateStore = (try? WorkspacePaths.confinedFolder(["state"], under: dataDir))
+        let stateStore = WorkspacePaths
+            .confinedFolderOrWarn(["state"], under: dataDir, onLine: onLine)
             .map(StateFileStore.init(directory:))
         let collectStart = Date()
         var unlanded: [String] = []

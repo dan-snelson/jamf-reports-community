@@ -9,6 +9,11 @@ versions in this repository map to git tags.
 
 ### Added
 
+- Jamf School setup can also save Platform API access for blueprints (experimental): turn on
+  "Do you also have Platform API configured for Jamf School?" and enter the region, tenant ID,
+  client ID and secret, or add them later from Data Sources. The app checks them once and says
+  if the tenant ID or a permission is wrong. Updating a School profile's credentials no longer
+  removes Platform API access it already has. (#284)
 - Warnings you have to act on no longer stay in the run log only: a webhook that rejected a card,
   a Jamf Protect backup that was skipped or incomplete, a Jamf School collect with no devices, an
   unreadable Extension Attribute snapshot, a large Fleet Drift change and a mobile device list

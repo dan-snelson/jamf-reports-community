@@ -9,6 +9,8 @@ versions in this repository map to git tags.
 
 ### Added
 
+- A Jamf Pro backup now also backs up Jamf Protect when Protect is connected to the workspace;
+  it is skipped on shared storage, where the files could sync credentials to other Macs. (#284)
 - Notifications can send a daily heartbeat: with `notify.heartbeat: true`, or the new "Send a
   daily heartbeat" switch under Notifications, the background item posts one short card a day
   per workspace saying it ran, with the newest summary's date unless detail is minimal; Run now
@@ -95,6 +97,8 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- A Jamf Protect backup that exits cleanly but exported nothing now reads as Partial, not as
+  backed up with 0 objects. (#284)
 - A Mac that is on only part of the day now gets its daily summary. A daily collect runs at
   its scheduled time, or, after the Mac was off or asleep, at its first background check after
   waking, and that run is the day's run, so the scheduled time does not repeat it. A failed run

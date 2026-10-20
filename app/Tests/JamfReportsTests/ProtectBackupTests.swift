@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class ProtectBackupTests: XCTestCase {
 
-    private enum ProtectMode { case ok, partial, failed, hang }
+    private enum ProtectMode { case ok, partial, failed, hang, empty }
 
     private let connectedConfig = """
     protect:
@@ -91,7 +91,6 @@ final class ProtectBackupTests: XCTestCase {
         // Nothing written: any non-zero exit is a failure, timeout included.
         XCTAssertEqual(ProtectBackup.result(exit: 3, directory: dir).state, .failed)
         XCTAssertEqual(ProtectBackup.result(exit: 7, directory: dir).state, .failed)
-        XCTAssertEqual(ProtectBackup.result(exit: 0, directory: dir).state, .ok)
         try write("name: a", to: dir.appendingPathComponent("plans/a.yaml"))
         try write("name: c", to: dir.appendingPathComponent("connections.yaml"))
         XCTAssertEqual(ProtectBackup.result(exit: 0, directory: dir).objectCounts,
@@ -107,6 +106,38 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertNil(withFailures.objectCounts["_failures"], "_failures.yaml is not a resource")
         // Exit 0 with a failures file is still not a whole backup.
         XCTAssertEqual(ProtectBackup.result(exit: 0, directory: dir).state, .partial)
+    }
+
+    func test_result_cleanExitWithNoObjectsIsPartial() throws {
+        let missing = try makeTempDir().appendingPathComponent("never-created")
+        let empty = try makeTempDir()
+        for dir in [missing, empty] {
+            let result = ProtectBackup.result(exit: 0, directory: dir)
+            XCTAssertEqual(result.state, .partial)
+            XCTAssertEqual(result.reason, "no objects exported")
+            XCTAssertTrue(result.isIncomplete)
+        }
+        try write("name: a", to: empty.appendingPathComponent("plans/a.yaml"))
+        XCTAssertEqual(ProtectBackup.result(exit: 0, directory: empty).state, .ok)
+    }
+
+    func test_backup_protectExitingCleanWithNothingExportedIsPartial() async throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .empty)
+        let lines = Lines()
+        let exit = try await CLIBridge().backup(
+            profile: ctx.profile, label: "scheduled-20260101", _testExecutable: ctx.stub
+        ) { lines.append($0) }
+
+        XCTAssertEqual(exit, 0)
+        let protect = try XCTUnwrap(BackupProductResult.protect(inBackup: try ctx.onlyBackup()))
+        XCTAssertEqual(protect.state, .partial)
+        XCTAssertEqual(protect.reason, "no objects exported")
+        let texts = lines.texts
+        XCTAssertTrue(texts.contains {
+            $0.hasPrefix("[warn] Jamf Protect backup is PARTIAL") && $0.contains("no objects exported")
+        }, "\(texts)")
+        XCTAssertEqual(texts.filter { $0.hasPrefix("[partial]") }.count, 1, "\(texts)")
+        XCTAssertFalse(texts.contains { $0.contains("backed up (0 objects)") })
     }
 
     // MARK: - backup(): connected
@@ -490,6 +521,8 @@ final class ProtectBackupTests: XCTestCase {
             protectBody = writeFiles + "\nexit 3"
         case .hang:
             protectBody = writeFiles + "\nexec /bin/sleep 30"
+        case .empty:
+            protectBody = "mkdir -p \"$out\"\nexit 0"
         }
         let script = """
         #!/bin/sh

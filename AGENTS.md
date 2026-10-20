@@ -435,9 +435,9 @@ action configs' request headers, data forwarding) would sync to every Mac. There
 for shared storage yet. `manifest.json` then carries `products.pro` and `products.protect`
 (`BackupProductResult`: `state` ok, partial, failed or skipped; `exit_code`; `reason`;
 `object_counts` per resource folder; `failures_file`); a manifest without `products` reads as
-before. `ProtectBackup.result` classifies the run: exit 0 with no `_failures.yaml` is ok; a
+before. `ProtectBackup.result` classifies the run: exit 0 with objects and no `_failures.yaml` is ok; a
 non-zero exit (7, or any exit with a `_failures.yaml`) that left files, or exit 0 with a
-`_failures.yaml`, is partial; everything else, a timeout included, is failed and its files are
+`_failures.yaml` or with no objects exported (reason "no objects exported"), is partial; everything else, a timeout included, is failed and its files are
 removed. A partial or failed Protect part never costs the Jamf Pro backup or changes its exit:
 the run logs a `[warn]` line (naming `protect/_failures.yaml` when present) and a `[partial]`
 line, so `CollectHonestyWatcher.incomplete` is true and Run History reads the run as Partial

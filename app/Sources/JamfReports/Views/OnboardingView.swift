@@ -851,10 +851,10 @@ struct OnboardingView: View {
     }
 
     /// "Run automatically" (on by default) and the optional webhook, applied when setup
-    /// finishes, whether by the first report or by Skip & finish. Disabled in demo mode, where
-    /// finishing applies neither.
+    /// finishes, whether by the first report or by Skip & finish. Open in demo mode too: setup
+    /// creates a real profile and finishing it leaves demo mode.
     private var automationAndWebhookCard: some View {
-        let locked = flow.isRunningFirstReport || workspaceStore.demoMode
+        let locked = flow.isRunningFirstReport
         return Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Run automatically").font(.body.weight(.semibold))
@@ -886,10 +886,6 @@ struct OnboardingView: View {
                 if NotifyConfigWriter.showsInsecureURLWarning(enabled: true, url: flow.webhookURL) {
                     Text("URL must start with https:// — it will not be saved.")
                         .font(.footnote).foregroundStyle(Theme.Colors.warn)
-                }
-                if workspaceStore.demoMode {
-                    Text(DemoData.liveOnlyHelp)
-                        .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
                 }
             }
         }

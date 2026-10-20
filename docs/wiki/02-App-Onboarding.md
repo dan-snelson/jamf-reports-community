@@ -148,8 +148,8 @@ profile has a workspace, for example after the workspace folder is emptied.
    to leave automation as it is; an automation setup you already have is never switched off
    or changed. **Webhook (optional)** takes a Teams or Slack incoming-webhook URL; leave it
    empty to skip. Only an `https://` URL is saved, as the workspace's `notify:` block with
-   full detail, and you can change it later under Automation › Notifications. Both controls
-   are disabled in demo mode.
+   full detail, and you can change it later under Automation › Notifications. Both apply
+   when setup was started from demo mode too, since setup creates a real profile.
 
 ### Adding more environments from the same integration
 

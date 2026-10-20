@@ -14,7 +14,7 @@ final class OnboardingAutomationChoiceTests: XCTestCase {
     /// legacy-plist import marked done so `applyAutomationPolicy` never reads the real
     /// ~/Library/LaunchAgents.
     private func makeStore(
-        storedPolicy: AutomationPolicy? = nil, demo: Bool = false
+        storedPolicy: AutomationPolicy? = nil, demo: Bool = false, realProfile: Bool = true
     ) throws -> (WorkspaceStore, StubTickerRegistrar) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("OnbAuto-\(UUID().uuidString)", isDirectory: true)
@@ -47,7 +47,8 @@ final class OnboardingAutomationChoiceTests: XCTestCase {
             demoMode: demo, tickerRegistrar: registrar,
             jamfCLIProfileNames: { [] },
             discoverProfiles: {
-                [JamfCLIProfile(name: profile, url: "", schedules: 0, status: .idle)]
+                realProfile ? [JamfCLIProfile(name: profile, url: "", schedules: 0, status: .idle)]
+                    : []
             },
             jamfCLIInstallation: { nil })
         store.resolveAuthMethod = { _ in nil }
@@ -144,13 +145,29 @@ final class OnboardingAutomationChoiceTests: XCTestCase {
         }
     }
 
-    func testDemoModeAppliesNeitherTheWebhookNorTheAutomation() async throws {
+    /// Setup started from demo mode creates a real profile; finishing it gets both.
+    func testSetupStartedInDemoModeAppliesTheWebhookAndTheAutomation() async throws {
         let (store, registrar) = try makeStore(demo: true)
         let flow = makeFlow()
         flow.webhookURL = "https://hooks.example.com/abc"
 
         await flow.finishSetup(in: store)
 
+        XCTAssertFalse(store.demoMode)
+        XCTAssertTrue(policy().isManaged)
+        XCTAssertEqual(registrar.registerCalls, 1)
+        XCTAssertTrue(NotifyConfigLoader.load(profile: profile).isUsable)
+    }
+
+    /// No real profile found: the store stays in demo mode and neither is applied.
+    func testAStoreStillInDemoModeAppliesNeither() async throws {
+        let (store, registrar) = try makeStore(demo: true, realProfile: false)
+        let flow = makeFlow()
+        flow.webhookURL = "https://hooks.example.com/abc"
+
+        await flow.finishSetup(in: store)
+
+        XCTAssertTrue(store.demoMode)
         XCTAssertFalse(policy().isManaged)
         XCTAssertEqual(registrar.registerCalls, 0)
         XCTAssertFalse(NotifyConfigLoader.load(profile: profile).isUsable)

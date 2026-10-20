@@ -1081,17 +1081,17 @@ final class OnboardingFlow {
     /// profile. The exception is a new profile named like the demo's, whose
     /// fresh workspace and schedules that cleanup would delete.
     ///
-    /// Then applies the last step's choices to a live (non-demo) store: the webhook and the
-    /// automation policy. Automation is only ever turned on here, never off.
+    /// Then applies the last step's choices: the webhook and the automation policy, also when
+    /// setup started in demo mode, unless the store is still in demo mode because no real
+    /// profile was found. Automation is only ever turned on here, never off.
     func finishSetup(in workspaceStore: WorkspaceStore) async {
-        let wasDemo = workspaceStore.demoMode
-        if wasDemo && profileName.trimmed != DemoData.org.profile {
+        if workspaceStore.demoMode && profileName.trimmed != DemoData.org.profile {
             workspaceStore.setDemoMode(false)
         } else {
             UserDefaults.standard.removeObject(forKey: WorkspaceStore.forceDemoModeKey)
             workspaceStore.reloadFromDisk()
         }
-        guard !wasDemo else { return }
+        guard !workspaceStore.demoMode else { return }
         saveWebhook(in: workspaceStore)
         let base = AutomationPolicy.current()
         guard automation.enabled, !base.isManaged else { return }

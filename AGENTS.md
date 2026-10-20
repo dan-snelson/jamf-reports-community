@@ -1379,6 +1379,7 @@ dependency floor), unrelated to app versioning.
   editable/removable list — the disappearing row's binding is re-read with a stale index
   during SwiftUI's removal diff and traps ("Array index out of range"). Use
   `safeElementBinding(_:_:default:)` (ConfigView) or a binding-to-element `ForEach($array)`.
+- Status colors (ok, warn, danger) are for status only, never for a data series.
 - Test targets live in `app/Tests/JamfReportsTests/`.
 
 ---

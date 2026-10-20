@@ -95,6 +95,14 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- The Mobile Devices supervision chart uses a blue and orange pair that color-blind readers
+  can tell apart.
+- The Fleet Overview stability trend and the second OS version slice are easier to see on
+  the dark background, and the stability pill says Healthy, Watch or Low as well as showing
+  the number.
+- Workbook compliance charts and the app use the same color for each compliance band, and
+  the chart legend no longer cuts long labels short.
+- OS version chart colors for a macOS release without a set color no longer change between runs.
 - A Mac that is on only part of the day now gets its daily summary. A daily collect runs at
   its scheduled time, or, after the Mac was off or asleep, at its first background check after
   waking, and that run is the day's run, so the scheduled time does not repeat it. A failed run

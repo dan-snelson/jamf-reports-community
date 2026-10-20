@@ -22,9 +22,8 @@ func runTick(
     case .acquired(let held):
         hold = held
     case .heldElsewhere:
-        // Stamp the refusal before returning: the non-catch-up window for the
-        // wake that eventually gets in is measured from here, not from that
-        // wake's own clock.
+        // Stamp the refusal before returning: the non-catch-up window and the off gap for the
+        // wake that eventually gets in are measured from here, not from that wake's own clock.
         TickLock.noteBlocked()
         fputs("[info] tick: another run holds the lock — queued markers run on the next wake\n",
               stderr)
@@ -60,19 +59,21 @@ func runTick(
     }
 
     var state = TickState.load()
-    if let blocked { state.noteWake(at: blocked.latest) }
+    let wasOff = TickScheduler.wasOff(
+        lastTick: state.lastTick, firstWake: blocked ?? now, now: now)
     let due = TickScheduler.due(
         schedules: schedules, state: state, runNowLabels: runNowLabels, now: now,
-        nonCatchUpAnchor: blocked?.first,
+        nonCatchUpAnchor: blocked, wasOff: wasOff,
         summaryMissingToday: { summaryMissing(for: $0, profiles: profiles, now: now) })
     // After the decision, which reads the previous wake. Best-effort: without it a daily
-    // schedule just waits for its fire.
+    // schedule just waits for its fire. A wake a long run turns away stamps `.tick.blocked`,
+    // so the run's own length never reads as the Mac being off.
     state.lastTick = now
     saveLastTick(state)
     let failures = TickFailureLog(profiles: profiles)
     defer { failures.finish() }
     let result = await TickLoop.runDue(
-        due, state: state,
+        due, state: state, runNowLabels: runNowLabels,
         save: { try $0.save() },
         clearRunNowMarker: { TickRunner.clearRunNowMarker(label: $0) },
         perform: { run in
@@ -99,12 +100,6 @@ func runTick(
                     profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
             }
         })
-    // A long run must not read as a gap in the wakes.
-    if !due.isEmpty {
-        var finished = TickState.load()
-        finished.lastTick = Date()
-        saveLastTick(finished)
-    }
     return result
 }
 
@@ -175,9 +170,15 @@ enum TickLoop {
     /// later save in this tick still records it, and at worst a same-day retry
     /// repeats it. Neither failure stops the schedules after it or the digest, and
     /// both go to `recordFailure` with their schedule for Run History.
+    ///
+    /// A Run now writes nothing to the state, but its start is still saved first so a marker is
+    /// never cleared on a state file that cannot be written. A marker is cleared whichever
+    /// reason its label runs under. `clock` is the start time each run is stamped with.
     static func runDue(
         _ due: [TickScheduler.DueRun],
         state initial: TickState,
+        runNowLabels: Set<String>,
+        clock: () -> Date = Date.init,
         save: (TickState) throws -> Void,
         clearRunNowMarker: (String) -> Void,
         perform: (TickScheduler.DueRun) async -> ScheduleRunOutcome,
@@ -199,7 +200,7 @@ enum TickLoop {
             // Stamped BEFORE the run so a crash mid-collect still counts as an
             // attempt and cannot re-run on every wake.
             let before = state
-            let startedAt = Date()
+            let startedAt = clock()
             state.noteStarted(label, at: startedAt, reason: run.reason)
             do {
                 try save(state)
@@ -214,9 +215,11 @@ enum TickLoop {
             }
             // The start is on disk, so the request is honoured. Cleared before the
             // run, never after: see `TickRunner.clearRunNowMarker`.
-            if run.reason == .runNow { clearRunNowMarker(label) }
+            if runNowLabels.contains(label) { clearRunNowMarker(label) }
             let outcome = await perform(run)
-            if outcome.endsRetries {
+            // A Run now pays no day and ends no retries.
+            let scheduled = run.reason != .runNow
+            if scheduled, outcome.endsRetries {
                 state.noteSucceeded(label, startedAt: startedAt)
                 do {
                     try save(state)
@@ -227,7 +230,7 @@ enum TickLoop {
                     reportTickError(message)
                     recordFailure(run.schedule, message)
                 }
-            } else if state.noteRetry(label, couldHelp: outcome.retryCouldHelp) {
+            } else if scheduled, state.noteRetry(label, couldHelp: outcome.retryCouldHelp) {
                 // Best-effort: unrecorded, the hourly retries run as if a retry could help.
                 do { try save(state) } catch {
                     AppLogger.schedule.warning(

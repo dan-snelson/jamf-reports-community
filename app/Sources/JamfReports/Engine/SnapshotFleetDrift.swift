@@ -22,6 +22,19 @@ struct SnapshotFleetDrift {
     /// True when either snapshot carries no check-in or inventory date at all (collected
     /// without `general`), so every Mac would read as never checked in.
     let staleNotCompared: Bool
+    let currentCount: Int, priorCount: Int
+
+    /// The share of the larger snapshot that joined or left, when that is more than
+    /// max(20, a quarter of the smaller snapshot) or the smaller is under half the larger.
+    /// Mass enrollment and retirement are normal, so this only prompts a check.
+    var largeChangePercent: Int? {
+        let (small, large) = (min(currentCount, priorCount), max(currentCount, priorCount))
+        let moved = joined.count + left.count
+        guard moved > 0,
+              Double(moved) > max(20, Double(small) * 0.25) || 2 * small < large
+        else { return nil }
+        return Int((Double(moved) / Double(large) * 100).rounded())
+    }
 
     /// Each snapshot is judged as of its own collection time, so a Mac that went quiet after the
     /// baseline was taken shows as newly stale.
@@ -33,6 +46,7 @@ struct SnapshotFleetDrift {
             macs.filter { $0.jamfID != nil || $0.serial != nil }
         }
         let now = identified(current), before = identified(prior)
+        (currentCount, priorCount) = (current.count, prior.count)
         unidentified = (current.count - now.count) + (prior.count - before.count)
         let priorIndex = ComputerDateIndex(before), currentIndex = ComputerDateIndex(now)
         func sortedByName(_ macs: [ComputerDates]) -> [ComputerDates] {
@@ -122,6 +136,19 @@ extension CoreDashboard {
             ncols: 6)
         ws.setColumnWidth(0, 0, 34)
         ws.setColumnWidth(1, 5, 22)
+        if let percent = drift.largeChangePercent {
+            let day = DateFormatter()
+            day.dateFormat = "yyyy-MM-dd"
+            let warning = "Large change: \(drift.joined.count) joined and \(drift.left.count) left "
+                + "since \(day.string(from: pair.prior.date)) (\(percent)% of the fleet). If this "
+                + "was not a planned enrollment or retirement, check that the last collect "
+                + "finished; a partial collect can make Macs look departed."
+            // Row 2 is the header's blank row, so the sections keep their rows.
+            ws.write(warning, row: row - 1, col: 0, format: .yellow)
+            let line = "[warn] Fleet Drift: \(warning)"
+            print("  " + line)
+            onLine?(.init(timestamp: Date(), level: .warn, text: line))
+        }
 
         func section(
             _ title: String, note: String? = nil, empty: String = "No changes",

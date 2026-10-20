@@ -19,6 +19,8 @@ struct CoreDashboard: Sendable {
     /// GUI-generate-only AI executive narrative (F3). nil (the default) writes
     /// no AI block on the Executive Summary sheet — headless callers never set it.
     let aiNarrative: String?
+    /// The generate run's log, for a sheet's `[warn]` line. Nil writes to stdout only.
+    let onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
     /// Shared by the copies of this struct that `sheetPlan`'s closures hold.
     private let hardwareIndex = OnceCache<[String: Bool]>()
     /// The `computers` snapshot's dates, read once for every sheet that grades by the stale rule.
@@ -29,8 +31,10 @@ struct CoreDashboard: Sendable {
         dataDir: URL,
         workbook: Workbook,
         provenance: Provenance? = nil,
-        aiNarrative: String? = nil
+        aiNarrative: String? = nil,
+        onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) {
+        self.onLine = onLine
         self.config = config
         self.dataDir = dataDir
         self.workbook = workbook

@@ -828,12 +828,19 @@ extension WorkspaceStore {
                 + (overdue.count == 1 ? "" : "s")
         // The claim keeps a tick that wakes mid-send from posting the same card; the day is
         // stamped only after a confirmed send, so a failed post retries on the next pass.
-        let outcome = await marker.sendOnce(day: today, in: [workspace]) {
-            await WebhookNotifier.sendFailed(config: notify, title: title, facts: facts)
+        let failure = WebhookNotifier.DeliveryFailure()
+        let outcome = await AttentionLog.recording(profile: profile) {
+            let outcome = await marker.sendOnce(day: today, in: [workspace]) {
+                await WebhookNotifier.sendFailed(
+                    config: notify, title: title, facts: facts, failure: failure)
+            }
+            ScheduledRunSignals.noteWebhook(outcome, failure: failure)
+            return outcome
         }
         if outcome == .failed {
+            let reason = failure.reason ?? "unknown"
             AppLogger.webhook.warning(
-                "Overdue dead-man digest failed to send for \(profile, privacy: .public) — day not claimed, will retry (distinct from a routine run digest failure)"
+                "Overdue dead-man digest failed to send for \(profile, privacy: .public): \(reason, privacy: .public) — day not claimed, will retry (distinct from a routine run digest failure)"
             )
         }
     }

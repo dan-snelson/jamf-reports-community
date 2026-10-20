@@ -227,4 +227,62 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertTrue(open.first?.message.contains("HTTP 403") == true)
         XCTAssertEqual(open.first?.runLog, "run.log")
     }
+
+    func testARejectedRunDigestNeedsAttentionWithItsStatus() async throws {
+        WebhookCapture.start()
+        defer { WebhookCapture.stop(); WebhookCapture.respond(with: 200) }
+        let status = try automation().appendingPathComponent("run_status.json")
+        WebhookCapture.respond(with: 410)
+        let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+        try ("notify:\n  enabled: true\n  provider: teams\n  url: \"\(WebhookCapture.webhookURL)\"\n")
+            .write(to: workspace.appendingPathComponent("config.yaml"),
+                   atomically: true, encoding: .utf8)
+        let config = try ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        await AttentionLog.recording(profile: profile, usesAppRecord: false) {
+            AttentionLog.current?.record(into: status, runLog: "run.log")
+            await ScheduledRunSignals.notifyScheduledRun(
+                config: config, profile: profile, mode: .snapshotOnly, artifact: nil,
+                recorder: nil)
+        }
+        let open = AttentionLog.openItems(profile: profile)
+        XCTAssertEqual(open.map(\.code), [.webhookRejected])
+        XCTAssertTrue(open.first?.message.contains("HTTP 410") == true, "\(open)")
+    }
+
+    func testARejectedAlertCardNeedsAttentionAndAnAcceptedOneClearsIt() async throws {
+        WebhookCapture.start()
+        defer { WebhookCapture.stop(); WebhookCapture.respond(with: 200) }
+        let status = try automation().appendingPathComponent("run_status.json")
+        let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+        try ("notify:\n  enabled: true\n  provider: teams\n  url: \"\(WebhookCapture.webhookURL)\"\n"
+            + "alerts:\n  enabled: true\n  rules:\n"
+            + "    - {metric: \"total_devices\", when: \"above\", threshold: 0}\n")
+            .write(to: workspace.appendingPathComponent("config.yaml"),
+                   atomically: true, encoding: .utf8)
+        let config = try ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        let summaries = try WorkspacePaths.summariesDir(for: profile)
+        try FileManager.default.createDirectory(at: summaries, withIntermediateDirectories: true)
+        let today = SummaryJSONParser.dateFormatter.string(from: Date())
+        try #"{"date":"\#(today)","totalDevices":5,"source":"jamf-cli"}"#.write(
+            to: summaries.appendingPathComponent("summary_\(today).json"),
+            atomically: true, encoding: .utf8)
+        func alert() async {
+            await AttentionLog.recording(profile: profile, usesAppRecord: false) {
+                AttentionLog.current?.record(into: status, runLog: "run.log")
+                await ScheduledRunSignals.notifyMetricAlerts(
+                    config: config, profile: profile, workspace: workspace, recorder: nil)
+            }
+        }
+        WebhookCapture.respond(with: 429)
+        await alert()
+        XCTAssertEqual(WebhookCapture.posted.count, 1)
+        let open = AttentionLog.openItems(profile: profile)
+        XCTAssertEqual(open.map(\.code), [.webhookRejected])
+        XCTAssertTrue(open.first?.message.contains("HTTP 429") == true, "\(open)")
+
+        WebhookCapture.respond(with: 200)
+        await alert()
+        XCTAssertEqual(WebhookCapture.posted.count, 2, "the unsent card is tried again")
+        XCTAssertTrue(AttentionLog.openItems(profile: profile).isEmpty)
+    }
 }

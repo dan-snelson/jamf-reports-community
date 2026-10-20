@@ -1055,8 +1055,8 @@ device data, URL or secret (`sanitized`: `LogRedactor.redactedForSharing`, URLs 
 characters), `first_seen`, `last_seen`, `count`, the profile and the run's log name. The emit
 site calls `AttentionLog.raise` beside its `[warn]` line and the check that passes calls
 `AttentionLog.clear`: a confirmed webhook send (success digest, failure card, heartbeat, metric
-alert) clears `webhookRejected`, a failure card or heartbeat that fails opens it with the HTTP
-status; a School collect that lands devices, readable EA snapshots (or no custom EAs), a Fleet
+alert, and the GUI's overdue digest) clears `webhookRejected`, and any of them that fails opens
+it with the HTTP status or network error (the tick's overdue digest records neither); a School collect that lands devices, readable EA snapshots (or no custom EAs), a Fleet
 Drift without a large change, a mobile list whose lost-mode text was removed, and a Protect backup
 that ran (ok clears both Protect codes, partial or failed opens `protectBackupPartial`; Protect
 not connected clears both) close theirs. `AttentionLog` is bound to the task (`current`,

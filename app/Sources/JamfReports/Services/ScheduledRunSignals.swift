@@ -137,16 +137,17 @@ enum ScheduledRunSignals {
             detail: notify.resolvedDetail, profile: profile, mode: mode,
             artifact: artifact, sheetFailures: sheetFailures
         )
+        let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.send(
-            config: notify, title: "Jamf Report — \(profile)", facts: facts
+            config: notify, title: "Jamf Report — \(profile)", facts: facts, failure: failure
         )
         if !sent {
-            let message = "[warn] webhook notification failed for '\(profile)'"
+            let message = "[warn] webhook notification failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
-        } else {
-            AttentionLog.clear(.webhookRejected)
         }
+        noteWebhook(sent ? .sent : .failed, failure: failure)
     }
 
     /// Post a failure webhook digest for a run that failed before or while generating a
@@ -372,16 +373,19 @@ enum ScheduledRunSignals {
         let newHits = hits.filter { newKeys.contains(MetricAlertEvaluator.dedupKey(for: $0)) }
         guard !newHits.isEmpty else { return }
         let facts = alertFacts(detail: notify.resolvedDetail, profile: profile, hits: newHits)
+        let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.sendAlert(
-            config: notify, title: "Jamf Reports alert — \(profile)", facts: facts
+            config: notify, title: "Jamf Reports alert — \(profile)", facts: facts,
+            failure: failure
         )
+        noteWebhook(sent ? .sent : .failed, failure: failure)
         guard sent else {
-            let message = "[warn] metric-alert webhook failed for '\(profile)'"
+            let message = "[warn] metric-alert webhook failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
             return
         }
-        AttentionLog.clear(.webhookRejected)
         // Claim the day only after a confirmed send, so a transient webhook
         // failure retries on the next run instead of silencing the rule.
         ledger.record(day: today, keys: Array(newKeys))

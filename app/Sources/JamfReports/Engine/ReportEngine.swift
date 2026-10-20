@@ -2439,6 +2439,9 @@ struct ReportEngine: Sendable {
         return args
     }
 
+    /// The School kind that reads the Platform API (`planSchoolCollect` gates it).
+    static let schoolBlueprintsKind = "school-blueprints"
+
     /// The commands a Jamf School collect runs, in order (`schoolCollect`; Data Sources lists
     /// them through `CollectSourcesPlan`).
     static func schoolCommandMatrix(profile: String) -> [(args: [String], kind: String)] {
@@ -2454,6 +2457,9 @@ struct ReportEngine: Sendable {
             (["-p", profile, "school", "locations", "list", "--output", "json"], "school-locations"),
             (["-p", profile, "school", "ibeacons", "list", "--output", "json"], "school-ibeacons"),
             (["-p", profile, "school", "dep-devices", "list", "--output", "json"], "school-dep-devices"),
+            // Experimental: reaches the Platform API, so it needs the profile's Platform fields.
+            (["-p", profile, "school", "blueprints", "list", "--output", "json"],
+             schoolBlueprintsKind),
         ]
     }
 
@@ -3395,7 +3401,16 @@ struct ReportEngine: Sendable {
         let stateStore = WorkspacePaths
             .confinedFolderOrWarn(["state"], under: dataDir, onLine: onLine)
             .map(StateFileStore.init(directory:))
-        let plan = planSchoolCollect(profile: profile, tiers: tiers, force: force) {
+        if stateStore != nil, let summariesDir = try? workspacePaths.summariesDir(for: profile) {
+            backfillSchoolHistoryOnce(
+                dataDir: dataDir, summariesDir: summariesDir,
+                staleDays: { schoolStaleDays(profile: profile, onLine: onLine) }, onLine: onLine)
+        }
+        // nil (could not ask) collects: only a profile known to lack Platform fields skips.
+        let resolved = ProfileAuthMethod.resolve(profile: profile, binary: bin)
+        let plan = planSchoolCollect(
+            profile: profile, tiers: tiers, force: force,
+            platformFieldsMissing: resolved.map { !$0.hasTenantID } ?? false) {
             stateStore?.lastRun(report: $0)
         }
         for line in collectPlanLines(profile: profile, fixedPlan: plan) {
@@ -3484,13 +3499,11 @@ struct ReportEngine: Sendable {
         reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
     }
 
-    /// The School daily summary: Trends history for a workspace that writes no other. The stale
-    /// cut-off is `thresholds.stale_device_days`; a config.yaml that will not load is named in
-    /// a `[warn]` and the default 30 applies, since the summary should still advance.
-    private static func writeSchoolSummaryAfterCollect(
-        profile: String, dataDir: URL, workspacePaths: WorkspacePaths.Type,
-        landedKinds: Set<String>, onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
-    ) {
+    /// `thresholds.stale_device_days` for a School summary; 30 when config.yaml will not load,
+    /// with a `[warn]`, since the summary should still advance.
+    static func schoolStaleDays(
+        profile: String, onLine: @Sendable (CLIBridge.LogLine) -> Void
+    ) -> Int {
         var staleDays = 30
         if let workspace = ProfileService.workspaceURL(for: profile) {
             let configURL = workspace.appendingPathComponent("config.yaml")
@@ -3505,6 +3518,17 @@ struct ReportEngine: Sendable {
                 }
             }
         }
+        return staleDays
+    }
+
+    /// The School daily summary: Trends history for a workspace that writes no other. The stale
+    /// cut-off is `thresholds.stale_device_days`; a config.yaml that will not load is named in
+    /// a `[warn]` and the default 30 applies, since the summary should still advance.
+    private static func writeSchoolSummaryAfterCollect(
+        profile: String, dataDir: URL, workspacePaths: WorkspacePaths.Type,
+        landedKinds: Set<String>, onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
+    ) {
+        let staleDays = schoolStaleDays(profile: profile, onLine: onLine)
         guard let summariesDir = try? workspacePaths.summariesDir(for: profile) else {
             if landedKinds.contains(SchoolFleetService.devicesKind) {
                 onLine(.init(timestamp: Date(), level: .warn, text: "\(summaryNotWrittenMarker) "

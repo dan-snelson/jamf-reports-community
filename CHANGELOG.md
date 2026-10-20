@@ -51,6 +51,22 @@ versions in this repository map to git tags.
   Enrollment are listed below them.
 - A Jamf School workspace now builds Trends history: each collect that reads its devices saves
   a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
+- Jamf Protect now works with a Jamf School workspace (experimental): connect it from Data
+  Sources and Protect is collected after each School collect, gets its own Jamf Protect screen,
+  matches Protect computers to Jamf School Macs, and adds its tabs to the School workbook. It is
+  not backed up, as a Jamf School workspace has no backups. (#284)
+- Jamf School setup can also save Platform API access for blueprints (experimental): turn on
+  "Do you also have Platform API configured for Jamf School?" and enter the region, tenant ID,
+  client ID and secret, or add them later from Data Sources. The app checks them once and says
+  if the tenant ID or a permission is wrong. Updating a School profile's credentials no longer
+  removes Platform API access it already has. (#284)
+- A Jamf School workspace now builds Trends history: each collect that reads its devices saves
+  a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
+  The first collect after the upgrade also fills in earlier days from the Jamf School device
+  snapshots already on disk, so Trends starts at the workspace's first collect. (#284)
+- Experimental: a Jamf School workspace whose profile also has Platform API fields collects its
+  blueprints and writes a Blueprints tab (name, state, last deployed, created, updated). Without
+  those fields Data Sources shows the source as skipped and says how to add them.
 
 ### Changed
 
@@ -261,6 +277,13 @@ versions in this repository map to git tags.
   number is on two Jamf Pro records and it has no Jamf ID; such Macs are counted in a note
   instead. An inventory collected without check-in dates no longer lists every Mac as newly
   stale: the stale sections say they were not compared. (#284)
+- Connecting Jamf Protect or Jamf School no longer changes jamf-cli's default profile: jamf-cli's
+  setup makes the new profile the default, and the app now puts the previous one back. (#284)
+- Connecting Jamf Protect or Jamf School now tries the credentials with one read before the
+  connection is saved, so a wrong client secret or API key shows at setup instead of at the
+  first collect. (#284)
+- A Platform API profile that also has Jamf Security Cloud set up on it (`security setup` run on
+  the same profile) is a Jamf Pro workspace again instead of being hidden. (#284)
 
 ### Removed
 

@@ -37,7 +37,8 @@ switcher** at the bottom of the sidebar and choose **Add workspace or product…
 
 - **New workspace**: Jamf Pro (OAuth2), Platform API or Jamf School. **Connect new** starts
   that product's onboarding.
-- **Add to** the current workspace: Jamf Protect, on a Jamf Pro workspace.
+- **Add to** the current workspace: Jamf Protect, on a Jamf Pro or (experimental) Jamf School
+  workspace.
 - **Profiles jamf-cli already has**: the sheet reads jamf-cli's profiles when it opens and on
   **Re-check**, and lists the ones no workspace uses, including profiles made in Terminal since
   the app started. **Set up workspace** creates the workspace and runs its first collection; a
@@ -112,8 +113,8 @@ profile has a workspace, for example after the workspace folder is emptied.
    collects one profile per fleet: when both reach the same Jamf Pro, setup keeps the Platform
    API profile, notes the OAuth one as "same Jamf Pro as ...", and leaves it out unless you tick
    it. The secret is passed to `jamf-cli` over a controlling TTY and cleared immediately; the
-   app never persists it. `jamf-cli` keeps the credentials in the macOS keychain and caches
-   tokens on disk. An organization-level integration is not accepted: it reaches only Jamf
+   app never persists it. Setup has `jamf-cli` store the credentials in the macOS keychain, and
+   tokens are cached on disk. An organization-level integration is not accepted: it reaches only Jamf
    Account, so create an environment-level one. For a Platform API connection, create the
    integration in Jamf
    Account first — at the platform environment level, scoped to one environment, with
@@ -190,7 +191,10 @@ The Connect School step registers a
 `jamf-cli school` profile (School URL + Network ID + API key, passed over stdin and cleared)
 and wires `school_cli.enabled`/`profile` into the workspace config, so the first report and
 every later collect route to the Jamf School engine. jamf-cli must still be installed to get
-past the Install CLI step, but no Jamf Pro credentials are entered. Please
+past the Install CLI step, but no Jamf Pro credentials are entered. An optional, experimental
+switch on the same step, **Do you also have Platform API configured for Jamf School?**, adds
+the Platform API region, tenant ID, client ID and secret to the same School profile (never a
+profile of its own) and checks them by listing blueprints once. Please
 [open an issue or pull request](https://github.com/tonyyo11/jamf-reports-community/issues) if
 something looks off. See
 [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School) for the

@@ -327,6 +327,8 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         XCTAssertEqual(detail(found, "sheets.skip"),
                        "\"Fleet Overview\" matches no sheet, so the app ignores it.")
         XCTAssertEqual(try rows(school + "sheets:\n  order: [iBeacons, Stale Devices]\n"), [])
+        XCTAssertEqual(try rows(school + "sheets:\n  skip: [Protect Alerts]\n"), [],
+                       "the School workbook has the Protect tabs (2.11)")
         XCTAssertEqual(try rows("sheets:\n  skip: [Cover, charts]\n"), [], "a Jamf Pro profile")
     }
 
@@ -467,14 +469,9 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         }
     }
 
-    func testSchoolAndProtectBothEnabledStateWhichOneTheCollectUses() throws {
-        let found = try rows("school_cli: {enabled: true}\nprotect: {enabled: true}\n")
-        XCTAssertEqual(titles(found), ["school_cli.enabled"])
-        XCTAssertEqual(found.first?.detail,
-                       "school_cli.enabled and protect.enabled are both true. The app collects "
-                       + "Jamf School only and never runs Protect for this profile.")
-        XCTAssertEqual(try rows("school_cli: {enabled: true}\nprotect: {enabled: false}\n"), [])
-        XCTAssertEqual(try rows("protect: {enabled: true}\n"), [])
+    /// Protect follows a Jamf School collect (2.11), so School with Protect is not a warning.
+    func testSchoolAndProtectBothEnabledIsQuiet() throws {
+        XCTAssertEqual(try rows("school_cli: {enabled: true}\nprotect: {enabled: true}\n"), [])
     }
 
     func testSchoolAndProtectRowIsQuietWhenSchoolIsAnotherProfile() throws {

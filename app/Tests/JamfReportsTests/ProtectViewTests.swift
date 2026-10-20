@@ -166,4 +166,21 @@ final class ProtectViewTests: XCTestCase {
             "1 Protect computer reports no UUID or serial.",
         ])
     }
+
+    /// On a Jamf School workspace the card matches against School inventory and says so.
+    func testSchoolMatchTextNamesJamfSchool() throws {
+        let match = ProtectProCorrelation(
+            inventory: .jamfSchool, protectCount: 2, matched: 1,
+            notInPro: try protectRows(1), proWithoutProtect: [proMac("A")])
+        XCTAssertEqual(ProtectView.matchSummary(match),
+                       "1 of 2 Protect computers match a Jamf School computer.")
+        XCTAssertEqual(ProtectView.matchNotes(match), [
+            "1 Protect computer has no Jamf School record.",
+            "1 Jamf School Mac has no Protect record.",
+        ])
+        XCTAssertEqual(ProtectView.noInventoryText(.jamfSchool),
+                       "Collect Jamf School inventory to match Protect computers to Jamf School.")
+        XCTAssertEqual(ProtectView.noInventoryText(.jamfPro),
+                       "Collect Jamf Pro inventory to match Protect computers to Jamf Pro.")
+    }
 }

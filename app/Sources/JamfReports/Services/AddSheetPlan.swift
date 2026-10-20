@@ -31,7 +31,7 @@ enum AddSheetPlan {
         enum Use: Equatable, Sendable {
             /// A Jamf Pro, Platform API or Jamf School login: set up as a workspace of its own.
             case newWorkspace
-            /// A Jamf Protect login: added to the current Jamf Pro workspace.
+            /// A Jamf Protect login: added to the current Jamf Pro or Jamf School workspace.
             case addToCurrent
             /// Nothing the app can do with it today, and why.
             case unavailable(String)
@@ -45,6 +45,14 @@ enum AddSheetPlan {
     }
 
     static let securityCloudReason = "Jamf Security Cloud is not supported yet."
+
+    /// The current workspace takes Jamf Protect: a live workspace on disk, Jamf Pro or, from
+    /// 2.11 (Experimental), Jamf School. Demo mode writes nothing.
+    static func currentTakesProtect(
+        demoMode: Bool, current: String, initialized: [String]
+    ) -> Bool {
+        !demoMode && initialized.contains(current)
+    }
 
     /// The jamf-cli profiles no workspace uses: neither a workspace folder of their own nor
     /// named by a workspace's `protect.profile` or `school_cli.profile`. Names compare by

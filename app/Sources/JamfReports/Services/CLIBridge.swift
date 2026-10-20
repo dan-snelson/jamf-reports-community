@@ -2491,7 +2491,8 @@ final class CLIBridge {
             fix = "the file is a symbolic link; replace it with the file it points to."
         case .credentialKey(let name):
             fix = "it holds a credential-shaped key (\(ConfigSchema.displayText(name))); "
-                + "remove it, since jamf-cli keeps secrets in the keychain."
+                + "remove it: secrets belong in jamf-cli's keychain, an environment variable "
+                + "or a file, never in this config.yaml."
         default:
             fix = "the file could not be updated; check that the workspace's config.yaml is a "
                 + "set of top-level settings."

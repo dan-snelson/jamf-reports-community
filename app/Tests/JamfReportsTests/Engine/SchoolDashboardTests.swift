@@ -507,3 +507,99 @@ final class SchoolDashboardSheetNamesTests: XCTestCase {
         XCTAssertEqual(dash.sheetPlan.map(\.name), SchoolDashboard.sheetNames)
     }
 }
+
+/// Experimental: the Blueprints tab reads `school-blueprints` (BlueprintOverview rows).
+final class SchoolBlueprintsSheetTests: XCTestCase {
+    private func dataDir(_ json: String) throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-bp-\(UUID().uuidString)")
+        let kind = tmp.appendingPathComponent("school-blueprints", isDirectory: true)
+        try FileManager.default.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data(json.utf8).write(to: kind.appendingPathComponent("school-blueprints_fixture.json"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: tmp) }
+        return tmp
+    }
+
+    func test_blueprintsSheet_readsOverviewRows_andToleratesMissingOptionals() throws {
+        let json = """
+        [
+          {"id": "b1", "name": "Update software", "description": "Keep current",
+           "deploymentState": {"state": "OUT_OF_DATE",
+             "lastDeployment": {"started": "2026-10-01T16:35:00Z", "state": "SUCCEEDED"}},
+           "created": "2026-09-01T12:00:00Z", "updated": "2026-10-02T09:00:00Z"},
+          {"id": "b2", "name": "Fresh",
+           "deploymentState": {"state": "NOT_DEPLOYED"},
+           "created": "2026-10-03T12:00:00Z", "updated": "2026-10-03T12:00:00Z"}
+        ]
+        """
+        let workbook = Workbook()
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: try dataDir(json), workbook: workbook)
+        XCTAssertNoThrow(try dash.writeSchoolBlueprints())
+        let cells = (workbook.sheet(named: "Blueprints")?.dedupedCells ?? []).compactMap {
+            if case let .string(s) = $0.value { return s } else { return nil }
+        }
+        for expected in ["Name", "State", "Last deployed", "Created", "Updated",
+                         "Update software", "Out of date", "2026-10-01T16:35:00Z",
+                         "Fresh", "Not deployed", "2026-10-03T12:00:00Z"] {
+            XCTAssertTrue(cells.contains(expected), expected)
+        }
+    }
+
+    func test_blueprintsSheet_isSkippedWithoutASnapshot() {
+        let empty = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-bp-none-\(UUID().uuidString)")
+        let dash = SchoolDashboard(config: ReportConfig(), dataDir: empty, workbook: Workbook())
+        XCTAssertThrowsError(try dash.writeSchoolBlueprints())
+    }
+
+    func test_sheetNames_areTheOldListPlusBlueprints() {
+        let old = ["School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles",
+                   "Locations", "DEP Devices", "iBeacons", "Device Inventory", "OS Versions",
+                   "Device Status", "Stale Devices"]
+        var expected = old
+        expected.insert("Blueprints", at: old.firstIndex(of: "Device Inventory") ?? 0)
+        XCTAssertEqual(SchoolDashboard.sheetNames, expected + CoreDashboard.protectSheetNames)
+    }
+}
+
+/// Protect works with Jamf School (2.11): the School workbook carries the Jamf Pro workbook's
+/// Protect tabs, under the same names and the same protect.enabled gate.
+final class SchoolDashboardProtectSheetTests: XCTestCase {
+    private func dataDir() throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-protect-\(UUID().uuidString)")
+        let kind = tmp.appendingPathComponent("protect-alerts", isDirectory: true)
+        try FileManager.default.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data(#"""
+        [{"computer":"lab-mac-01","created":"2026-10-01T08:00:00.000Z","eventType":"GPFSEvent",
+          "severity":"High","status":"New","uuid":"a1"}]
+        """#.utf8).write(to: kind.appendingPathComponent("protect-alerts_fixture.json"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: tmp) }
+        return tmp
+    }
+
+    func test_protectTabs_haveTheProWorkbookNames() {
+        let pro = CoreDashboard(config: ReportConfig(), dataDir: FileManager.default
+            .temporaryDirectory, workbook: Workbook()).sheetPlan.map(\.name)
+        XCTAssertEqual(pro.filter { $0.hasPrefix("Protect ") }, CoreDashboard.protectSheetNames)
+        XCTAssertEqual(Array(SchoolDashboard.sheetNames.suffix(6)), CoreDashboard.protectSheetNames)
+    }
+
+    func test_protectTabs_areWrittenOnlyWhileProtectIsEnabled() throws {
+        let dir = try dataDir()
+        let on = Workbook()
+        let config = try ConfigLoader.loadFromString(
+            "school_cli:\n  enabled: true\nprotect:\n  enabled: true\n  profile: p\n")
+        SchoolDashboard(config: config, dataDir: dir, workbook: on).writeAll()
+        XCTAssertNotNil(on.sheet(named: "Protect Alerts"))
+        XCTAssertNotNil(on.sheet(named: "Protect Threat Overview"))
+
+        let off = Workbook()
+        let schoolOnly = try ConfigLoader.loadFromString("school_cli:\n  enabled: true\n")
+        let (_, failures) = SchoolDashboard(config: schoolOnly, dataDir: dir, workbook: off)
+            .writeAll()
+        XCTAssertNil(off.sheet(named: "Protect Alerts"))
+        XCTAssertEqual(failures.map(\.sheet), [])
+    }
+}

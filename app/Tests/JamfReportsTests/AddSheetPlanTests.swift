@@ -112,4 +112,44 @@ final class AddSheetPlanTests: XCTestCase {
         XCTAssertEqual(preselection([]), .newWorkspace)
         XCTAssertEqual(preselection([profile("cloud", .securityCloud)]), .newWorkspace)
     }
+
+    // MARK: - Which workspace takes Jamf Protect
+
+    /// A Jamf School workspace takes Protect as a Jamf Pro one does (2.11); a profile with no
+    /// workspace on disk, and demo mode, do not.
+    func testAJamfProOrJamfSchoolWorkspaceTakesProtect() {
+        let initialized = ["prod", "campus"]
+        XCTAssertTrue(AddSheetPlan.currentTakesProtect(
+            demoMode: false, current: "campus", initialized: initialized))
+        XCTAssertTrue(AddSheetPlan.currentTakesProtect(
+            demoMode: false, current: "prod", initialized: initialized))
+        XCTAssertFalse(AddSheetPlan.currentTakesProtect(
+            demoMode: false, current: "new", initialized: initialized))
+        XCTAssertFalse(AddSheetPlan.currentTakesProtect(
+            demoMode: true, current: "campus", initialized: initialized))
+    }
+
+    /// Add to current names the Protect login in the School workspace's config.yaml, which
+    /// keeps routing to School and now runs Protect after it.
+    @MainActor func testAddingProtectToASchoolWorkspaceWritesItsConfig() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-add-school-protect-\(UUID().uuidString)")
+        let workspace = root.appendingPathComponent("campus", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        setenv("JRC_TEST_WORKSPACES_ROOT", root.path, 1)
+        addTeardownBlock {
+            unsetenv("JRC_TEST_WORKSPACES_ROOT")
+            try? FileManager.default.removeItem(at: root)
+        }
+        let configURL = workspace.appendingPathComponent("config.yaml")
+        try Data("school_cli:\n  enabled: true\n".utf8).write(to: configURL)
+        XCTAssertNil(AddSheetDiscovery.load(currentWorkspace: "campus").currentProtect)
+
+        try OnboardingFlow.writeProtectConfig(profileSlug: "campus", protectProfileName: "prot")
+        let detected = ProfileProductType.detect(
+            from: try ConfigLoader.load(from: configURL), profile: "campus")
+        XCTAssertEqual(detected.type, .jamfSchool)
+        XCTAssertTrue(detected.runsProtect)
+        XCTAssertEqual(AddSheetDiscovery.load(currentWorkspace: "campus").currentProtect, "prot")
+    }
 }

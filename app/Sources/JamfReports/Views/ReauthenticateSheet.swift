@@ -33,6 +33,14 @@ struct ReauthenticateSheet: View {
     var prefillAuthMethod: String = ""
     /// A Jamf School workspace: the School form, never the Jamf Pro connection types.
     var isSchool: Bool = false
+    /// What the School profile holds for the Platform API now; nil when the caller cannot say.
+    /// `school setup` drops the fields it is not sent, so a profile that has them opens with
+    /// the switch on and needs them filled in to save.
+    var schoolPlatform: SchoolPlatformRow? = nil
+    /// The Data Sources Platform API row opened the sheet: the switch starts on.
+    var opensSchoolPlatform: Bool = false
+    /// The blueprints check after a School save that sent Platform API fields.
+    var onSchoolPlatformCheck: ((SchoolPlatformCheck.Verdict) -> Void)? = nil
     /// Called once when credentials were (re)written, so the caller can re-run
     /// its connection-health probe. Not called on a pure cancel.
     var onSaved: (() -> Void)? = nil
@@ -55,10 +63,11 @@ struct ReauthenticateSheet: View {
 
     /// Whether the School "Verify & save" action may run. Mirrors onboarding's School step.
     nonisolated static func canVerifySchool(
-        isBusy: Bool, urlValid: Bool, networkID: String, hasKey: Bool
+        isBusy: Bool, urlValid: Bool, networkID: String, hasKey: Bool,
+        platformComplete: Bool = true
     ) -> Bool {
         let idFilled = !networkID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return !isBusy && urlValid && idFilled && hasKey
+        return !isBusy && urlValid && idFilled && hasKey && platformComplete
     }
 
     /// Chooses the form to prefill from the profile's recorded auth method.
@@ -86,6 +95,33 @@ struct ReauthenticateSheet: View {
             scopeID.trimmingCharacters(in: .whitespacesAndNewlines))
         let idFilled = !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return !isBusy && gatewayURLValid && scopeFilled && idFilled && hasSecret
+    }
+
+    /// Prefills the School form. Re-running `school setup` answers the Platform prompt from
+    /// the switch, so it starts on for a profile that has the fields.
+    static func prefillSchool(
+        _ flow: OnboardingFlow, profile: String, url: String,
+        platform: SchoolPlatformRow?, opensPlatform: Bool
+    ) {
+        flow.schoolProfileName = profile
+        flow.schoolURL = url
+        flow.schoolPlatformEnabled = opensPlatform || platform?.hasFields == true
+    }
+
+    /// The line under a switch that is off while saving would, or could, remove Platform API
+    /// access the profile has.
+    nonisolated static func platformRemovalWarning(
+        platform: SchoolPlatformRow?, enabled: Bool
+    ) -> String? {
+        guard !enabled, let platform else { return nil }
+        if platform.hasFields {
+            return "This profile has Platform API access. Saving with the switch off removes it."
+        }
+        if platform == .unknown {
+            return "Could not read whether this profile has Platform API access. If it does, "
+                + "turn the switch on and fill in the fields, or saving removes it."
+        }
+        return nil
     }
 
     // MARK: - Body
@@ -321,9 +357,18 @@ struct ReauthenticateSheet: View {
                     .frame(maxWidth: .infinity)
                 }
 
-                Text("Saving re-runs jamf-cli's School setup for this profile: it replaces the "
-                     + "stored URL, Network ID and API key, removes any Platform API access added "
-                     + "to the profile outside this app, and makes it jamf-cli's default profile.")
+                SchoolPlatformFields(flow: flow)
+                if let warning = Self.platformRemovalWarning(
+                    platform: schoolPlatform, enabled: flow.schoolPlatformEnabled) {
+                    Text(warning)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Colors.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Text("Saving re-runs jamf-cli's School setup for this profile, which rebuilds it "
+                     + "from these fields: enter all of them, Platform API included, or that "
+                     + "access is removed.")
                     .font(.caption)
                     .foregroundStyle(Theme.Colors.fg2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -457,7 +502,8 @@ struct ReauthenticateSheet: View {
                 isBusy: isBusy,
                 urlValid: flow.isSchoolURLValid,
                 networkID: flow.schoolNetworkID,
-                hasKey: !flow.schoolAPIKey.isEmpty || flow.schoolAPIKeyFieldHasText
+                hasKey: !flow.schoolAPIKey.isEmpty || flow.schoolAPIKeyFieldHasText,
+                platformComplete: !flow.schoolPlatformEnabled || flow.isSchoolPlatformComplete
             )
         }
         switch flow.proConnectionType {
@@ -488,8 +534,9 @@ struct ReauthenticateSheet: View {
         let stored = prefillURL.trimmingCharacters(in: .whitespacesAndNewlines)
         switch Self.form(isSchool: isSchool, authMethod: prefillAuthMethod) {
         case .school:
-            flow.schoolProfileName = profileSlug
-            flow.schoolURL = stored
+            Self.prefillSchool(
+                flow, profile: profileSlug, url: stored, platform: schoolPlatform,
+                opensPlatform: opensSchoolPlatform)
         case .platformGateway:
             flow.proConnectionType = .platformGateway
             if let url = GatewayRegion.startingURL(fromStored: prefillURL) {
@@ -510,7 +557,10 @@ struct ReauthenticateSheet: View {
         flow.lastError = nil
         if isSchool {
             // The School profile is the workspace's own (`connectSchoolAsPrimary`).
-            Task { await flow.connectSchoolAsPrimary() }
+            Task {
+                await flow.connectSchoolAsPrimary()
+                if let check = flow.schoolPlatformCheck { onSchoolPlatformCheck?(check) }
+            }
             return
         }
         Task {

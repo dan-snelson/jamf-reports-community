@@ -77,8 +77,8 @@ full detail on each:
 4. **Authenticate** — connect with a Jamf Account integration (Platform API, recommended
    for Jamf Cloud; pick a region and enter the environment ID) or with your Jamf Pro API
    client credentials (OAuth2, for on-prem, GovCloud or any instance). The secret is
-   never persisted by the app; `jamf-cli` keeps the credentials in the macOS keychain and
-   caches tokens on disk.
+   never persisted by the app; setup has `jamf-cli` store the credentials in the macOS keychain
+   and tokens are cached on disk.
 5. **Validate** — the app confirms the connection works.
 6. **Add products (optional)** — connect Jamf Protect here if you use it, or skip and add it
    later from the Data Sources screen. Jamf School uses its own workspace.

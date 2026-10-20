@@ -140,7 +140,8 @@ final class ConnectionCheckTests: XCTestCase {
     func testNoJamfProAtTenantLevelNamesProtectAndSecurityCloud() {
         let text = ConnectionCheck.Verdict.noJamfPro.message(tenantLevel: true)
         XCTAssertFalse(text.contains("probably Jamf School"))
-        for phrase in ["Jamf School workspace", "Jamf Protect is added to a Jamf Pro workspace",
+        for phrase in ["Jamf School workspace",
+                       "Jamf Protect is added to a Jamf Pro or Jamf School workspace",
                        "Jamf Security Cloud is not supported yet"] {
             XCTAssertTrue(text.contains(phrase), phrase)
         }

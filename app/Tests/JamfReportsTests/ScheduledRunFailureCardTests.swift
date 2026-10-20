@@ -73,17 +73,55 @@ final class ScheduledRunFailureCardTests: XCTestCase {
             atPath: workspace.appendingPathComponent("automation").path))
     }
 
-    func testARefusedRunPostsAgainTheNextDayAndPerSchedule() async throws {
-        let config = try ConfigLoader.load(from: try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+    // MARK: - One card a day per failure
+
+    private func loadConfig() throws -> ReportConfig {
+        try ConfigLoader.load(from: try XCTUnwrap(ProfileService.workspaceURL(for: profile))
             .appendingPathComponent("config.yaml"))
-        let state = root.appendingPathComponent("refused-state")
+    }
+
+    private func post(
+        _ key: String, _ reason: String, state: URL, at day: Date, config: ReportConfig
+    ) async {
+        await ScheduledRunSignals.notifyScheduledRunFailure(
+            config: config, profile: profile, mode: .snapshotOnly, errorDescription: reason,
+            recorder: nil, scheduleKey: key, stateRoot: state, now: day)
+    }
+
+    func testTheSameFailurePostsOnceADayPerScheduleAndAgainTheNextDay() async throws {
+        let config = try loadConfig()
+        let state = root.appendingPathComponent("card-state")
         let today = Date()
-        for (key, day) in [("a", today), ("a", today), ("b", today),
-                           ("a", today.addingTimeInterval(86_400))] {
-            await ScheduledRunSignals.notifyRefusedRun(
-                config: config, profile: profile, mode: .snapshotOnly, scheduleKey: key,
-                refusal: "refused", stateRoot: state, now: day)
+        let tomorrow = today.addingTimeInterval(86_400)
+        for (key, day) in [("a", today), ("a", today), ("b", today), ("a", tomorrow)] {
+            await post(key, "refused", state: state, at: day, config: config)
         }
         XCTAssertEqual(WebhookCapture.posted.count, 3)
+    }
+
+    func testADifferentFailureTheSameDayPostsAndOnlyNumbersDoNotCount() async throws {
+        let config = try loadConfig()
+        let state = root.appendingPathComponent("card-state")
+        let now = Date()
+        await post("a", "collect timed out after 60 s", state: state, at: now, config: config)
+        await post("a", "collect timed out after 61 s", state: state, at: now, config: config)
+        XCTAssertEqual(WebhookCapture.posted.count, 1)
+        await post("a", "authentication rejected", state: state, at: now, config: config)
+        XCTAssertEqual(WebhookCapture.posted.count, 2)
+    }
+
+    func testAFailedSendStampsNothingSoTheNextPassRetries() async throws {
+        try writeConfig("notify:\n  enabled: true\n  provider: teams\n"
+            + "  url: \"https://127.0.0.1:1/hook\"\n")
+        let broken = try loadConfig()
+        try writeConfig("notify:\n  enabled: true\n  provider: teams\n"
+            + "  url: \"\(WebhookCapture.webhookURL)\"\n")
+        let working = try loadConfig()
+        let state = root.appendingPathComponent("card-state")
+        let now = Date()
+        await post("a", "refused", state: state, at: now, config: broken)
+        XCTAssertTrue(WebhookCapture.posted.isEmpty)
+        await post("a", "refused", state: state, at: now, config: working)
+        XCTAssertEqual(WebhookCapture.posted.count, 1)
     }
 }

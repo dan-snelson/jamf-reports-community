@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - Webhook fact assembly (detail-mode reduction + egress redaction)
@@ -130,20 +131,30 @@ enum ScheduledRunSignals {
         }
     }
 
-    /// Post a failure webhook digest for a run that threw before generating a
+    /// Post a failure webhook digest for a run that failed before or while generating a
     /// report. The error text is the only free-text egress channel — a network
     /// `errorDescription` can embed the Jamf server hostname — so in `full` mode
     /// it is scrubbed through the strictest pipeline (`LogRedactor` credential
     /// patterns + `DiagnosticRedactor` full-PII pass) before it enters a fact.
     /// `minimal` mode drops the error fact entirely. Best-effort — never throws.
     /// `fallbackNotify` is the `notify:` block read alone, for a run with no decoded config.
+    ///
+    /// With hourly retries a persistent failure would post every hour, so a `scheduleKey`
+    /// (schedule label + profile) allows one card per local day for the same failure
+    /// (`failureFingerprint`); a different failure posts, and a failed send stamps nothing so
+    /// the next pass retries. The stamp lives in `stateRoot` (this Mac's Application Support),
+    /// never in the workspace, which a refused run must leave untouched.
     static func notifyScheduledRunFailure(
         config: ReportConfig?,
         profile: String,
         mode: Schedule.RunMode,
         errorDescription: String,
         recorder: ScheduledRunRecorder?,
-        fallbackNotify: NotifyConfig? = nil
+        fallbackNotify: NotifyConfig? = nil,
+        scheduleKey: String,
+        stateRoot: URL = AppSupport.directory()
+            .appendingPathComponent("failure-cards", isDirectory: true),
+        now: Date = Date()
     ) async {
         guard let notify = SharedConfigPin.effectiveNotify(
                 config?.notify ?? fallbackNotify, profile: profile),
@@ -152,47 +163,31 @@ enum ScheduledRunSignals {
             detail: notify.resolvedDetail, profile: profile, mode: mode,
             errorDescription: errorDescription
         )
-        let sent = await WebhookNotifier.sendFailed(
-            config: notify, title: "Jamf Report — \(profile)", facts: facts
-        )
-        if !sent {
-            let message = "[warn] failure webhook notification failed for '\(profile)'"
-            fputs(message + "\n", stderr)
-            recorder?.record(message)
-        }
-    }
-
-    /// Post the failure card for a run the product guard refused, once per local day per
-    /// schedule. A refused run exits 0 and writes nothing in the workspace, so without a card
-    /// nobody learns the schedule has never run. The once-a-day stamp lives in `stateRoot`
-    /// (this Mac's Application Support), never in the workspace. Best-effort — never throws.
-    static func notifyRefusedRun(
-        config: ReportConfig?,
-        profile: String,
-        mode: Schedule.RunMode,
-        scheduleKey: String,
-        refusal: String,
-        stateRoot: URL = AppSupport.directory()
-            .appendingPathComponent("refused-runs", isDirectory: true),
-        now: Date = Date()
-    ) async {
-        guard let notify = SharedConfigPin.effectiveNotify(config?.notify, profile: profile),
-              notify.isUsable else { return }
-        let facts = failureFacts(
-            detail: notify.resolvedDetail, profile: profile, mode: mode,
-            errorDescription: refusal)
         let folder = stateRoot.appendingPathComponent(
             ProfileName.labelComponent(scheduleKey), isDirectory: true)
-        let outcome = await DayMarker(name: "refused-run").sendOnce(
-            day: SummaryJSONParser.dateFormatter.string(from: now), in: [folder], now: now,
+        let day = SummaryJSONParser.dateFormatter.string(from: now)
+        let outcome = await DayMarker(name: "failure-card").sendOnce(
+            day: "\(day)-\(failureFingerprint(errorDescription))", in: [folder], now: now,
             onLine: { fputs($0 + "\n", stderr) }
         ) {
             await WebhookNotifier.sendFailed(
                 config: notify, title: "Jamf Report — \(profile)", facts: facts)
         }
         if outcome == .failed {
-            fputs("[warn] refused-run notification failed for '\(profile)'\n", stderr)
+            let message = "[warn] failure webhook notification failed for '\(profile)'"
+            fputs(message + "\n", stderr)
+            recorder?.record(message)
         }
+    }
+
+    /// Eight hex characters naming a failure: digit runs (durations, counts, ports) are
+    /// flattened so the same failure with a different number is still the same failure.
+    /// shortcut: one stamp per schedule holds the latest failure only, so A, B, A posts A twice.
+    static func failureFingerprint(_ reason: String) -> String {
+        let flattened = LogRedactor.redact(reason)
+            .replacingOccurrences(of: "[0-9]+", with: "#", options: .regularExpression)
+        return SHA256.hash(data: Data(flattened.utf8)).prefix(4)
+            .map { String(format: "%02x", $0) }.joined()
     }
 
     /// Record any config problem serious enough to make the data unreliable.
@@ -667,7 +662,7 @@ struct CLIRunSignals: Sendable {
         recorder?.finish(exitCode: 1)
         await ScheduledRunSignals.notifyScheduledRunFailure(
             config: config, profile: profile, mode: mode,
-            errorDescription: desc, recorder: nil
+            errorDescription: desc, recorder: nil, scheduleKey: "cli.\(kind).\(profile)"
         )
     }
 }

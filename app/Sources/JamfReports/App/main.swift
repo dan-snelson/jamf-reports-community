@@ -255,6 +255,8 @@ private func scheduledRunSingleBody(
 
     let labelProfile = ProfileName.labelComponent(profile)
     let runLabel = label ?? "\(LaunchAgentWriter.labelPrefix).\(labelProfile).\(mode.rawValue)"
+    // One failure card a day per schedule and profile for the same failure (hourly retries).
+    let cardKey = "\(runLabel).\(labelProfile)"
 
     // A profile of another product (Protect, Security Cloud, organization level) can never run
     // a Jamf Pro schedule, so every retry would fail the same way. Refused before the recorder
@@ -270,9 +272,9 @@ private func scheduledRunSingleBody(
         fputs(message + "\n", stderr)
         AppLogger.schedule.notice("\(LogRedactor.redact(message), privacy: .public)")
         // Exit 0 so the tick does not retry it, but not silence: one card a day.
-        await ScheduledRunSignals.notifyRefusedRun(
+        await ScheduledRunSignals.notifyScheduledRunFailure(
             config: routingConfig, profile: profile, mode: mode,
-            scheduleKey: "\(runLabel).\(labelProfile)", refusal: refusal)
+            errorDescription: refusal, recorder: nil, scheduleKey: cardKey)
         return 0
     }
 
@@ -316,7 +318,7 @@ private func scheduledRunSingleBody(
         await ScheduledRunSignals.notifyScheduledRunFailure(
             config: nil, profile: profile, mode: mode,
             errorDescription: configError.localizedDescription, recorder: nil,
-            fallbackNotify: routingNotify)
+            fallbackNotify: routingNotify, scheduleKey: cardKey)
         return 1
     }
 
@@ -337,7 +339,8 @@ private func scheduledRunSingleBody(
             recorder?.finish(exitCode: 1)
             await ScheduledRunSignals.notifyScheduledRunFailure(
                 config: routingConfig, profile: profile, mode: mode,
-                errorDescription: line.text, recorder: nil, fallbackNotify: routingNotify)
+                errorDescription: line.text, recorder: nil, fallbackNotify: routingNotify,
+                scheduleKey: cardKey)
             return 1
         }
     }
@@ -402,7 +405,8 @@ private func scheduledRunSingleBody(
             if let failureDetail {
                 await ScheduledRunSignals.notifyScheduledRunFailure(
                     config: routingConfig, profile: profile, mode: mode,
-                    errorDescription: failureDetail, recorder: nil, fallbackNotify: routingNotify
+                    errorDescription: failureDetail, recorder: nil, fallbackNotify: routingNotify,
+                    scheduleKey: cardKey
                 )
             }
             return exit
@@ -415,7 +419,8 @@ private func scheduledRunSingleBody(
             recorder?.finish(exitCode: 1)
             await ScheduledRunSignals.notifyScheduledRunFailure(
                 config: routingConfig, profile: profile, mode: mode,
-                errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify
+                errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify,
+                scheduleKey: cardKey
             )
             return 1
         }
@@ -584,7 +589,8 @@ private func scheduledRunSingleBody(
         // webhook send latency never blocks the exit path.
         await ScheduledRunSignals.notifyScheduledRunFailure(
             config: routingConfig, profile: profile, mode: mode,
-            errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify
+            errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify,
+            scheduleKey: cardKey
         )
         return 1
     }

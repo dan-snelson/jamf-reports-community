@@ -35,6 +35,9 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- A scheduled run that fails the same way again posts its failure card once a day per schedule and
+  profile, not on every hourly retry; a different failure still posts, and a card that could not
+  be sent is tried again. (#284)
 - Setting up a workspace from the onboarding wizard now asks, on the last step, whether to run
   automatically (on by default, same choice as when adopting existing profiles) and offers an
   optional Teams or Slack webhook. Finishing with the box ticked turns on the daily collection;

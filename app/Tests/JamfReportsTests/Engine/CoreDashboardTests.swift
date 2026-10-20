@@ -714,9 +714,9 @@ final class CoreDashboardTests: XCTestCase {
             })?.row else { return nil }
             return ws.dedupedCells.first { $0.row == row && $0.col == 6 }?.format
         }
-        XCTAssertEqual(rateFormat(of: "high"), .green)
-        XCTAssertEqual(rateFormat(of: "mid"), .yellow)
-        XCTAssertEqual(rateFormat(of: "low"), .red)
+        XCTAssertEqual(rateFormat(of: "high"), .pctGreen)
+        XCTAssertEqual(rateFormat(of: "mid"), .pctYellow)
+        XCTAssertEqual(rateFormat(of: "low"), .pctRed)
         XCTAssertEqual(rateFormat(of: "blank"), .cell)
         XCTAssertEqual(rateFormat(of: "missing"), .cell)
         XCTAssertEqual(rateFormat(of: "text"), .cell)

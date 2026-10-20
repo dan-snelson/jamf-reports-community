@@ -368,7 +368,9 @@ enum OverviewLiveDataLoader {
         let label = names.first ?? "Compliance Benchmark"
         let rules = scoped.rules.compactMap { rule -> FailingRule? in
             guard let failed = rule.failed, failed > 0 else { return nil }
-            return FailingRule(ruleID: rule.rule, fails: failed, baseline: label)
+            // The title, which a benchmark always carries; the ID only when a row lacks one.
+            let name = rule.rule.isEmpty ? rule.ruleId : rule.rule
+            return FailingRule(ruleID: name, fails: failed, baseline: label)
         }
         // Every rule of a benchmark is evaluated on the same Macs; the largest
         // count covers a rule that skipped a Mac.

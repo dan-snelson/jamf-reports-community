@@ -82,14 +82,15 @@ struct ReportEngine: Sendable {
         // template order rather than plan order. Unknown SheetID values are skipped
         // with a warning — they are engine-team follow-ups, not fatal errors.
         let core = CoreDashboard(config: config, dataDir: dataDir, workbook: workbook,
-                                 provenance: prov, aiNarrative: aiNarrative)
+                                 provenance: prov, aiNarrative: aiNarrative, onLine: onLine)
         let registry = SheetRegistry(plan: core.sheetPlan)
         for sheetID in template.includedSheets {
             AppLogger.report.debug("sheet \(sheetID.rawValue, privacy: .public)")
         }
         // The EA results are read first so `sheets.only` is judged against every tab this
         // workbook can have.
-        let eaSheets = EASheets.load(config: config, workbook: workbook, dataDir: dataDir)
+        let eaSheets = EASheets.load(
+            config: config, workbook: workbook, dataDir: dataDir, onLine: onLine)
         let sheets = Self.sheetSettings(
             config, tabs: template.includedSheets.map(\.rawValue)
                 + (eaSheets?.sheetPlan.map(\.name) ?? [])
@@ -1022,8 +1023,10 @@ struct ReportEngine: Sendable {
     ///
     /// Derived from the data directory rather than a passed-in flag so the
     /// summary writer needs no new parameter threading through its callers.
-    static func collectingHostLabel(dataDir: URL) -> String? {
-        guard CloudStorage.provider(for: dataDir) != nil else { return nil }
+    static func collectingHostLabel(
+        dataDir: URL, syncProbe: CloudStorage.SyncProbe = .live
+    ) -> String? {
+        guard CloudStorage.isSharedStorage(dataDir, syncProbe: syncProbe) else { return nil }
         return SharedWorkspace.currentHost.display
     }
 
@@ -2826,8 +2829,21 @@ struct ReportEngine: Sendable {
                 text: "[info] \(kind): dropped \(data.count - payload.count) byte(s) "
                     + note))
         }
-        let saved = kind == MobileFleetService.deviceKind
-            ? Self.droppingLostModeText(payload) : payload
+        var saved = payload
+        if kind == MobileFleetService.deviceKind {
+            guard let stripped = Self.droppingLostModeText(payload) else {
+                onLine(.init(timestamp: Date(), level: .warn,
+                    text: "[warn] \(kind): lost-mode text could not be removed from the payload "
+                        + "— snapshot not saved"))
+                AttentionLog.raise(.lostModeStripFailed,
+                                   "Mobile device list not saved: lost-mode text not removed")
+                stateStore?.record(
+                    .failed(exitCode: outcome.exitCode), report: kind, at: collectStart)
+                return KindCollectResult(outcome: outcome, saved: false)
+            }
+            AttentionLog.clear(.lostModeStripFailed)
+            saved = stripped
+        }
         do {
             try saveSnapshot(
                 data: saved, kind: kind, dataDir: dataDir,
@@ -3365,9 +3381,10 @@ struct ReportEngine: Sendable {
         workspacePaths: WorkspacePaths.Type,
         tiers: Set<CollectionTier> = Set(CollectionTier.allCases),
         force: Bool = false,
+        locateJamfCLI: @Sendable () -> URL? = { ExecutableLocator.locate("jamf-cli") },
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
-        guard let bin = ExecutableLocator.locate("jamf-cli") else {
+        guard let bin = locateJamfCLI() else {
             throw ReportEngineError.jamfCLINotFound
         }
         guard ProfileService.isValid(profile) else {
@@ -3375,7 +3392,9 @@ struct ReportEngine: Sendable {
         }
         let dataDir = try workspacePaths.dataDir(for: profile)
 
-        let stateStore = (try? workspacePaths.stateDir(for: profile)).map(StateFileStore.init(directory:))
+        let stateStore = WorkspacePaths
+            .confinedFolderOrWarn(["state"], under: dataDir, onLine: onLine)
+            .map(StateFileStore.init(directory:))
         let plan = planSchoolCollect(profile: profile, tiers: tiers, force: force) {
             stateStore?.lastRun(report: $0)
         }
@@ -3412,6 +3431,7 @@ struct ReportEngine: Sendable {
             }
             guard let (exitCode, data) = schoolResult else {
                 unlanded.append(kind)
+                schoolOutcomes.append(CollectOutcome(kind: kind, exitCode: launchFailureExitCode))
                 stateStore?.record(.failed(exitCode: nil), report: kind, at: collectStart)
                 continue
             }
@@ -3447,8 +3467,9 @@ struct ReportEngine: Sendable {
         // Total-outage guard for School: commands were attempted but none succeeded.
         // Without this, a dead School tenant silently records Success on every run.
         // Checked after the full loop (same as Jamf Pro collect) so partial failures
-        // still warm the cache. Launch-failures (nil schoolResult) are excluded from
-        // schoolOutcomes intentionally — they carry no exit code signal.
+        // still warm the cache. A launch failure (nil schoolResult) counts as
+        // `launchFailureExitCode`, as in the Pro loop: an all-launch-failure run is an
+        // outage, not a Partial run with exit 0.
         if Self.isCollectDead(schoolOutcomes, savedKinds: schoolSaved) {
             let failedCount = schoolOutcomes.count
             let msg = "[error] all \(failedCount) live jamf-cli school call(s) failed for " +
@@ -3524,9 +3545,10 @@ struct ReportEngine: Sendable {
     static func protectCollect(
         profile: String,
         dataDir: URL,
+        locateJamfCLI: @Sendable () -> URL? = { ExecutableLocator.locate("jamf-cli") },
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
-        guard let bin = ExecutableLocator.locate("jamf-cli") else {
+        guard let bin = locateJamfCLI() else {
             throw ReportEngineError.jamfCLINotFound
         }
         guard ProfileService.isValid(profile) else {
@@ -3541,7 +3563,8 @@ struct ReportEngine: Sendable {
 
         let bridge = CLIBridge()
         // The state folder sits under the data folder, which is all this call is given.
-        let stateStore = (try? WorkspacePaths.confinedFolder(["state"], under: dataDir))
+        let stateStore = WorkspacePaths
+            .confinedFolderOrWarn(["state"], under: dataDir, onLine: onLine)
             .map(StateFileStore.init(directory:))
         let collectStart = Date()
         var unlanded: [String] = []
@@ -3970,10 +3993,11 @@ struct ReportEngine: Sendable {
     ]
 
     /// The payload with every `lostModeTextKeys` key removed at any depth. Returned unchanged
-    /// when it holds none of them or does not parse.
-    static func droppingLostModeText(_ data: Data) -> Data {
+    /// when it holds none of them. Nil, so the caller saves nothing, when it does not parse or
+    /// cannot be written back after removal: the text must not reach disk on a guess.
+    static func droppingLostModeText(_ data: Data) -> Data? {
         guard let object = try? JSONSerialization.jsonObject(with: data, options: []) else {
-            return data
+            return nil
         }
         var removed = false
         func strip(_ value: Any) -> Any {
@@ -3989,10 +4013,8 @@ struct ReportEngine: Sendable {
             return value
         }
         let stripped = strip(object)
-        guard removed,
-              let out = try? JSONSerialization.data(withJSONObject: stripped, options: [])
-        else { return data }
-        return out
+        guard removed else { return data }
+        return try? JSONSerialization.data(withJSONObject: stripped, options: [])
     }
 
     static func jsonPayload(from data: Data) -> Data? {

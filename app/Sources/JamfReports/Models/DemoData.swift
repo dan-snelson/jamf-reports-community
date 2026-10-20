@@ -174,13 +174,22 @@ enum DemoData {
         .init(name: "Tailscale",           installed: 389, pct: 74.2, column: "Tailscale - Connected", trend: .up),
     ]
 
-    static let complianceBands: [ComplianceBand] = [
-        .init(label: "Pass",            range: "0",     count: 213, pct: 42.4, colorHex: 0x2A6B6B),
-        .init(label: "Low (1–10)",      range: "1–10",  count: 167, pct: 33.3, colorHex: 0x3A8A8A),
-        .init(label: "Med-Low (11–30)", range: "11–30", count:  74, pct: 14.7, colorHex: 0xC9970A),
-        .init(label: "Medium (31–50)",  range: "31–50", count:  31, pct:  6.2, colorHex: 0xFF9F0A),
-        .init(label: "High (>50)",      range: "51+",   count:  17, pct:  3.4, colorHex: 0xFF453A),
-    ]
+    /// Band colors come from `ComplianceBandingService.Band`, the one source the app and
+    /// the workbook share.
+    static let complianceBands: [ComplianceBand] = {
+        typealias Band = ComplianceBandingService.Band
+        return [
+            .init(label: "Pass", range: "0", count: 213, pct: 42.4, colorHex: Band.pass.colorHex),
+            .init(label: "Low (1–10)", range: "1–10", count: 167, pct: 33.3,
+                  colorHex: Band.low.colorHex),
+            .init(label: "Med-Low (11–30)", range: "11–30", count: 74, pct: 14.7,
+                  colorHex: Band.medLow.colorHex),
+            .init(label: "Medium (31–50)", range: "31–50", count: 31, pct: 6.2,
+                  colorHex: Band.medium.colorHex),
+            .init(label: "High (>50)", range: "51+", count: 17, pct: 3.4,
+                  colorHex: Band.high.colorHex),
+        ]
+    }()
 
     static let topFailingRules: [FailingRule] = [
         .init(ruleID: "os_sudo_log_enforce",                  fails: 134, baseline: "NIST 800-53r5 Mod"),

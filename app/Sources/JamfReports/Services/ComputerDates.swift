@@ -102,10 +102,20 @@ extension BinaryMissing {
 struct ComputerDateIndex: Sendable {
     private let byID: [String: ComputerDates]
     private let bySerial: [String: ComputerDates]
+    /// Every identifier, shared ones included, for `contains`.
+    private let allIDs: Set<String>
+    private let idsBySerial: [String: [String?]]
 
     init(_ computers: [ComputerDates]) {
         byID = Self.unique(computers) { $0.jamfID }
         bySerial = Self.unique(computers) { $0.serial }
+        allIDs = Set(computers.compactMap { Self.key($0.jamfID) })
+        var idsBySerial: [String: [String?]] = [:]
+        for computer in computers {
+            guard let serial = Self.key(computer.serial) else { continue }
+            idsBySerial[serial, default: []].append(Self.key(computer.jamfID))
+        }
+        self.idsBySerial = idsBySerial
     }
 
     /// Nil when the data is not a `computers` snapshot.
@@ -120,6 +130,15 @@ struct ComputerDateIndex: Sendable {
         guard let serial = Self.key(serial), let found = bySerial[serial] else { return nil }
         if let id, let theirs = Self.key(found.jamfID), theirs != id { return nil }
         return found
+    }
+
+    /// Whether any record could be this Mac under `match`'s rules, counting identifiers two
+    /// records share, which `match` refuses. True with a nil `match` means "more than one".
+    func contains(jamfID: String?, serial: String?) -> Bool {
+        let id = Self.key(jamfID)
+        if let id, allIDs.contains(id) { return true }
+        guard let serial = Self.key(serial), let ids = idsBySerial[serial] else { return false }
+        return id == nil || ids.contains { $0 == nil || $0 == id }
     }
 
     private static func unique(

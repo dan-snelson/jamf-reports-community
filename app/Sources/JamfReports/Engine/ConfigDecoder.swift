@@ -708,12 +708,33 @@ struct BrandingConfig: Decodable, Sendable {
 struct ProtectConfig: Decodable, Sendable {
     var enabled: Bool?
     var profile: String?
+    /// `backup_on_synced_storage`: back Protect up even when the workspace is on storage other
+    /// Macs reach. Absent or anything but a boolean reads as off; Config Doctor names a value
+    /// that is not one. On a shared workspace `SharedConfigPin` decides what this Mac uses.
+    var backupOnSyncedStorage: Bool?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case enabled, profile
+        case backupOnSyncedStorage = "backup_on_synced_storage"
+    }
+
+    init(enabled: Bool? = nil, profile: String? = nil, backupOnSyncedStorage: Bool? = nil) {
+        self.enabled = enabled
+        self.profile = profile
+        self.backupOnSyncedStorage = backupOnSyncedStorage
+    }
+
+    /// A mistyped `backup_on_synced_storage` reads as off rather than failing the whole decode.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled)
+        profile = try container.decodeIfPresent(String.self, forKey: .profile)
+        backupOnSyncedStorage = try? container.decodeIfPresent(
+            Bool.self, forKey: .backupOnSyncedStorage)
     }
 
     var isEnabled: Bool { enabled ?? false }
+    var backsUpOnSyncedStorage: Bool { backupOnSyncedStorage ?? false }
     var resolvedProfile: String { profile?.trimmingCharacters(in: .whitespaces) ?? "" }
 }
 

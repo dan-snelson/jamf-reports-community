@@ -137,14 +137,17 @@ enum ScheduledRunSignals {
             detail: notify.resolvedDetail, profile: profile, mode: mode,
             artifact: artifact, sheetFailures: sheetFailures
         )
+        let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.send(
-            config: notify, title: "Jamf Report — \(profile)", facts: facts
+            config: notify, title: "Jamf Report — \(profile)", facts: facts, failure: failure
         )
         if !sent {
-            let message = "[warn] webhook notification failed for '\(profile)'"
+            let message = "[warn] webhook notification failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
         }
+        noteWebhook(sent ? .sent : .failed, failure: failure)
     }
 
     /// Post a failure webhook digest for a run that failed before or while generating a
@@ -182,18 +185,22 @@ enum ScheduledRunSignals {
         let folder = stateRoot.appendingPathComponent(
             ProfileName.labelComponent(scheduleKey), isDirectory: true)
         let day = SummaryJSONParser.dateFormatter.string(from: now)
+        let failure = WebhookNotifier.DeliveryFailure()
         let outcome = await DayMarker(name: "failure-card").sendOnce(
             day: "\(day)-\(failureFingerprint(errorDescription))", in: [folder], now: now,
             onLine: { fputs($0 + "\n", stderr) }
         ) {
             await WebhookNotifier.sendFailed(
-                config: notify, title: "Jamf Report — \(profile)", facts: facts)
+                config: notify, title: "Jamf Report — \(profile)", facts: facts, failure: failure)
         }
         if outcome == .failed {
-            let message = "[warn] failure webhook notification failed for '\(profile)'"
+            let message = "[warn] failure webhook notification failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
+            AppLogger.webhook.error("\(message, privacy: .public)")
         }
+        noteWebhook(outcome, failure: failure)
     }
 
     /// Eight hex characters naming a failure: digit runs (durations, counts, ports) are
@@ -230,16 +237,39 @@ enum ScheduledRunSignals {
             let facts = heartbeatFacts(
                 detail: target.notify.resolvedDetail, profile: target.profile,
                 newestSummaryDay: SummaryJSONParser.newestSummaryDay(profile: target.profile))
-            let outcome = await marker.sendOnce(
-                day: day, in: [folder], now: now, onLine: { fputs($0 + "\n", stderr) }
-            ) {
-                await WebhookNotifier.send(
-                    config: target.notify, title: "Jamf Reports heartbeat — \(target.profile)",
-                    facts: facts)
+            let failure = WebhookNotifier.DeliveryFailure()
+            let outcome = await AttentionLog.recording(profile: target.profile) {
+                let outcome = await marker.sendOnce(
+                    day: day, in: [folder], now: now, onLine: { fputs($0 + "\n", stderr) }
+                ) {
+                    await WebhookNotifier.send(
+                        config: target.notify,
+                        title: "Jamf Reports heartbeat — \(target.profile)",
+                        facts: facts, failure: failure)
+                }
+                noteWebhook(outcome, failure: failure)
+                return outcome
             }
             if outcome == .failed {
-                fputs("[warn] heartbeat notification failed for '\(target.profile)'\n", stderr)
+                let message = "[warn] heartbeat notification failed for '\(target.profile)': "
+                    + (failure.reason ?? "unknown")
+                fputs(message + "\n", stderr)
+                AppLogger.webhook.error("\(message, privacy: .public)")
             }
+        }
+    }
+
+    /// A confirmed send closes `webhookRejected`; a failed one opens it, naming the HTTP status
+    /// or the network error, never the URL.
+    static func noteWebhook(
+        _ outcome: DayMarker.SendOutcome, failure: WebhookNotifier.DeliveryFailure
+    ) {
+        switch outcome {
+        case .sent: AttentionLog.clear(.webhookRejected)
+        case .failed:
+            AttentionLog.raise(
+                .webhookRejected, "webhook rejected (\(failure.reason ?? "unknown"))")
+        case .skipped: break
         }
     }
 
@@ -343,11 +373,15 @@ enum ScheduledRunSignals {
         let newHits = hits.filter { newKeys.contains(MetricAlertEvaluator.dedupKey(for: $0)) }
         guard !newHits.isEmpty else { return }
         let facts = alertFacts(detail: notify.resolvedDetail, profile: profile, hits: newHits)
+        let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.sendAlert(
-            config: notify, title: "Jamf Reports alert — \(profile)", facts: facts
+            config: notify, title: "Jamf Reports alert — \(profile)", facts: facts,
+            failure: failure
         )
+        noteWebhook(sent ? .sent : .failed, failure: failure)
         guard sent else {
-            let message = "[warn] metric-alert webhook failed for '\(profile)'"
+            let message = "[warn] metric-alert webhook failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
             return

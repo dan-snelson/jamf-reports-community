@@ -39,7 +39,8 @@ struct AutomationChoiceFields: View {
                 .disabled(isLocked)
                 HStack {
                     Text("Run automation at")
-                    TextField("06:00", text: $choice.runTime)
+                    TextField("Run automation at", text: $choice.runTime, prompt: Text("06:00"))
+                        .labelsHidden()
                         .frame(width: 80)
                         .textFieldStyle(.roundedBorder)
                         .disabled(isLocked)

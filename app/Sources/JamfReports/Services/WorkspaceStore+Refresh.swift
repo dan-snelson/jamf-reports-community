@@ -403,21 +403,28 @@ extension WorkspaceStore {
                 "Collect run recorder unavailable — this run will not appear in Run History"
             )
         }
-        do {
-            let exit = try await run(observing(honesty, then: { line in
-                CLIBridge.bufferingOnLine(line)
-                recorder?.record(line.text)
-            }))
-            recorder?.finish(exitCode: exit)
-            return (exit, recorder != nil)
-        } catch {
-            if CLIBridgeError.isCollectRefusal(error) {
-                recorder?.discard()
-            } else {
-                recorder?.record("[error] \(error.localizedDescription)")
-                recorder?.finish(exitCode: 1)
+        // The collect's attention items name this run, so Run History can open on it.
+        return try await AttentionLog.recording(profile: profile) {
+            if let recorder {
+                AttentionLog.current?.record(
+                    into: recorder.statusURL, runLog: recorder.logURL.lastPathComponent)
             }
-            throw error
+            do {
+                let exit = try await run(observing(honesty, then: { line in
+                    CLIBridge.bufferingOnLine(line)
+                    recorder?.record(line.text)
+                }))
+                recorder?.finish(exitCode: exit)
+                return (exit, recorder != nil)
+            } catch {
+                if CLIBridgeError.isCollectRefusal(error) {
+                    recorder?.discard()
+                } else {
+                    recorder?.record("[error] \(error.localizedDescription)")
+                    recorder?.finish(exitCode: 1)
+                }
+                throw error
+            }
         }
     }
 

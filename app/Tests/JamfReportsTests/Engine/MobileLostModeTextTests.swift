@@ -44,6 +44,42 @@ final class MobileLostModeTextTests: XCTestCase {
         XCTAssertEqual(ReportEngine.droppingLostModeText(data), data)
     }
 
+    /// A payload the strip cannot parse is not saved: the previous snapshot stays newest.
+    func testUnparseablePayloadIsNotSavedAndWarns() throws {
+        XCTAssertNil(ReportEngine.droppingLostModeText(Data("5".utf8)))
+
+        let kind = MobileFleetService.deviceKind
+        let lines = LineBox()
+        let result = try ReportEngine.saveCollectedPayload(
+            kind: kind, data: Data("5".utf8),
+            outcome: ReportEngine.CollectOutcome(kind: kind, exitCode: 0),
+            isPartialFailure: false, dataDir: dataDir, recordManifest: false,
+            stateStore: nil, collectStart: Date(), onLine: lines.append)
+
+        XCTAssertFalse(result.saved)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: dataDir.appendingPathComponent(kind).path), "nothing may reach disk")
+        XCTAssertEqual(lines.texts.filter { $0.hasPrefix("[warn] \(kind)") }.count, 1)
+    }
+
+    func testAListThatCouldNotBeStrippedNeedsAttentionAndASavedOneClearsIt() throws {
+        let kind = MobileFleetService.deviceKind
+        func changes(_ payload: String) throws -> [AttentionCode: AttentionChange] {
+            let log = AttentionLog(profile: "p", usesAppRecord: false)
+            _ = try AttentionLog.$current.withValue(log) {
+                try ReportEngine.saveCollectedPayload(
+                    kind: kind, data: Data(payload.utf8),
+                    outcome: ReportEngine.CollectOutcome(kind: kind, exitCode: 0),
+                    isPartialFailure: false, dataDir: dataDir, recordManifest: false,
+                    stateStore: nil, collectStart: Date(), onLine: { _ in })
+            }
+            return log.changes
+        }
+        XCTAssertEqual(try changes("5"), [.lostModeStripFailed: .raised(
+            "Mobile device list not saved: lost-mode text not removed")])
+        XCTAssertEqual(try changes(Self.record), [.lostModeStripFailed: .cleared])
+    }
+
     // MARK: - Fixtures
 
     private static let record = #"""
@@ -69,5 +105,22 @@ final class MobileLostModeTextTests: XCTestCase {
                 .first { $0.pathExtension == "json" })
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
         return try XCTUnwrap(object as? [[String: Any]])
+    }
+}
+
+private final class LineBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var append: @Sendable (CLIBridge.LogLine) -> Void {
+        { line in
+            self.lock.lock(); defer { self.lock.unlock() }
+            self.lines.append(line.text)
+        }
+    }
+
+    var texts: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return lines
     }
 }

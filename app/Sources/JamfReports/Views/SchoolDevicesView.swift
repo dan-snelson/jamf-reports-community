@@ -164,7 +164,7 @@ struct SchoolDeviceTiles: View {
     }
 }
 
-private struct SchoolDevicesTable: View {
+struct SchoolDevicesTable: View {
     let rows: [SchoolFleetService.Device]
     let staleDays: Int
     @Environment(\.colorSchemeContrast) private var contrast
@@ -191,9 +191,21 @@ private struct SchoolDevicesTable: View {
             TableColumn("Supervised") { Text(Self.yesNo($0.isSupervised)) }
                 .width(min: 70, ideal: 90)
             TableColumn("Last Check-in") { device in
-                Text(Self.checkinText(device, now: now))
-                    .foregroundStyle(device.isStale(atDays: staleDays, now: now)
-                                     ? Theme.Colors.warn : Theme.Text.tertiary(contrast))
+                let stale = device.isStale(atDays: staleDays, now: now)
+                // Same icon as the Computers table's stale state.
+                HStack(spacing: 4) {
+                    if stale {
+                        Image(systemName: "clock.badge.exclamationmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.warn)
+                            .accessibilityHidden(true)
+                    }
+                    Text(Self.checkinText(device, now: now))
+                        .foregroundStyle(stale ? Theme.Colors.warn : Theme.Text.tertiary(contrast))
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Last Check-in")
+                .accessibilityValue(Self.checkinAccessibilityValue(device, stale: stale, now: now))
             }
             .width(min: 100, ideal: 130)
         }
@@ -202,6 +214,14 @@ private struct SchoolDevicesTable: View {
 
     static func yesNo(_ value: Bool?) -> String {
         value.map { $0 ? "Yes" : "No" } ?? "—"
+    }
+
+    /// The check-in text, led by "Stale" so the state is not carried by color alone.
+    static func checkinAccessibilityValue(
+        _ device: SchoolFleetService.Device, stale: Bool, now: Date
+    ) -> String {
+        let text = checkinText(device, now: now)
+        return stale ? "Stale, \(text)" : text
     }
 
     static func checkinText(_ device: SchoolFleetService.Device, now: Date) -> String {

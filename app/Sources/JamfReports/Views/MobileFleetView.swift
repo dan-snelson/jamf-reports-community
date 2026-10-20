@@ -339,7 +339,7 @@ struct MobileFleetView: View {
                 outerRadius: .ratio(sliceOuterRatio(for: slice.role)),
                 angularInset: 1.6
             )
-            .foregroundStyle(supervisionColor(for: slice.role))
+            .foregroundStyle(Self.supervisionColor(for: slice.role))
             .opacity(sliceOpacity(for: slice.role))
             .accessibilityLabel(slice.role.label)
             .accessibilityValue("\(slice.count) devices")
@@ -387,7 +387,7 @@ struct MobileFleetView: View {
                 } label: {
                     HStack(spacing: 10) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(supervisionColor(for: slice.role))
+                            .fill(Self.supervisionColor(for: slice.role))
                             .opacity(sliceOpacity(for: slice.role))
                             .frame(width: 12, height: 12)
                         Text(slice.label)
@@ -442,10 +442,11 @@ struct MobileFleetView: View {
         selectedDeviceID = nil
     }
 
-    private func supervisionColor(for role: MobileFleetService.SupervisionRole) -> Color {
+    /// Blue vs orange stays apart for color-blind readers; warn is a status color, not a series.
+    static func supervisionColor(for role: MobileFleetService.SupervisionRole) -> Color {
         switch role {
-        case .supervised: return Theme.Colors.goldBright
-        case .unsupervised: return Theme.Colors.warn
+        case .supervised: return Theme.ChartPalette.supervised
+        case .unsupervised: return Theme.ChartPalette.unsupervised
         // A mid grey rather than a hairline tone: at 12% white the slice
         // almost vanished, and selected it read dimmer than the dimmed ones.
         case .unmanaged: return Theme.Colors.fgMuted

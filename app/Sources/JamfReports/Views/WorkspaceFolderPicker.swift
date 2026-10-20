@@ -40,7 +40,7 @@ enum WorkspaceFolderPicker {
 
     /// Named for what it actually shares, not for the feature.
     nonisolated static func consentTitle(for url: URL?) -> String {
-        guard let url, let provider = CloudStorage.provider(for: url) else {
+        guard let url, let provider = CloudStorage.syncProvider(for: url) else {
             return "Use this shared folder?"
         }
         return "Everyone with access to this \(provider.displayName) folder will be able to "

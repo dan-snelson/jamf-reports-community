@@ -18,8 +18,17 @@ struct BackupProductResult: Sendable, Hashable {
     /// True when jamf-cli left a `_failures.yaml` naming the resources it could not export.
     var hasFailuresFile = false
 
-    /// A Protect part that did not come out whole; the backup is never auto-pruned.
+    /// A Protect part that did not come out whole.
     var isIncomplete: Bool { state == .partial || state == .failed }
+
+    /// Partial only because a clean run exported nothing (a tenant with nothing to export).
+    var isEmptyExport: Bool {
+        state == .partial && exitCode == 0 && !hasFailuresFile && objectCounts.isEmpty
+    }
+
+    /// Retention keeps this backup: its Protect part failed or lost resources. An empty export
+    /// is not kept, or every scheduled backup of an empty tenant would stay forever.
+    var keepsBackupFromPruning: Bool { isIncomplete && !isEmptyExport }
 
     var objectTotal: Int { objectCounts.values.reduce(0, +) }
 
@@ -49,7 +58,9 @@ struct BackupProductResult: Sendable, Hashable {
                         + "\(ProtectBackup.folderName)/\(ProtectBackup.failuresFileName) "
                         + "in the backup folder. "
                     : "")
-                + "It is never pruned automatically."
+                + (isEmptyExport
+                    ? "Jamf Protect exported no objects."
+                    : "It is never pruned automatically.")
         case .failed:
             let code = exitCode.map { " (exit \($0))" } ?? ""
             return "The latest backup has no Jamf Protect part: the Protect backup failed\(code). "
@@ -129,13 +140,15 @@ enum ProtectBackup {
 
     /// Decides whether this backup includes Protect. The pin and storage checks are closures
     /// so a workspace without Protect never evaluates them (the pin check records a first
-    /// sight on a shared workspace).
+    /// sight on a shared workspace). `syncedStorageAllowed` is asked only on shared storage:
+    /// `protect.backup_on_synced_storage` as this Mac may use it.
     static func plan(
         config: ReportConfig?,
         workspaceProfile: String,
         pinAllows: () -> Bool,
         protectRefusal: (String) -> String? = { _ in nil },
-        sharedStorage: () -> String?
+        sharedStorage: () -> String?,
+        syncedStorageAllowed: () -> Bool = { false }
     ) -> Plan {
         let detected = ProfileProductType.detect(from: config, profile: workspaceProfile)
         guard detected.type == .jamfPro, detected.runsProtect else { return .notConnected }
@@ -151,11 +164,43 @@ enum ProtectBackup {
             return .skip(reason: "protect.profile is not a usable jamf-cli profile name")
         }
         if let refusal = protectRefusal(protectProfile) { return .skip(reason: refusal) }
-        if let place = sharedStorage() {
-            return .skip(reason: "this workspace is \(place), and Protect backup files can hold "
-                + "third-party credentials that would sync to every Mac that shares it")
+        if let place = sharedStorage(), !syncedStorageAllowed() {
+            return .skip(reason: syncedStorageReason(place: place))
         }
         return .run(profile: protectProfile)
+    }
+
+    /// The concern and how to allow it; the organization's storage policy decides, not the app.
+    static func syncedStorageReason(place: String) -> String {
+        "this workspace is \(place), and a Protect backup contains action configurations with "
+            + "request headers and data-forwarding settings. If your organization's storage "
+            + "policy allows it, turn on Protect backups for this folder in Backups "
+            + "(\(SharedConfigPin.Key.protectBackupOnSyncedStorage.rawValue))"
+    }
+
+    /// Where a Protect-connected workspace's backups sit on storage other Macs reach, and
+    /// whether this Mac backs Protect up there. Nil when Protect is not connected or the
+    /// storage is local. Probes the volume, so call it off the main actor.
+    struct SyncedStorageChoice: Sendable, Equatable {
+        let place: String
+        let allowed: Bool
+    }
+
+    static func syncedStorageChoice(
+        profile: String, config: ReportConfig?, appSupport: URL = AppSupport.directory()
+    ) -> SyncedStorageChoice? {
+        let detected = ProfileProductType.detect(from: config, profile: profile)
+        guard detected.type == .jamfPro, detected.runsProtect,
+              let workspace = ProfileService.workspaceURL(for: profile),
+              let place = BackupMaintenance.sharedStorageDescription(
+                workspace.appendingPathComponent("backups", isDirectory: true),
+                profile: profile, volumeIsLocal: CloudStorage.isOnLocalVolume)
+        else { return nil }
+        return SyncedStorageChoice(
+            place: place,
+            allowed: SharedConfigPin.protectBackupOnSyncedStorage(
+                config?.protect?.backsUpOnSyncedStorage ?? false,
+                profile: profile, appSupport: appSupport))
     }
 
     /// Classifies a finished `protect backup` from its exit code and what it left in
@@ -168,10 +213,14 @@ enum ProtectBackup {
         let failures = fileManager.fileExists(
             atPath: directory.appendingPathComponent(failuresFileName).path)
         let state: BackupProductResult.State
+        var reason: String?
         if exit == CLIBridge.exitCodeTimedOut {
             state = .failed
         } else if exit == 0 {
-            state = failures ? .partial : .ok
+            // An empty or unreadable folder after a clean exit is not a backup (counts read
+            // as empty when the folder cannot be listed).
+            if counts.isEmpty { reason = "no objects exported" }
+            state = failures || counts.isEmpty ? .partial : .ok
         } else if (exit == CLIBridge.exitCodePartialFailure || failures), !counts.isEmpty {
             state = .partial
         } else {
@@ -179,7 +228,7 @@ enum ProtectBackup {
         }
         // A failed run's files are discarded, so the record claims none.
         return BackupProductResult(
-            state: state, exitCode: exit,
+            state: state, exitCode: exit, reason: reason,
             objectCounts: state == .failed ? [:] : counts,
             hasFailuresFile: state != .failed && failures)
     }
@@ -214,6 +263,41 @@ enum ProtectBackup {
     }
 }
 
+/// Scoped write of `protect.backup_on_synced_storage`, the Backups screen's switch. Like
+/// `NotifyConfigWriter` it rewrites only the `protect:` block (a dropped comment is copied out
+/// first) and confirms the value it wrote on this Mac, since the switch is the operator's own act.
+enum ProtectBackupConfigWriter {
+    enum WriteError: Error, LocalizedError {
+        case invalidProfile(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidProfile(let profile): "Invalid profile name: \(profile)"
+            }
+        }
+    }
+
+    static func apply(onSyncedStorage: Bool, to root: inout YAMLCodec.YAMLMapping) {
+        var protect = root.value(for: "protect")?.mapping ?? .init(entries: [])
+        protect.set("backup_on_synced_storage", value: .scalar(.bool(onSyncedStorage)))
+        root.set("protect", value: .mapping(protect))
+    }
+
+    @discardableResult
+    static func save(
+        onSyncedStorage: Bool, profile: String, appSupport: URL = AppSupport.directory()
+    ) throws -> ConfigSaveReport {
+        guard ProfileService.isValid(profile) else { throw WriteError.invalidProfile(profile) }
+        let report = try ConfigService.saveBlock(key: "protect", profile: profile) {
+            apply(onSyncedStorage: onSyncedStorage, to: &$0)
+        }.report
+        SharedConfigPin.confirmWritten(
+            String(onSyncedStorage), key: .protectBackupOnSyncedStorage,
+            profile: profile, appSupport: appSupport)
+        return report
+    }
+}
+
 extension CLIBridge {
     /// Backs up Protect into `<staging>/protect` when the workspace has it connected and the
     /// plan allows it. Nil means Protect is not part of this workspace. Never throws: a
@@ -228,26 +312,60 @@ extension CLIBridge {
         sharedStorage: () -> String?,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> BackupProductResult? {
-        let config = try? ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        let configURL = workspace.appendingPathComponent("config.yaml")
+        let config: ReportConfig?
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            do {
+                config = try ConfigLoader.load(from: configURL)
+            } catch {
+                // Whether Protect is connected cannot be told, so say so instead of leaving it out.
+                let reason = LogRedactor.redact(
+                    "config.yaml does not decode, so Protect cannot be told from it: "
+                        + error.localizedDescription)
+                onLine(.init(timestamp: Date(), level: .warn,
+                             text: "[warn] Jamf Protect not backed up: \(reason). "
+                                 + "The Jamf Pro backup is unaffected."))
+                AttentionLog.raise(
+                    .protectBackupSkipped, "Protect not backed up: config.yaml does not decode")
+                return BackupProductResult(state: .skipped, reason: reason)
+            }
+        } else {
+            config = nil
+        }
         let named = config?.protect?.resolvedProfile ?? ""
         let refusal = config?.protect?.isEnabled == true && !named.isEmpty
             ? await ProfileAuthMethod.protectRefusal(profile: named) : nil
+        var syncedPlace: String?
         let plan = ProtectBackup.plan(
             config: config, workspaceProfile: profile,
             pinAllows: { SharedConfigPin.protectAllowed(profile: profile) },
             protectRefusal: { _ in refusal },
-            sharedStorage: sharedStorage)
+            sharedStorage: { syncedPlace = sharedStorage(); return syncedPlace },
+            syncedStorageAllowed: {
+                SharedConfigPin.protectBackupOnSyncedStorage(
+                    config?.protect?.backsUpOnSyncedStorage ?? false, profile: profile)
+            })
         let protectProfile: String
         switch plan {
         case .notConnected:
+            AttentionLog.clear(.protectBackupSkipped, .protectBackupPartial)
             return nil
         case .skip(let reason):
             onLine(.init(timestamp: Date(), level: .warn,
                          text: "[warn] Jamf Protect not backed up: \(reason). "
                              + "The Jamf Pro backup is unaffected."))
+            AttentionLog.raise(.protectBackupSkipped, "Protect not backed up: \(reason)")
             return BackupProductResult(state: .skipped, reason: reason)
         case .run(let name):
             protectProfile = name
+        }
+        // Run on shared storage means the opt-in allowed it: say so for the audit trail.
+        if let syncedPlace {
+            onLine(.init(timestamp: Date(), level: .info,
+                         text: "[info] backing up Jamf Protect to synced storage: this workspace "
+                             + "is \(syncedPlace), and "
+                             + "\(SharedConfigPin.Key.protectBackupOnSyncedStorage.rawValue) "
+                             + "allows it on this Mac"))
         }
 
         let output = staging.appendingPathComponent(ProtectBackup.folderName, isDirectory: true)
@@ -255,6 +373,7 @@ extension CLIBridge {
             let reason = "the Protect backup path was rejected by the path guard"
             onLine(.init(timestamp: Date(), level: .warn,
                          text: "[warn] Jamf Protect not backed up: \(reason)."))
+            AttentionLog.raise(.protectBackupSkipped, "Protect not backed up: \(reason)")
             return BackupProductResult(state: .skipped, reason: reason)
         }
         onLine(.init(timestamp: Date(), level: .info,
@@ -275,6 +394,8 @@ extension CLIBridge {
                          text: "[error] could not run protect backup: \(error.localizedDescription)"))
         }
         let result = ProtectBackup.result(exit: exit, directory: validated)
+        // It ran, so a skip is over; what it left decides the other code.
+        AttentionLog.clear(.protectBackupSkipped)
         reportProtectBackup(result, exit: exit, timeout: timeout, output: validated, onLine: onLine)
         return result
     }
@@ -288,6 +409,7 @@ extension CLIBridge {
             onLine(.init(timestamp: Date(), level: .ok,
                          text: "[ok] Jamf Protect configuration backed up "
                              + "(\(result.objectTotal) objects)"))
+            AttentionLog.clear(.protectBackupPartial)
             return
         case .skipped:
             return
@@ -320,11 +442,15 @@ extension CLIBridge {
                 + "\(ProtectBackup.folderName)/\(ProtectBackup.failuresFileName) "
                 + "in the backup folder"
         } else {
-            detail = "see the lines above for the resources that failed"
+            detail = result.reason ?? "see the lines above for the resources that failed"
         }
         onLine(.init(timestamp: Date(), level: .warn,
                      text: "[warn] Jamf Protect backup is "
                          + "\(result.state == .partial ? "PARTIAL" : "FAILED"): \(detail)"))
+        AttentionLog.raise(
+            .protectBackupPartial,
+            "Protect backup \(result.state == .partial ? "partial" : "failed")"
+                + (result.reason.map { ": \($0)" } ?? ""))
         onLine(.init(timestamp: Date(), level: .warn,
                      text: "[partial] Jamf Protect configuration is not fully backed up; "
                          + "the Jamf Pro backup is complete"))

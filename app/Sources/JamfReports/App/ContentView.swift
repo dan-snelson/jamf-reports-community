@@ -117,7 +117,14 @@ struct ContentView: View {
                             onOpenConfigDoctor: {
                                 AutomationHealthModel.shared.openConfigDoctorRequested = true
                                 tab = .audit
-                            }
+                            },
+                            attentionItems: AutomationHealthModel.shared.attentionItems,
+                            onOpenBackups: { tab = .backups },
+                            onOpenRunHistory: { log in
+                                AutomationHealthModel.shared.openRunLogRequested = log
+                                tab = .runs
+                            },
+                            onDismissAttention: { workspace.dismissAttention() }
                         )
                     }
                     // Reports a newer stable release; also in demo mode, since it is

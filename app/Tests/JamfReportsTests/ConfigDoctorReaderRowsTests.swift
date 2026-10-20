@@ -138,4 +138,16 @@ final class ConfigDoctorReaderRowsTests: XCTestCase {
                        "1 more line in config.yaml was not read as written.")
         XCTAssertEqual(ConfigDoctorService.parseNoteRows(Array(notes.prefix(20))).count, 20)
     }
+
+    /// `protect.backup_on_synced_storage` reads as off for anything but a boolean.
+    func testAProtectBackupOptInThatIsNotABooleanReadsAsFalse() throws {
+        let root = try ConfigLoader.rawMapping(
+            fromYAML: "protect:\n  backup_on_synced_storage: yes please\n")
+        let rows = ConfigDoctorService.fileReadBooleanRows(root)
+        XCTAssertEqual(rows.map(\.id), ["config.value.protect.backup_on_synced_storage"])
+        XCTAssertEqual(rows.first?.severity, .warn)
+        XCTAssertEqual(ConfigDoctorService.fileReadBooleanRows(
+            try ConfigLoader.rawMapping(fromYAML: "protect:\n  backup_on_synced_storage: true\n")),
+            [])
+    }
 }

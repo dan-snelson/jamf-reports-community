@@ -9,6 +9,18 @@ versions in this repository map to git tags.
 
 ### Added
 
+- Warnings you have to act on no longer stay in the run log only: a webhook that rejected a card,
+  a Jamf Protect backup that was skipped or incomplete, a Jamf School collect with no devices, an
+  unreadable Extension Attribute snapshot, a large Fleet Drift change and a mobile device list
+  that could not be saved now show as "Needs attention" in the health strip, with a button to the
+  screen that fixes it. Each clears itself once the next run's check passes, and Dismiss hides it
+  on this Mac until it clears and happens again. (#284)
+- A Jamf Pro backup now also backs up Jamf Protect when Protect is connected to the workspace.
+  On shared storage it is skipped by default, since the files hold action configurations with
+  request headers and data-forwarding settings; if your organization's storage policy allows
+  it, turn on "Back up Jamf Protect in this folder" on the Backups screen
+  (`protect.backup_on_synced_storage`). On a shared folder each Mac confirms the setting once.
+  (#284)
 - Notifications can send a daily heartbeat: with `notify.heartbeat: true`, or the new "Send a
   daily heartbeat" switch under Notifications, the background item posts one short card a day
   per workspace saying it ran, with the newest summary's date unless detail is minimal; Run now
@@ -48,7 +60,6 @@ versions in this repository map to git tags.
   optional Teams or Slack webhook, also when setup was started from demo mode. Finishing with
   the box ticked turns on the daily collection; before, a new workspace had no background item
   until you opened Automation. An existing automation setup is never switched off or changed.
-
 - **Settings › Add connection** and the workspace menu's **Add workspace or product…** now open
   one **Add** sheet, which replaces Add workspace, Add Jamf School workspace and the Jamf
   Pro-only setup they started. Choose a new Jamf Pro, Platform API or Jamf School workspace, or
@@ -95,6 +106,16 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- VoiceOver can reach the Retry and action buttons on empty and error screens, and more controls
+  have names. (#284)
+- A webhook that answers with an error now shows in the log as an error with the HTTP status,
+  and the "notification failed" lines for the run digest, failure card, metric alert, overdue
+  digest and heartbeat say why. (#284)
+- A backup of a workspace whose config.yaml does not decode now says Jamf Protect was not backed
+  up, with the reason, instead of leaving Protect out silently. (#284)
+- A Jamf Protect backup that exits cleanly but exported nothing now reads as Partial, not as
+  backed up with 0 objects. Retention still prunes those backups, so a Protect tenant with
+  nothing to export does not keep every scheduled backup. (#284)
 - A Mac that is on only part of the day now gets its daily summary. A daily collect runs at
   its scheduled time, or, after the Mac was off or asleep, at its first background check after
   waking, and that run is the day's run, so the scheduled time does not repeat it. A failed run
@@ -199,6 +220,39 @@ versions in this repository map to git tags.
   connection** again; jamf-cli 1.33.0 reports its `apikey` sign-in method as invalid.
 - The health banner now reports Jamf Protect data that has gone stale or keeps failing in a
   workspace with Protect connected; before, only Jamf Pro data was checked.
+- A Jamf School collect where jamf-cli cannot be started for any source now fails, as the Jamf
+  Pro collect does, instead of finishing as Partial with a success exit. (#284)
+- A Jamf School or Jamf Protect collect whose `state` folder is a link or otherwise refused now
+  logs one warning naming the folder, instead of not recording per-source results in silence.
+  (#284)
+- If the mobile device list from jamf-cli cannot be read well enough to remove the lost-mode
+  phone number, location and message, it is no longer saved with them in it. The previous
+  snapshot stays in use and the run logs a warning. (#284)
+- A Jamf School collect that gets an empty device list now logs a warning ("Jamf School returned
+  0 devices") instead of an info line, so an empty tenant or a wrong login stands out in Run
+  History. (#284)
+- When an `ea-results` or Extension Attribute definitions snapshot exists but cannot be read, the
+  report now logs a warning and lists each custom EA on the EA Warnings tab as "snapshot
+  unreadable" with the reason, instead of leaving out the EA tabs and the warnings tab with no
+  message. (#284)
+- A custom EA date tab no longer shows "Expiring (0d)" for a date that passed less than a day ago.
+  It now reads Expired, with the day count rounded down. (#284)
+- The Mobile Devices supervision chart uses a blue and orange pair that color-blind readers
+  can tell apart.
+- The Fleet Overview stability trend and the second OS version slice are easier to see on
+  the dark background, and the stability pill says Healthy, Watch or Low as well as showing
+  the number.
+- Workbook compliance charts and the app use the same color for each compliance band, and
+  the chart legend no longer cuts long labels short.
+- OS version chart colors for a macOS release without a set color no longer change between runs.
+- **Fleet Drift** still lists every Mac that joined or left when the change is large, and now
+  says so at the top of the sheet and in the run log, with the counts and the share of the fleet:
+  a planned mass enrollment or retirement is normal, but a collect that did not finish can make
+  Macs look departed. (#284)
+- **Fleet Drift** no longer lists a Mac as both a new enrollment and departed when its serial
+  number is on two Jamf Pro records and it has no Jamf ID; such Macs are counted in a note
+  instead. An inventory collected without check-in dates no longer lists every Mac as newly
+  stale: the stale sections say they were not compared. (#284)
 
 ### Removed
 
@@ -226,6 +280,12 @@ versions in this repository map to git tags.
 
 ### Security
 
+- A workspace in a Desktop or Documents folder that iCloud Drive syncs
+  (iCloud Desktop & Documents) is now treated like a workspace in any other cloud folder:
+  settings other Macs could change wait for a Confirm on this Mac in Config Doctor, Jamf Protect
+  is left out of its backups so credential-bearing files do not sync, unless turned on in Backups
+  (`protect.backup_on_synced_storage`), and backup pruning removes
+  only this Mac's backups. Before, such a folder read as local disk. (#284)
 - The saved mobile device inventory no longer keeps Lost Mode text (the phone number, location,
   message and footnote shown on a lost device). Nothing in the app read it, and the snapshot can
   sit in a shared folder. Whether Lost Mode is on is still kept.

@@ -146,28 +146,50 @@ func notifyOverdueSchedulesHeadless(
     }
 
     for batch in routing.batches {
-        // Reuse the GUI's fact builder so the two paths emit byte-identical cards
-        // (and honor notify.detail minimal/full the same way).
-        let facts = WorkspaceStore.overdueFacts(
-            detail: batch.notify.resolvedDetail, profile: batch.profiles.joined(separator: ", "),
-            overdue: batch.issues
-        )
-        let count = batch.issues.count
-        let outcome = await marker.sendOnce(
-            day: today, in: batch.targets.map(\.workspace),
-            onLine: { fputs($0 + "\n", stderr) }
-        ) {
-            await WebhookNotifier.sendFailed(
-                config: batch.notify,
-                title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
-                facts: facts
-            )
-        }
-        // Stamped only after a confirmed send, so a transient webhook failure retries next run.
-        guard outcome == .sent else { continue }
-        print("[info] overdue schedule digest posted headlessly for "
-            + "\(batch.profiles.joined(separator: ", ")) (\(count) overdue)")
+        await postOverdueDigest(batch, marker: marker, today: today)
     }
+}
+
+/// One overdue card for `batch`. Its outcome opens or clears `webhookRejected` for every
+/// profile on the card, each in its own attention record (the app record, as for a heartbeat).
+@discardableResult
+func postOverdueDigest(
+    _ batch: OverdueDigestRouting.Batch, marker: DayMarker, today: String
+) async -> DayMarker.SendOutcome {
+    // Reuse the GUI's fact builder so the two paths emit byte-identical cards
+    // (and honor notify.detail minimal/full the same way).
+    let names = batch.profiles.joined(separator: ", ")
+    let facts = WorkspaceStore.overdueFacts(
+        detail: batch.notify.resolvedDetail, profile: names, overdue: batch.issues)
+    let count = batch.issues.count
+    let failure = WebhookNotifier.DeliveryFailure()
+    let outcome = await marker.sendOnce(
+        day: today, in: batch.targets.map(\.workspace),
+        onLine: { fputs($0 + "\n", stderr) }
+    ) {
+        await WebhookNotifier.sendFailed(
+            config: batch.notify,
+            title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
+            facts: facts, failure: failure
+        )
+    }
+    for profile in batch.profiles {
+        await AttentionLog.recording(profile: profile) {
+            ScheduledRunSignals.noteWebhook(outcome, failure: failure)
+        }
+    }
+    switch outcome {
+    case .sent:
+        print("[info] overdue schedule digest posted headlessly for \(names) (\(count) overdue)")
+    case .failed:
+        // Stamped only after a confirmed send, so a failed one retries next run.
+        let message = "[warn] overdue digest notification failed for \(names): "
+            + (failure.reason ?? "unknown")
+        fputs(message + "\n", stderr)
+        AppLogger.webhook.error("\(message, privacy: .public)")
+    case .skipped: break
+    }
+    return outcome
 }
 
 /// A target for each profile in `profiles` whose `config.yaml` `notify:` block is
@@ -206,10 +228,14 @@ private func scheduledRunSingle(
     honesty: CollectHonestyWatcher,
     retiredCSVAssisted: Bool
 ) async -> Int32 {
-    await SharedConfigPin.announcingOnce {
-        await scheduledRunSingleBody(
-            profile: profile, mode: mode, tiers: tiers, verbose: verbose,
-            label: label, honesty: honesty, retiredCSVAssisted: retiredCSVAssisted)
+    // Its attention items go into the run's status file once the recorder opens it, after
+    // the failure card; a run refused before that writes none.
+    await AttentionLog.recording(profile: profile, usesAppRecord: false) {
+        await SharedConfigPin.announcingOnce {
+            await scheduledRunSingleBody(
+                profile: profile, mode: mode, tiers: tiers, verbose: verbose,
+                label: label, honesty: honesty, retiredCSVAssisted: retiredCSVAssisted)
+        }
     }
 }
 
@@ -286,7 +312,10 @@ private func scheduledRunSingleBody(
     // Legacy plists without --label fall back to a profile+mode label so
     // their runs are recorded too.
     let recorder = ScheduledRunRecorder(workspace: workspace, label: runLabel)
-    if recorder == nil {
+    if let recorder {
+        AttentionLog.current?.record(
+            into: recorder.statusURL, runLog: recorder.logURL.lastPathComponent)
+    } else {
         fputs("[warn] could not open run record in automation/logs — run will not appear in Run History\n", stderr)
     }
 
@@ -310,11 +339,8 @@ private func scheduledRunSingleBody(
     }
 
     // A backup needs only the profile, so it runs; a collect cannot be routed without the file.
-    if mode == .backup, let configError {
-        onLine(.init(timestamp: Date(), level: .warn, text: LogRedactor.redact(
-            "[warn] '\(profile)': config.yaml does not decode, so the backup runs as Jamf Pro: "
-                + configError.localizedDescription)))
-    } else if mode != .jamfCLIOnly, let configError {
+    // A backup that reaches Protect warns about the file itself (`backupProtect`).
+    if mode != .jamfCLIOnly, mode != .backup, let configError {
         let message = LogRedactor.redact(
             "[error] '\(profile)': config.yaml does not decode, so the product cannot be told "
                 + "and nothing ran: \(configError.localizedDescription)")

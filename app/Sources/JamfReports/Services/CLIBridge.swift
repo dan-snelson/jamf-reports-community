@@ -576,6 +576,21 @@ final class CLIBridge {
         htmlWithWorkbook: Bool = true,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async throws -> Int32 {
+        try await AttentionLog.recording(profile: profile) {
+            try await generateRecording(
+                profile: profile, template: template, outputDir: outputDir,
+                aiNarrative: aiNarrative, htmlWithWorkbook: htmlWithWorkbook, onLine: onLine)
+        }
+    }
+
+    private func generateRecording(
+        profile: String,
+        template: any ReportTemplate,
+        outputDir: URL?,
+        aiNarrative: String?,
+        htmlWithWorkbook: Bool,
+        onLine: @Sendable @escaping (LogLine) -> Void
+    ) async throws -> Int32 {
         try await ensureWorkspace(profile: profile, onLine: onLine)
         // A Generate with no collect before it (the Overview, onboarding) still names a drift.
         SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
@@ -1079,14 +1094,6 @@ final class CLIBridge {
             ))
         }
         return false
-    }
-
-    /// Returns `true` when the auth method does not require a bearer-token probe.
-    ///
-    /// API-key auth (Jamf School) uses key-based authentication with no bearer token
-    /// to inspect, so the `pro auth token` probe must be skipped for those profiles.
-    nonisolated static func shouldSkipAuthProbe(for authMethod: String) -> Bool {
-        JamfCLIAuthMethod(raw: authMethod) == .apiKey
     }
 
     /// The refusal, after one `[error]` line, when `profile` is known to belong to another
@@ -1915,6 +1922,21 @@ final class CLIBridge {
         timeout: TimeInterval = CLIBridge.backupTimeout,
         protectTimeout: TimeInterval = ProtectBackup.timeout,
         _testExecutable: URL? = nil,
+        onLine: @Sendable @escaping (LogLine) -> Void
+    ) async throws -> Int32 {
+        try await AttentionLog.recording(profile: profile) {
+            try await backupRecording(
+                profile: profile, label: label, timeout: timeout,
+                protectTimeout: protectTimeout, _testExecutable: _testExecutable, onLine: onLine)
+        }
+    }
+
+    private func backupRecording(
+        profile: String,
+        label: String?,
+        timeout: TimeInterval,
+        protectTimeout: TimeInterval,
+        _testExecutable: URL?,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async throws -> Int32 {
         guard ProfileService.isValid(profile) else {

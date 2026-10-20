@@ -1,0 +1,102 @@
+import XCTest
+@testable import JamfReports
+
+/// School and Protect collects tell the truth about launch failures and a refused state folder,
+/// as the Jamf Pro collect does.
+final class SchoolProtectCollectHonestyTests: XCTestCase {
+    private var root: URL!
+    private var bin: URL!
+    private let profile = "school-honesty"
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("JRC-SPHonesty-\(UUID().uuidString)", isDirectory: true)
+        let workspaces = root.appendingPathComponent("Jamf-Reports", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: workspaces.appendingPathComponent(profile, isDirectory: true),
+            withIntermediateDirectories: true)
+        setenv("JRC_TEST_WORKSPACES_ROOT", workspaces.path, 1)
+        addTeardownBlock { unsetenv("JRC_TEST_WORKSPACES_ROOT") }
+        // Not named `jamf-cli`: `CLIBridge.codesignGate` keys on that filename.
+        bin = root.appendingPathComponent("stub-cli")
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+        try super.tearDownWithError()
+    }
+
+    private func installStub(executable: Bool, exitCode: Int = 1) throws {
+        let body = executable ? "#!/bin/sh\nexit \(exitCode)\n" : "not an executable\n"
+        try body.write(to: bin, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: executable ? 0o755 : 0o644], ofItemAtPath: bin.path)
+    }
+
+    func testSchoolRunWhereEveryKindFailsToLaunchIsADeadCollect() async throws {
+        try installStub(executable: false)
+        let stub: URL = bin
+        do {
+            try await ReportEngine.schoolCollect(
+                profile: profile, workspacePaths: WorkspacePaths.self, force: true,
+                locateJamfCLI: { stub }, onLine: { _ in })
+            XCTFail("a School run that launched nothing must not succeed")
+        } catch ReportEngineError.collectDead(_, let failedCount, _) {
+            XCTAssertGreaterThan(failedCount, 0)
+        }
+    }
+
+    /// A `state` folder that is a link is refused with one `[warn]`, not skipped in silence.
+    private func linkStateFolder() throws -> URL {
+        let data = try WorkspacePaths.dataDir(for: profile)
+        try FileManager.default.createDirectory(at: data, withIntermediateDirectories: true)
+        let elsewhere = root.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: data.appendingPathComponent("state"), withDestinationURL: elsewhere)
+        return data
+    }
+
+    private func refusals(_ lines: [String]) -> [String] {
+        lines.filter { $0.hasPrefix("[warn] state is not used") }
+    }
+
+    func testSchoolCollectWarnsOnceWhenTheStateFolderIsRefused() async throws {
+        _ = try linkStateFolder()
+        try installStub(executable: true)
+        let stub: URL = bin
+        let seen = LineBox()
+        _ = try? await ReportEngine.schoolCollect(
+            profile: profile, workspacePaths: WorkspacePaths.self, force: true,
+            locateJamfCLI: { stub }, onLine: seen.append)
+        XCTAssertEqual(refusals(seen.texts).count, 1, "\(seen.texts)")
+    }
+
+    func testProtectCollectWarnsOnceWhenTheStateFolderIsRefused() async throws {
+        let data = try linkStateFolder()
+        try installStub(executable: true)
+        let stub: URL = bin
+        let seen = LineBox()
+        try await ReportEngine.protectCollect(
+            profile: profile, dataDir: data, locateJamfCLI: { stub }, onLine: seen.append)
+        XCTAssertEqual(refusals(seen.texts).count, 1, "\(seen.texts)")
+    }
+}
+
+private final class LineBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+
+    var append: @Sendable (CLIBridge.LogLine) -> Void {
+        { line in
+            self.lock.lock(); defer { self.lock.unlock() }
+            self.lines.append(line.text)
+        }
+    }
+
+    var texts: [String] {
+        lock.lock(); defer { lock.unlock() }
+        return lines
+    }
+}

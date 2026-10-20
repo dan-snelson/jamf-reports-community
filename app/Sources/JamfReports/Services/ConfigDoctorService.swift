@@ -86,6 +86,8 @@ enum ConfigDoctorService {
             rows += profileMismatchRows(profile: profile, config: config)
             rows += protectProfileFolderRows(profile: profile, config: config)
             rows += protectProfileProductRows(config: config)
+            rows += protectSyncedBackupRows(
+                ProtectBackup.syncedStorageChoice(profile: profile, config: config))
             rows += valueRows(profile: profile, config: config, workspaceRoot: workspaceRoot)
             rows += accuracyRows(config: config, profile: profile)
             rows += securityPolicyRows(profile: profile, config: config)
@@ -450,10 +452,10 @@ enum ConfigDoctorService {
         }
     }
 
-    /// true/false keys the decoder does not model, and `html.with_workbook` and
-    /// `notify.heartbeat`, which it reads as off for any other value instead of failing the decode.
-    /// `output.allow_absolute_paths` also takes yes, on and 1 (`WorkspacePaths.optIn`);
-    /// `html.track_history`, `html.with_workbook` and `notify.heartbeat` take only true and false.
+    /// true/false keys the decoder does not model, and `html.with_workbook`, `notify.heartbeat`
+    /// and `protect.backup_on_synced_storage`, which it reads as off for any other value instead
+    /// of failing the decode. `output.allow_absolute_paths` also takes yes, on and 1
+    /// (`WorkspacePaths.optIn`); the others take only true and false.
     static func fileReadBooleanRows(_ root: [String: Any]) -> [DoctorRow] {
         var rows: [DoctorRow] = []
         if let value = typedNonBoolean(at: ["output", "allow_absolute_paths"], in: root) {
@@ -470,6 +472,7 @@ enum ConfigDoctorService {
         }
         let switches = [
             ["html", "track_history"], ["html", "with_workbook"], ["notify", "heartbeat"],
+            ["protect", "backup_on_synced_storage"],
         ]
         for path in switches {
             if let value = typedNonBoolean(at: path, in: root) {
@@ -968,6 +971,9 @@ struct CloudStorageInputs: Sendable {
     let otherHosts: [SharedWorkspace.HostActivity]
     let claim: SharedWorkspace.Claim?
     let now: Date
+    /// The provider syncing a folder. Path-only by default so the rules stay pure; the gather
+    /// passes `CloudStorage.syncProvider`, which also finds iCloud Desktop & Documents.
+    var providerOf: @Sendable (URL) -> CloudStorage.Provider? = { CloudStorage.provider(for: $0) }
 }
 
 extension ConfigDoctorService {
@@ -1046,7 +1052,7 @@ extension ConfigDoctorService {
             )]
         case .ok:
             guard inputs.rootIsCustom else { return [] }
-            let provider = CloudStorage.provider(for: inputs.workspaceRoot)
+            let provider = inputs.providerOf(inputs.workspaceRoot)
             let where_ = provider.map { "on \($0.displayName)" } ?? "at a custom location"
             return [DoctorRow(
                 id: "cloud.root",
@@ -1062,7 +1068,7 @@ extension ConfigDoctorService {
 
     private static func workspaceShapeRows(_ inputs: CloudStorageInputs) -> [DoctorRow] {
         guard let workspace = inputs.workspace,
-              let provider = CloudStorage.provider(for: workspace) else { return [] }
+              let provider = inputs.providerOf(workspace) else { return [] }
 
         // The genuinely risky state: the folder syncs to other people's Macs
         // but nothing is coordinating writes to it.
@@ -1251,9 +1257,9 @@ extension ConfigDoctorService {
 
     private static func publishTargetRows(_ inputs: CloudStorageInputs) -> [DoctorRow] {
         var rows: [DoctorRow] = []
-        let workspaceProvider = inputs.workspace.flatMap(CloudStorage.provider(for:))
-        let outputProvider = inputs.outputDir.flatMap(CloudStorage.provider(for:))
-        let archiveProvider = inputs.archiveDir.flatMap(CloudStorage.provider(for:))
+        let workspaceProvider = inputs.workspace.flatMap(inputs.providerOf)
+        let outputProvider = inputs.outputDir.flatMap(inputs.providerOf)
+        let archiveProvider = inputs.archiveDir.flatMap(inputs.providerOf)
 
         if workspaceProvider == nil, let provider = outputProvider {
             rows.append(DoctorRow(
@@ -1280,7 +1286,7 @@ extension ConfigDoctorService {
             ))
         }
 
-        if inputs.backupsDir.flatMap(CloudStorage.provider(for:)) != nil {
+        if workspaceProvider != nil || inputs.backupsDir.flatMap(inputs.providerOf) != nil {
             rows.append(DoctorRow(
                 id: "cloud.backups",
                 severity: .suggest,
@@ -1345,8 +1351,10 @@ extension ConfigDoctorService {
         let conflicts = scanRoots.flatMap { CloudStorage.conflictCopies(in: $0) }
 
         let shared = config?.sharedWorkspace ?? SharedWorkspaceConfig()
-        let synced = workspace.flatMap(CloudStorage.provider(for:)) != nil
-        let coordinating = shared.isEnabled(workspaceIsSynced: synced)
+        // The coordination gate's own rule, so network volumes and sync markers count too.
+        let coordinating = workspace.map {
+            SharedWorkspace.isEffectivelyShared(workspace: $0, config: config?.sharedWorkspace)
+        } ?? shared.isEnabled(workspaceIsSynced: false)
 
         return CloudStorageInputs(
             workspaceRoot: root,
@@ -1362,7 +1370,8 @@ extension ConfigDoctorService {
             minCollectInterval: shared.minCollectInterval,
             otherHosts: coordinating ? SharedWorkspace.otherHosts(profile: profile) : [],
             claim: coordinating ? SharedWorkspace.readClaim(profile: profile) : nil,
-            now: Date()
+            now: Date(),
+            providerOf: { CloudStorage.syncProvider(for: $0) }
         )
     }
 }

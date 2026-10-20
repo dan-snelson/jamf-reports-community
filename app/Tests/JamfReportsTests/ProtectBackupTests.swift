@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class ProtectBackupTests: XCTestCase {
 
-    private enum ProtectMode { case ok, partial, failed, hang }
+    private enum ProtectMode { case ok, partial, failed, hang, empty }
 
     private let connectedConfig = """
     protect:
@@ -76,6 +76,56 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertTrue(empty.contains("protect.profile is empty"), empty)
     }
 
+    func test_plan_skipsOnAnICloudDesktopAndDocumentsFolder() throws {
+        let config = try loadConfig(connectedConfig)
+        let folder = try makeTempDir()
+        guard case .skip(let reason) = ProtectBackup.plan(
+            config: config, workspaceProfile: "ws", pinAllows: { true },
+            sharedStorage: {
+                BackupMaintenance.sharedStorageDescription(
+                    folder, profile: "ws", volumeIsLocal: { _ in true },
+                    syncProbe: .iCloudEverywhere)
+            }) else { return XCTFail("synced") }
+        XCTAssertTrue(reason.contains("on iCloud Desktop & Documents"), reason)
+    }
+
+    func test_plan_onSyncedStorageSkipsByDefaultAndRunsWhenThisMacAllowsIt() throws {
+        let config = try loadConfig(connectedConfig)
+        guard case .skip(let reason) = ProtectBackup.plan(
+            config: config, workspaceProfile: "ws",
+            pinAllows: { true }, sharedStorage: { "on a network volume" })
+        else { return XCTFail("skip by default") }
+        XCTAssertEqual(reason, ProtectBackup.syncedStorageReason(place: "on a network volume"))
+        for text in ["this workspace is on a network volume", "request headers",
+                     "data-forwarding", "storage policy", "protect.backup_on_synced_storage"] {
+            XCTAssertTrue(reason.contains(text), text)
+        }
+        XCTAssertFalse(reason.contains("OneDrive"))
+
+        XCTAssertEqual(
+            ProtectBackup.plan(
+                config: config, workspaceProfile: "ws", pinAllows: { true },
+                sharedStorage: { "on a network volume" }, syncedStorageAllowed: { true }),
+            .run(profile: "protect-login"))
+
+        var asked = false
+        XCTAssertEqual(
+            ProtectBackup.plan(
+                config: config, workspaceProfile: "ws", pinAllows: { true },
+                sharedStorage: { nil }, syncedStorageAllowed: { asked = true; return false }),
+            .run(profile: "protect-login"))
+        XCTAssertFalse(asked, "local storage never asks for the opt-in")
+    }
+
+    func test_backupOnSyncedStorage_decodesAndANonBooleanReadsAsOff() throws {
+        XCTAssertFalse(try loadConfig(connectedConfig).protect?.backsUpOnSyncedStorage ?? true)
+        XCTAssertTrue(try loadConfig(connectedConfig + "\n  backup_on_synced_storage: true\n")
+            .protect?.backsUpOnSyncedStorage ?? false)
+        let typo = try loadConfig(connectedConfig + "\n  backup_on_synced_storage: sometimes\n")
+        XCTAssertFalse(typo.protect?.backsUpOnSyncedStorage ?? true)
+        XCTAssertEqual(typo.protect?.resolvedProfile, "protect-login")
+    }
+
     func test_plan_skipsAProfileOfAnotherProduct() throws {
         let config = try loadConfig(connectedConfig)
         let plan = ProtectBackup.plan(
@@ -91,7 +141,6 @@ final class ProtectBackupTests: XCTestCase {
         // Nothing written: any non-zero exit is a failure, timeout included.
         XCTAssertEqual(ProtectBackup.result(exit: 3, directory: dir).state, .failed)
         XCTAssertEqual(ProtectBackup.result(exit: 7, directory: dir).state, .failed)
-        XCTAssertEqual(ProtectBackup.result(exit: 0, directory: dir).state, .ok)
         try write("name: a", to: dir.appendingPathComponent("plans/a.yaml"))
         try write("name: c", to: dir.appendingPathComponent("connections.yaml"))
         XCTAssertEqual(ProtectBackup.result(exit: 0, directory: dir).objectCounts,
@@ -107,6 +156,71 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertNil(withFailures.objectCounts["_failures"], "_failures.yaml is not a resource")
         // Exit 0 with a failures file is still not a whole backup.
         XCTAssertEqual(ProtectBackup.result(exit: 0, directory: dir).state, .partial)
+    }
+
+    func test_result_cleanExitWithNoObjectsIsPartial() throws {
+        let missing = try makeTempDir().appendingPathComponent("never-created")
+        let empty = try makeTempDir()
+        for dir in [missing, empty] {
+            let result = ProtectBackup.result(exit: 0, directory: dir)
+            XCTAssertEqual(result.state, .partial)
+            XCTAssertEqual(result.reason, "no objects exported")
+            XCTAssertTrue(result.isIncomplete)
+        }
+        try write("name: a", to: empty.appendingPathComponent("plans/a.yaml"))
+        XCTAssertEqual(ProtectBackup.result(exit: 0, directory: empty).state, .ok)
+    }
+
+    func test_backup_protectExitingCleanWithNothingExportedIsPartial() async throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .empty)
+        let lines = Lines()
+        let exit = try await CLIBridge().backup(
+            profile: ctx.profile, label: "scheduled-20260101", _testExecutable: ctx.stub
+        ) { lines.append($0) }
+
+        XCTAssertEqual(exit, 0)
+        let protect = try XCTUnwrap(BackupProductResult.protect(inBackup: try ctx.onlyBackup()))
+        XCTAssertEqual(protect.state, .partial)
+        XCTAssertEqual(protect.reason, "no objects exported")
+        let texts = lines.texts
+        XCTAssertTrue(texts.contains {
+            $0.hasPrefix("[warn] Jamf Protect backup is PARTIAL") && $0.contains("no objects exported")
+        }, "\(texts)")
+        XCTAssertEqual(texts.filter { $0.hasPrefix("[partial]") }.count, 1, "\(texts)")
+        XCTAssertFalse(texts.contains { $0.contains("backed up (0 objects)") })
+    }
+
+    // MARK: - Needs attention
+
+    private func attention(
+        config: String?, protect: ProtectMode
+    ) async throws -> [AttentionCode: AttentionChange] {
+        let ctx = try makeContext(config: config, protect: protect)
+        let log = AttentionLog(profile: ctx.profile, usesAppRecord: false)
+        _ = try await AttentionLog.$current.withValue(log) {
+            try await CLIBridge().backup(
+                profile: ctx.profile, label: "scheduled-t", _testExecutable: ctx.stub) { _ in }
+        }
+        return log.changes
+    }
+
+    func test_attention_eachProtectOutcomeRecordsOrClearsItsCode() async throws {
+        let ok = try await attention(config: connectedConfig, protect: .ok)
+        XCTAssertEqual(ok, [.protectBackupSkipped: .cleared, .protectBackupPartial: .cleared])
+        let empty = try await attention(config: connectedConfig, protect: .empty)
+        XCTAssertEqual(empty, [
+            .protectBackupSkipped: .cleared,
+            .protectBackupPartial: .raised("Protect backup partial: no objects exported"),
+        ])
+        let failed = try await attention(config: connectedConfig, protect: .failed)
+        XCTAssertEqual(failed[.protectBackupPartial], .raised("Protect backup failed"))
+        let undecodable = try await attention(config: "thresholds: not-a-mapping\n", protect: .ok)
+        XCTAssertEqual(undecodable, [
+            .protectBackupSkipped: .raised("Protect not backed up: config.yaml does not decode"),
+        ])
+        let none = try await attention(config: nil, protect: .ok)
+        XCTAssertEqual(none, [.protectBackupSkipped: .cleared, .protectBackupPartial: .cleared],
+                       "a workspace without Protect has nothing left to fix")
     }
 
     // MARK: - backup(): connected
@@ -146,6 +260,8 @@ final class ProtectBackupTests: XCTestCase {
                        protect)
         XCTAssertTrue(lines.texts.contains { $0.hasPrefix("[ok] Jamf Protect") }, "\(lines.texts)")
         XCTAssertFalse(lines.texts.contains { $0.hasPrefix("[partial]") })
+        XCTAssertFalse(lines.texts.contains { $0.contains("to synced storage") },
+                       "local storage logs no synced-storage audit line")
     }
 
     func test_backup_workspaceWithoutProtectIsAsBefore() async throws {
@@ -197,6 +313,24 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertFalse(lines.texts.contains { $0.hasPrefix("[partial]") })
     }
 
+    func test_backup_skipsProtectWithOneWarningWhenConfigDoesNotDecode() async throws {
+        let ctx = try makeContext(config: "thresholds: not-a-mapping\n", protect: .ok)
+        let lines = Lines()
+        let exit = try await CLIBridge().backup(
+            profile: ctx.profile, label: "scheduled-t", _testExecutable: ctx.stub
+        ) { lines.append($0) }
+
+        XCTAssertEqual(exit, 0, "the Jamf Pro backup stands")
+        XCTAssertEqual(try ctx.calls().count, 1, "protect backup must not run")
+        let warns = lines.texts.filter { $0.contains("config.yaml does not decode") }
+        XCTAssertEqual(warns.count, 1, "\(lines.texts)")
+        XCTAssertTrue(warns[0].hasPrefix("[warn] Jamf Protect not backed up"), warns[0])
+        let result = try XCTUnwrap(BackupProductResult.protect(inBackup: try ctx.onlyBackup()))
+        XCTAssertEqual(result.state, .skipped)
+        XCTAssertTrue(try XCTUnwrap(result.reason).contains("config.yaml does not decode"))
+        XCTAssertFalse(lines.texts.contains { $0.hasPrefix("[partial]") })
+    }
+
     func test_backup_skipsProtectOnSharedStorage() async throws {
         let ctx = try makeContext(
             config: "shared_workspace:\n  enabled: true\n" + connectedConfig + "\n", protect: .ok)
@@ -211,12 +345,46 @@ final class ProtectBackupTests: XCTestCase {
         let warns = lines.texts.filter { $0.hasPrefix("[warn] Jamf Protect not backed up") }
         XCTAssertEqual(warns.count, 1, "\(lines.texts)")
         XCTAssertTrue(warns[0].contains("in a shared workspace"), warns[0])
-        XCTAssertTrue(warns[0].contains("credentials"), warns[0])
+        XCTAssertTrue(warns[0].contains("request headers"), warns[0])
+        XCTAssertTrue(warns[0].contains("protect.backup_on_synced_storage"), warns[0])
         let final = try ctx.onlyBackup()
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: final.appendingPathComponent("protect").path))
         XCTAssertEqual(
             BackupProductResult.protect(inBackup: final)?.state, .skipped)
+    }
+
+    /// The opt-in found already on at first sight waits for this Mac; once confirmed, the backup
+    /// includes Protect and jamf-cli's 0600 on credential files survives.
+    func test_backup_onSharedStorageRunsProtectOnlyOnceTheOptInIsConfirmed() async throws {
+        let ctx = try makeContext(
+            config: "shared_workspace:\n  enabled: true\n" + connectedConfig
+                + "\n  backup_on_synced_storage: true\n", protect: .ok)
+        let first = Lines()
+        _ = try await CLIBridge().backup(
+            profile: ctx.profile, label: nil, _testExecutable: ctx.stub) { first.append($0) }
+        XCTAssertEqual(try ctx.calls().count, 1, "unconfirmed: Jamf Pro only")
+        XCTAssertTrue(first.texts.contains { $0.hasPrefix("[warn] Jamf Protect not backed up") })
+        let skipped = try ctx.onlyBackup()
+        try FileManager.default.removeItem(at: skipped)
+
+        try SharedConfigPin.confirm(profile: ctx.profile, keys: [.protectBackupOnSyncedStorage])
+        let second = Lines()
+        let exit = try await CLIBridge().backup(
+            profile: ctx.profile, label: nil, _testExecutable: ctx.stub) { second.append($0) }
+        XCTAssertEqual(exit, 0)
+        let calls = try ctx.calls()
+        XCTAssertEqual(calls.count, 3, "\(calls)")
+        XCTAssertFalse(second.texts.contains { $0.hasPrefix("[warn] Jamf Protect not backed up") })
+        let audit = second.texts.filter { $0.hasPrefix("[info] backing up Jamf Protect to synced") }
+        XCTAssertEqual(audit.count, 1, "\(second.texts)")
+        XCTAssertTrue(audit[0].contains("in a shared workspace"), audit[0])
+        XCTAssertTrue(audit[0].contains("protect.backup_on_synced_storage allows it"), audit[0])
+        let final = try ctx.onlyBackup()
+        XCTAssertEqual(BackupProductResult.protect(inBackup: final)?.state, .ok)
+        let hook = final.appendingPathComponent("protect/action-configs/hook.yaml")
+        let mode = try FileManager.default.attributesOfItem(atPath: hook.path)[.posixPermissions]
+        XCTAssertEqual(mode as? Int, 0o600)
     }
 
     // MARK: - backup(): Protect fails, Pro stands
@@ -288,6 +456,34 @@ final class ProtectBackupTests: XCTestCase {
                        "incomplete Protect parts stay; of the rest only the newest is kept")
         XCTAssertTrue(lines.texts.contains { $0.contains("2 scheduled backup(s) whose Jamf Protect") },
                       "\(lines.texts)")
+    }
+
+    func test_pruneRemovesOldBackupsWhoseProtectPartExportedNothing() throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .ok)
+        let backups = ctx.workspace.appendingPathComponent("backups", isDirectory: true)
+        let empty = ProtectBackup.result(
+            exit: 0, directory: try makeTempDir().appendingPathComponent("none"))
+        XCTAssertEqual(empty.state, .partial, "still reported as partial")
+        func make(_ name: String, protect: BackupProductResult) throws {
+            let manifest: [String: Any] = [
+                "label": "scheduled-x", "products": ["protect": protect.manifestValue]]
+            let dir = backups.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: manifest)
+                .write(to: dir.appendingPathComponent("manifest.json"))
+        }
+        try make("20260501T010101", protect: empty)
+        try make("20260502T010101", protect: BackupProductResult(
+            state: .partial, exitCode: 0, reason: "no objects exported", hasFailuresFile: true))
+        try make("20260503T010101", protect: empty)
+        try make("20260504T010101", protect: empty)
+
+        BackupMaintenance.pruneScheduledBackups(profile: ctx.profile, keep: 1)
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
+        XCTAssertEqual(left, ["20260502T010101", "20260504T010101"],
+                       "empty exports are counted and pruned; a real Protect failure stays")
+        XCTAssertFalse(empty.protectSummary.contains("never pruned"), empty.protectSummary)
     }
 
     func test_backup_failedProtectDiscardsItsFilesAndKeepsPro() async throws {
@@ -490,6 +686,8 @@ final class ProtectBackupTests: XCTestCase {
             protectBody = writeFiles + "\nexit 3"
         case .hang:
             protectBody = writeFiles + "\nexec /bin/sleep 30"
+        case .empty:
+            protectBody = "mkdir -p \"$out\"\nexit 0"
         }
         let script = """
         #!/bin/sh

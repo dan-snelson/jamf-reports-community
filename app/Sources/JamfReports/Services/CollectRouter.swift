@@ -114,6 +114,8 @@ enum CollectRouter {
     ///   - resolved: The profile's resolved auth method and product (`ProfileAuthMethod.resolve`).
     ///     Nil means "could not ask" and runs the collect.
     ///   - onLine: Progress log callback.
+    ///
+    /// A collect started outside a recording run keeps its attention items in the app record.
     static func run(
         profile: String,
         tiers: Set<CollectionTier> = Set(CollectionTier.allCases),
@@ -127,6 +129,28 @@ enum CollectRouter {
         resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved? = {
             ProfileAuthMethod.resolve(profile: $0)
         },
+        onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
+    ) async throws {
+        try await AttentionLog.recording(profile: profile) {
+            try await routed(
+                profile: profile, tiers: tiers, skipExpensive: skipExpensive, force: force,
+                config: config, workspacePaths: workspacePaths, proCollect: proCollect,
+                schoolCollect: schoolCollect, protectCollect: protectCollect,
+                resolved: resolved, onLine: onLine)
+        }
+    }
+
+    private static func routed(
+        profile: String,
+        tiers: Set<CollectionTier>,
+        skipExpensive: Bool,
+        force: Bool,
+        config: ReportConfig?,
+        workspacePaths: WorkspacePaths.Type,
+        proCollect: ProCollect,
+        schoolCollect: SchoolCollect,
+        protectCollect: ProtectCollect,
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved?,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
         // First, before anything touches the workspace: jamf-cli never checks a profile against

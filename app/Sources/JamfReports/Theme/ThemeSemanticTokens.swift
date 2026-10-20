@@ -248,6 +248,10 @@ extension Theme {
 
 extension Theme {
     enum ChartPalette {
+        /// Supervision donut: a validated blue/orange pair (color-blind safe on the card).
+        static let supervised   = Color(hex: 0x3987E5)
+        static let unsupervised = Color(hex: 0xD95926)
+
         /// Ordered palette for OS version distributions. Read at small slice sizes
         /// in both dark in-app and light export canvases.
         static let osVersionInApp: [Color] = [

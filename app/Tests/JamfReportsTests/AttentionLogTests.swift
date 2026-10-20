@@ -301,4 +301,45 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertEqual(WebhookCapture.posted.count, 2, "the unsent card is tried again")
         XCTAssertTrue(AttentionLog.openItems(profile: profile).isEmpty)
     }
+
+    func testARejectedOverdueCardNeedsAttentionForEveryProfileOnItAndASentOneClearsIt()
+        async throws {
+        WebhookCapture.start()
+        defer { WebhookCapture.stop(); WebhookCapture.respond(with: 200) }
+        let other = "attn-b"
+        let otherWorkspace = try XCTUnwrap(ProfileService.workspaceURL(for: other))
+        try FileManager.default.createDirectory(
+            at: otherWorkspace.appendingPathComponent("automation"),
+            withIntermediateDirectories: true)
+        let notify = NotifyConfig(
+            enabled: true, provider: "teams", url: WebhookCapture.webhookURL, detail: nil)
+        let targets = try [profile, other].map { name in
+            OverdueDigestRouting.Target(
+                profile: name, notify: notify,
+                workspace: try XCTUnwrap(ProfileService.workspaceURL(for: name)),
+                sentToday: false)
+        }
+        let issue = AutomationHealthIssue(
+            label: "fleet", displayName: "fleet", kind: .overdue, isMulti: true,
+            profile: "", expectedFire: nil, lastRunFinishedAt: nil)
+        let batch = OverdueDigestRouting.Batch(targets: targets, notify: notify, issues: [issue])
+        let marker = DayMarker(name: "overdue-notify")
+
+        WebhookCapture.respond(with: 404)
+        let failed = await postOverdueDigest(batch, marker: marker, today: "2026-10-20")
+        XCTAssertEqual(failed, .failed)
+        XCTAssertEqual(WebhookCapture.posted.count, 1, "one card for both profiles")
+        for name in [profile, other] {
+            let open = AttentionLog.openItems(profile: name)
+            XCTAssertEqual(open.map(\.code), [.webhookRejected], name)
+            XCTAssertTrue(open.first?.message.contains("HTTP 404") == true, "\(open)")
+        }
+
+        WebhookCapture.respond(with: 200)
+        let sent = await postOverdueDigest(batch, marker: marker, today: "2026-10-20")
+        XCTAssertEqual(sent, .sent)
+        for name in [profile, other] {
+            XCTAssertTrue(AttentionLog.openItems(profile: name).isEmpty, name)
+        }
+    }
 }

@@ -146,28 +146,50 @@ func notifyOverdueSchedulesHeadless(
     }
 
     for batch in routing.batches {
-        // Reuse the GUI's fact builder so the two paths emit byte-identical cards
-        // (and honor notify.detail minimal/full the same way).
-        let facts = WorkspaceStore.overdueFacts(
-            detail: batch.notify.resolvedDetail, profile: batch.profiles.joined(separator: ", "),
-            overdue: batch.issues
-        )
-        let count = batch.issues.count
-        let outcome = await marker.sendOnce(
-            day: today, in: batch.targets.map(\.workspace),
-            onLine: { fputs($0 + "\n", stderr) }
-        ) {
-            await WebhookNotifier.sendFailed(
-                config: batch.notify,
-                title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
-                facts: facts
-            )
-        }
-        // Stamped only after a confirmed send, so a transient webhook failure retries next run.
-        guard outcome == .sent else { continue }
-        print("[info] overdue schedule digest posted headlessly for "
-            + "\(batch.profiles.joined(separator: ", ")) (\(count) overdue)")
+        await postOverdueDigest(batch, marker: marker, today: today)
     }
+}
+
+/// One overdue card for `batch`. Its outcome opens or clears `webhookRejected` for every
+/// profile on the card, each in its own attention record (the app record, as for a heartbeat).
+@discardableResult
+func postOverdueDigest(
+    _ batch: OverdueDigestRouting.Batch, marker: DayMarker, today: String
+) async -> DayMarker.SendOutcome {
+    // Reuse the GUI's fact builder so the two paths emit byte-identical cards
+    // (and honor notify.detail minimal/full the same way).
+    let names = batch.profiles.joined(separator: ", ")
+    let facts = WorkspaceStore.overdueFacts(
+        detail: batch.notify.resolvedDetail, profile: names, overdue: batch.issues)
+    let count = batch.issues.count
+    let failure = WebhookNotifier.DeliveryFailure()
+    let outcome = await marker.sendOnce(
+        day: today, in: batch.targets.map(\.workspace),
+        onLine: { fputs($0 + "\n", stderr) }
+    ) {
+        await WebhookNotifier.sendFailed(
+            config: batch.notify,
+            title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
+            facts: facts, failure: failure
+        )
+    }
+    for profile in batch.profiles {
+        await AttentionLog.recording(profile: profile) {
+            ScheduledRunSignals.noteWebhook(outcome, failure: failure)
+        }
+    }
+    switch outcome {
+    case .sent:
+        print("[info] overdue schedule digest posted headlessly for \(names) (\(count) overdue)")
+    case .failed:
+        // Stamped only after a confirmed send, so a failed one retries next run.
+        let message = "[warn] overdue digest notification failed for \(names): "
+            + (failure.reason ?? "unknown")
+        fputs(message + "\n", stderr)
+        AppLogger.webhook.error("\(message, privacy: .public)")
+    case .skipped: break
+    }
+    return outcome
 }
 
 /// A target for each profile in `profiles` whose `config.yaml` `notify:` block is

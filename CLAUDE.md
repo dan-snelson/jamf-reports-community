@@ -1055,14 +1055,16 @@ device data, URL or secret (`sanitized`: `LogRedactor.redactedForSharing`, URLs 
 characters), `first_seen`, `last_seen`, `count`, the profile and the run's log name. The emit
 site calls `AttentionLog.raise` beside its `[warn]` line and the check that passes calls
 `AttentionLog.clear`: a confirmed webhook send (success digest, failure card, heartbeat, metric
-alert, and the GUI's overdue digest) clears `webhookRejected`, and any of them that fails opens
-it with the HTTP status or network error (the tick's overdue digest records neither); a School collect that lands devices, readable EA snapshots (or no custom EAs), a Fleet
+alert, and the GUI's and the tick's overdue digest, the tick's for every profile on the card)
+clears `webhookRejected`, and any of them that fails opens it with the HTTP status or network
+error; a School collect that lands devices, readable EA snapshots (or no custom EAs), a Fleet
 Drift without a large change, a mobile list whose lost-mode text was removed, and a Protect backup
 that ran (ok clears both Protect codes, partial or failed opens `protectBackupPartial`; Protect
 not connected clears both) close theirs. `AttentionLog` is bound to the task (`current`,
 `recording(profile:)`): `scheduledRunSingle` (records only once its recorder opens, so a run
 refused before that writes nothing), `recordingCollect`, `CollectRouter.run`, `CLIBridge.generate`,
-`CLIBridge.backup` and each heartbeat target; an inner `recording` for the same profile joins the
+`CLIBridge.backup`, each heartbeat target and each profile on a tick overdue card
+(`postOverdueDigest`); an inner `recording` for the same profile joins the
 run. A commit merges the run's changes into the workspace's open set (the `attention` array of the
 `automation/*_status.json` with the newest `attention_at`): a code seen again keeps `first_seen`
 and counts up, a cleared one is removed; the result goes into the run's status file, else the app

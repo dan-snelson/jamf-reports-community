@@ -258,6 +258,11 @@ versions in this repository map to git tags.
 
 ### Security
 
+- A workspace in a Desktop or Documents folder that iCloud Drive syncs
+  (iCloud Desktop & Documents) is now treated like a workspace in any other cloud folder:
+  settings other Macs could change wait for a Confirm on this Mac in Config Doctor, Jamf Protect
+  is left out of its backups so credential-bearing files do not sync, and backup pruning removes
+  only this Mac's backups. Before, such a folder read as local disk. (#284)
 - The saved mobile device inventory no longer keeps Lost Mode text (the phone number, location,
   message and footnote shown on a lost device). Nothing in the app read it, and the snapshot can
   sit in a shared folder. Whether Lost Mode is on is still kept.

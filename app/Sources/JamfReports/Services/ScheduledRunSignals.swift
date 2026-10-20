@@ -136,14 +136,17 @@ enum ScheduledRunSignals {
     /// it is scrubbed through the strictest pipeline (`LogRedactor` credential
     /// patterns + `DiagnosticRedactor` full-PII pass) before it enters a fact.
     /// `minimal` mode drops the error fact entirely. Best-effort — never throws.
+    /// `fallbackNotify` is the `notify:` block read alone, for a run with no decoded config.
     static func notifyScheduledRunFailure(
         config: ReportConfig?,
         profile: String,
         mode: Schedule.RunMode,
         errorDescription: String,
-        recorder: ScheduledRunRecorder?
+        recorder: ScheduledRunRecorder?,
+        fallbackNotify: NotifyConfig? = nil
     ) async {
-        guard let notify = SharedConfigPin.effectiveNotify(config?.notify, profile: profile),
+        guard let notify = SharedConfigPin.effectiveNotify(
+                config?.notify ?? fallbackNotify, profile: profile),
               notify.isUsable else { return }
         let facts = failureFacts(
             detail: notify.resolvedDetail, profile: profile, mode: mode,
@@ -156,6 +159,39 @@ enum ScheduledRunSignals {
             let message = "[warn] failure webhook notification failed for '\(profile)'"
             fputs(message + "\n", stderr)
             recorder?.record(message)
+        }
+    }
+
+    /// Post the failure card for a run the product guard refused, once per local day per
+    /// schedule. A refused run exits 0 and writes nothing in the workspace, so without a card
+    /// nobody learns the schedule has never run. The once-a-day stamp lives in `stateRoot`
+    /// (this Mac's Application Support), never in the workspace. Best-effort — never throws.
+    static func notifyRefusedRun(
+        config: ReportConfig?,
+        profile: String,
+        mode: Schedule.RunMode,
+        scheduleKey: String,
+        refusal: String,
+        stateRoot: URL = AppSupport.directory()
+            .appendingPathComponent("refused-runs", isDirectory: true),
+        now: Date = Date()
+    ) async {
+        guard let notify = SharedConfigPin.effectiveNotify(config?.notify, profile: profile),
+              notify.isUsable else { return }
+        let facts = failureFacts(
+            detail: notify.resolvedDetail, profile: profile, mode: mode,
+            errorDescription: refusal)
+        let folder = stateRoot.appendingPathComponent(
+            ProfileName.labelComponent(scheduleKey), isDirectory: true)
+        let outcome = await DayMarker(name: "refused-run").sendOnce(
+            day: SummaryJSONParser.dateFormatter.string(from: now), in: [folder], now: now,
+            onLine: { fputs($0 + "\n", stderr) }
+        ) {
+            await WebhookNotifier.sendFailed(
+                config: notify, title: "Jamf Report — \(profile)", facts: facts)
+        }
+        if outcome == .failed {
+            fputs("[warn] refused-run notification failed for '\(profile)'\n", stderr)
         }
     }
 
@@ -382,6 +418,8 @@ let deviceScanNotWrittenMarkerSuffix = "— not written"
 final class CollectHonestyWatcher: @unchecked Sendable {
     private let lock = NSLock()
     private var standDown = false
+    /// The stand-down was for a peer's recent collect, not its live claim.
+    private var freshnessStandDown = false
     private var summaryFailed = false
     private var partial = false
     /// Sources the `[partial]` lines named as not landed.
@@ -400,7 +438,9 @@ final class CollectHonestyWatcher: @unchecked Sendable {
             let liveClaim = line.hasSuffix(ReportEngine.liveClaimStandDownSuffix)
             lock.withLock {
                 standDown = true
-                if liveClaim { partial = true; unexplainedPartial = true }
+                if liveClaim { partial = true; unexplainedPartial = true } else {
+                    freshnessStandDown = true
+                }
             }
             return
         }
@@ -465,7 +505,13 @@ final class CollectHonestyWatcher: @unchecked Sendable {
 
     /// The rule self-remediation uses (`WorkspaceStore.lastFailureRepeatsOnRetry`), read from
     /// `profile`'s state files, except that exit 3 still retries (#226 5a).
-    func retryCouldHelp(profile: String) -> Bool {
+    ///
+    /// A stand-down because a peer collected recently is also worth a retry while `profile` has
+    /// no summary for today: if that peer is off, a later wake finds its data older than the
+    /// window and collects.
+    func retryCouldHelp(profile: String, now: Date = Date()) -> Bool {
+        if lock.withLock({ freshnessStandDown }),
+           !SummaryJSONParser.hasSummary(profile: profile, on: now) { return true }
         guard let stateDir = try? WorkspacePaths.stateDir(for: profile) else { return incomplete }
         let store = StateFileStore(directory: stateDir)
         return retryCouldHelp {

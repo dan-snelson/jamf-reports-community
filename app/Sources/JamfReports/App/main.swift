@@ -171,9 +171,9 @@ func notifyOverdueSchedulesHeadless(
 }
 
 /// A target for each profile in `profiles` whose `config.yaml` `notify:` block is
-/// usable, in discovery order. Best-effort per profile — an unreadable or
-/// undecodable config is left out.
-private func notifyTargets(
+/// usable, in discovery order. Best-effort per profile — an unreadable config is left out; one
+/// that does not decode still contributes its `notify:` block.
+func notifyTargets(
     in profiles: [String], sentToday: (URL) -> Bool
 ) -> [OverdueDigestRouting.Target] {
     profiles.compactMap { profile in
@@ -181,27 +181,15 @@ private func notifyTargets(
               let workspace = ProfileService.workspaceURL(for: profile) else { return nil }
         let url = workspace.appendingPathComponent("config.yaml")
         guard FileManager.default.fileExists(atPath: url.path),
-              let config = try? ConfigLoader.load(from: url),
-              let notify = SharedConfigPin.effectiveNotify(config.notify, profile: profile),
+              let notify = SharedConfigPin.effectiveNotify(
+                  (try? ConfigLoader.load(from: url))?.notify ?? NotifyConfigLoader.scoped(at: url),
+                  profile: profile),
               notify.isUsable else { return nil }
         return OverdueDigestRouting.Target(
             profile: profile, notify: notify, workspace: workspace,
             sentToday: sentToday(workspace))
     }
 }
-
-/// The installed jamf-cli version when it is present but below the supported
-/// floor; nil when jamf-cli is absent (optional) or meets the floor. Uses the
-/// nonisolated probe so it is callable from the headless `@Sendable` runner
-/// without a MainActor hop.
-@Sendable
-private func jamfCLIVersionBelowFloor() -> String? {
-    guard let binary = ExecutableLocator.locate("jamf-cli"),
-          let installed = JamfCLIInstaller.installedVersion(at: binary),
-          JamfCLIInstaller.isBelowMinimumSupported(installed) else { return nil }
-    return installed
-}
-
 
 /// True unless `value` looks like another flag — guards `args[idx + 1]` reads
 /// against silently consuming a missing value's own flag name (e.g.
@@ -244,21 +232,47 @@ private func scheduledRunSingleBody(
         return 1
     }
 
+    // Loaded once for the product refusal, the version preflight, routing and generate. A
+    // config.yaml that exists but does not decode is kept as an error, not read as "no config":
+    // the product (School, Pro) cannot be told from it, and reading it as Jamf Pro refused a
+    // School profile with exit 0 on every run.
+    let configURL = workspace.appendingPathComponent("config.yaml")
+    var configError: Error?
+    let routingConfig: ReportConfig?
+    do {
+        routingConfig = FileManager.default.fileExists(atPath: configURL.path)
+            ? try ConfigLoader.load(from: configURL) : nil
+    } catch {
+        routingConfig = nil
+        configError = error
+    }
+    // A config the full decode rejects still carries the webhook the failure card goes to.
+    let routingNotify = configError == nil ? nil : NotifyConfigLoader.scoped(at: configURL)
+    if routingConfig == nil {
+        AppLogger.schedule.warning(
+            "[routing] no usable config for \(profile, privacy: .public) — treating as Jamf Pro")
+    }
+
+    let labelProfile = ProfileName.labelComponent(profile)
+    let runLabel = label ?? "\(LaunchAgentWriter.labelPrefix).\(labelProfile).\(mode.rawValue)"
+
     // A profile of another product (Protect, Security Cloud, organization level) can never run
     // a Jamf Pro schedule, so every retry would fail the same way. Refused before the recorder
     // creates anything in the workspace; like a School backup, it ends the run as a success
     // so the tick does not retry it and no failure webhook is posted. jamf-cli-only reads the
     // cache and sends no command.
-    if mode != .jamfCLIOnly, let refusal = CollectRouter.proRunRefusal(
-        profile: profile, operation: "Scheduled \(mode.rawValue) run",
-        config: try? ConfigLoader.load(
-            from: workspace.appendingPathComponent("config.yaml"))
+    if mode != .jamfCLIOnly, configError == nil, let refusal = CollectRouter.proRunRefusal(
+        profile: profile, operation: "Scheduled \(mode.rawValue) run", config: routingConfig
     ) {
         let message = "[skip] scheduled \(mode.rawValue) run skipped for '\(profile)': "
             + "\(refusal). Not a failure. Exclude this profile from the schedule to stop "
             + "scheduling it."
         fputs(message + "\n", stderr)
         AppLogger.schedule.notice("\(LogRedactor.redact(message), privacy: .public)")
+        // Exit 0 so the tick does not retry it, but not silence: one card a day.
+        await ScheduledRunSignals.notifyRefusedRun(
+            config: routingConfig, profile: profile, mode: mode,
+            scheduleKey: "\(runLabel).\(labelProfile)", refusal: refusal)
         return 0
     }
 
@@ -268,8 +282,6 @@ private func scheduledRunSingleBody(
     // stream capture); the recorder is the structured per-run record.
     // Legacy plists without --label fall back to a profile+mode label so
     // their runs are recorded too.
-    let labelProfile = ProfileName.labelComponent(profile)
-    let runLabel = label ?? "\(LaunchAgentWriter.labelPrefix).\(labelProfile).\(mode.rawValue)"
     let recorder = ScheduledRunRecorder(workspace: workspace, label: runLabel)
     if recorder == nil {
         fputs("[warn] could not open run record in automation/logs — run will not appear in Run History\n", stderr)
@@ -294,6 +306,20 @@ private func scheduledRunSingleBody(
             + "ran as jamf-cli-full"))
     }
 
+    if mode != .jamfCLIOnly, let configError {
+        let message = LogRedactor.redact(
+            "[error] '\(profile)': config.yaml does not decode, so the product cannot be told "
+                + "and nothing ran: \(configError.localizedDescription)")
+        fputs(message + "\n", stderr)
+        recorder?.record(message)
+        recorder?.finish(exitCode: 1)
+        await ScheduledRunSignals.notifyScheduledRunFailure(
+            config: nil, profile: profile, mode: mode,
+            errorDescription: configError.localizedDescription, recorder: nil,
+            fallbackNotify: routingNotify)
+        return 1
+    }
+
     // Shared workspace: a config.yaml value another Mac changed since this one pinned it is
     // not followed (folders, retention, webhook); the run says which and carries on.
     SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
@@ -303,31 +329,18 @@ private func scheduledRunSingleBody(
     // the app cannot drive; below the supported floor it warns and carries on. jamf-cli-only
     // generates from cache and never calls jamf-cli, so it is exempt; an absent jamf-cli is
     // also exempt (the collect path handles it).
-    if mode != .jamfCLIOnly, let belowVersion = jamfCLIVersionBelowFloor() {
+    if mode != .jamfCLIOnly, let belowVersion = JamfCLIInstaller.installedVersionBelowFloor() {
         let line = JamfCLIInstaller.floorLine(installed: belowVersion, profile: profile)
         fputs(line.text + "\n", stderr)
         recorder?.record(line.text)
         if line.stops {
             recorder?.finish(exitCode: 1)
+            await ScheduledRunSignals.notifyScheduledRunFailure(
+                config: routingConfig, profile: profile, mode: mode,
+                errorDescription: line.text, recorder: nil, fallbackNotify: routingNotify)
             return 1
         }
     }
-
-    // Load config once, before the backup branch (product-type routing needs
-    // it), before collect (routing needs it) and before generate. Failure
-    // degrades routing to Jamf Pro and still fails generate with the real error
-    // (ConfigLoader.LoadError) so the recorded run shows a meaningful message.
-    // nil config in routing logs loudly and uses Pro.
-    let configURL = workspace.appendingPathComponent("config.yaml")
-    let routingConfig: ReportConfig? = {
-        guard let loaded = try? ConfigLoader.load(from: configURL) else {
-            AppLogger.schedule.warning(
-                "[routing] could not load config for \(profile, privacy: .public) — defaulting to Jamf Pro"
-            )
-            return nil
-        }
-        return loaded
-    }()
 
     // Backup mode (v2.2.0): export configuration objects; no collect, no
     // generate. Retention prunes scheduled backups beyond the newest 10 and
@@ -389,7 +402,7 @@ private func scheduledRunSingleBody(
             if let failureDetail {
                 await ScheduledRunSignals.notifyScheduledRunFailure(
                     config: routingConfig, profile: profile, mode: mode,
-                    errorDescription: failureDetail, recorder: nil
+                    errorDescription: failureDetail, recorder: nil, fallbackNotify: routingNotify
                 )
             }
             return exit
@@ -402,7 +415,7 @@ private func scheduledRunSingleBody(
             recorder?.finish(exitCode: 1)
             await ScheduledRunSignals.notifyScheduledRunFailure(
                 config: routingConfig, profile: profile, mode: mode,
-                errorDescription: errorDesc, recorder: nil
+                errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify
             )
             return 1
         }
@@ -571,7 +584,7 @@ private func scheduledRunSingleBody(
         // webhook send latency never blocks the exit path.
         await ScheduledRunSignals.notifyScheduledRunFailure(
             config: routingConfig, profile: profile, mode: mode,
-            errorDescription: errorDesc, recorder: nil
+            errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify
         )
         return 1
     }

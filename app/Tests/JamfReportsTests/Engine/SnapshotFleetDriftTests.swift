@@ -203,6 +203,17 @@ final class SnapshotFleetDriftTests: XCTestCase {
         XCTAssertTrue(lines.texts.isEmpty)
     }
 
+    func testATinyFleetGrowingDoesNotWarn() throws {
+        let (old, new) = (at(-1), at(0))
+        let lines = DriftLineCollector()
+        let dash = try dashboard(
+            files: [(old, fleet(1...1, taken: old)), (new, fleet(1...3, taken: new))],
+            onLine: lines.append)
+        try dash.writeFleetDrift()
+        XCTAssertEqual(try section("New Enrollments", in: dash).count, 2)
+        XCTAssertTrue(lines.texts.isEmpty)
+    }
+
     /// Power BI reads this tab by name and layout; a warning must not move a section.
     func testTheSheetKeepsItsNameAndColumnsWithAWarning() throws {
         let (old, new) = (at(-1), at(0))

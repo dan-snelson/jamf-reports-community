@@ -27,11 +27,12 @@ struct SnapshotFleetDrift {
     /// The share of the larger snapshot that joined or left, when that is more than
     /// max(20, a quarter of the smaller snapshot) or the smaller is under half the larger.
     /// Mass enrollment and retirement are normal, so this only prompts a check.
+    /// The halving rule needs 20 Macs, so a tiny fleet's normal change (1 to 3) does not warn.
     var largeChangePercent: Int? {
         let (small, large) = (min(currentCount, priorCount), max(currentCount, priorCount))
         let moved = joined.count + left.count
         guard moved > 0,
-              Double(moved) > max(20, Double(small) * 0.25) || 2 * small < large
+              Double(moved) > max(20, Double(small) * 0.25) || (large >= 20 && 2 * small < large)
         else { return nil }
         return Int((Double(moved) / Double(large) * 100).rounded())
     }

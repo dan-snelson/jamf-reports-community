@@ -9,6 +9,8 @@ versions in this repository map to git tags.
 
 ### Added
 
+- The workbook's Compliance Rules sheet has a Rule ID column at the end; the other columns are
+  unchanged. (#284)
 - Warnings you have to act on no longer stay in the run log only: a webhook that rejected a card,
   a Jamf Protect backup that was skipped or incomplete, a Jamf School collect with no devices, an
   unreadable Extension Attribute snapshot, a large Fleet Drift change and a mobile device list
@@ -52,6 +54,12 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- A Jamf Protect backup now runs even when the Jamf Pro backup fails, so Protect is still backed
+  up. That backup is marked on the Backups screen and is not offered for a diff; the run still
+  reads as failed. (#284)
+- A backup whose Jamf Protect part failed is kept only until a newer backup's Protect part
+  completes, so a Protect failure that repeats no longer stops old backups from being removed.
+  (#284)
 - A scheduled run that fails the same way again posts its failure card once a day per schedule and
   profile, not on every hourly retry; a different failure still posts, and a card that could not
   be sent is tried again. (#284)
@@ -256,6 +264,7 @@ versions in this repository map to git tags.
 
 ### Removed
 
+- `exceptions[].control_id` is no longer read; Config Doctor says it can be deleted. (#284)
 - The boot-drive risk factor ("Boot Drive >95% Full") is gone: only a CSV export supplied the
   boot-drive figure, and jamf-cli data has none. (#281)
 - The **Columns** tab on Config, the column-mapping step in setup, the **CSV Inbox** card on

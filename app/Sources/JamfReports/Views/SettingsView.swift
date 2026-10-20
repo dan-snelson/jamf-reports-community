@@ -1227,7 +1227,8 @@ struct SettingsView: View {
     nonisolated static func toggleableGroups(
         school: Bool, protectConnected: Bool = false
     ) -> [(label: String, tabs: [Tab])] {
-        let available = TabVisibility().limited(toSchool: school, protectConnected: protectConnected)
+        let available = TabVisibility()
+            .limited(toSchool: school, protectConnected: protectConnected)
         return Tab.navGroups.compactMap { group in
             let tabs = group.items.filter { !$0.isCoreTab && available.isAvailable($0) }
             return tabs.isEmpty ? nil : (label: group.label, tabs: tabs)

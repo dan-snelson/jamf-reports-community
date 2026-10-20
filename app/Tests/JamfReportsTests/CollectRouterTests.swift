@@ -194,7 +194,7 @@ final class CollectRouterTests: XCTestCase {
 
         XCTAssertEqual(spy.schoolCallCount, 1, "School collect must be called exactly once")
         XCTAssertEqual(spy.proCallCount, 0, "Pro collect must not be called for a School profile")
-        XCTAssertEqual(spy.protectCallCount, 0, "Protect collect must not run without protect.enabled")
+        XCTAssertEqual(spy.protectCallCount, 0, "no Protect without protect.enabled")
     }
 
     /// A Jamf Pro workspace holding a foreign school_cli.profile (written by earlier builds)

@@ -7,10 +7,11 @@ import Foundation
 /// Routing rules:
 /// - `school_cli.enabled == true` and `school_cli.profile` blank or the workspace's own
 ///   profile → `.jamfSchool` (school collect only, never pro).
-/// - Otherwise → `.jamfPro`.
+/// - Otherwise → `.jamfPro`. That includes a `school_cli.profile` naming some other jamf-cli
+///   profile: a School login recorded in a Jamf Pro workspace (written by builds before 2.10)
+///   is not used there.
 /// - Either way, `protect?.enabled == true` means Protect augments the run (2.11: Jamf Protect
-///   works with Jamf School too, Experimental). The `.jamfPro` case includes a `school_cli.profile` naming some other jamf-cli profile: a School login
-///   recorded in a Jamf Pro workspace (written by builds before 2.10) is not used there.
+///   works with Jamf School too, Experimental).
 ///
 /// Protect is an ADD-ON to a Jamf Pro or Jamf School workspace, not a standalone product type;
 /// it runs with its own `protect.profile` login.

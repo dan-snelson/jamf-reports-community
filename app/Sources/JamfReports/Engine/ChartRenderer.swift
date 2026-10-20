@@ -56,7 +56,9 @@ enum ChartPalette {
     }
 
     static func colorForMajorVersion(_ version: String) -> CGColor {
-        majorVersionColors[version] ?? color(for: version.hashValue)
+        // hashValue is seeded per process; the fallback must give the same color every run.
+        majorVersionColors[version]
+            ?? color(for: Int(version) ?? version.utf8.reduce(0) { $0 &+ Int($1) })
     }
 }
 

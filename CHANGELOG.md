@@ -199,6 +199,8 @@ versions in this repository map to git tags.
   connection** again; jamf-cli 1.33.0 reports its `apikey` sign-in method as invalid.
 - The health banner now reports Jamf Protect data that has gone stale or keeps failing in a
   workspace with Protect connected; before, only Jamf Pro data was checked.
+- A Jamf School collect where jamf-cli cannot be started for any source now fails, as the Jamf
+  Pro collect does, instead of finishing as Partial with a success exit. (#284)
 
 ### Removed
 

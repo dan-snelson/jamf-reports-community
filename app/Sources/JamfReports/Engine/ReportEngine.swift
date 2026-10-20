@@ -3365,9 +3365,10 @@ struct ReportEngine: Sendable {
         workspacePaths: WorkspacePaths.Type,
         tiers: Set<CollectionTier> = Set(CollectionTier.allCases),
         force: Bool = false,
+        locateJamfCLI: @Sendable () -> URL? = { ExecutableLocator.locate("jamf-cli") },
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
-        guard let bin = ExecutableLocator.locate("jamf-cli") else {
+        guard let bin = locateJamfCLI() else {
             throw ReportEngineError.jamfCLINotFound
         }
         guard ProfileService.isValid(profile) else {
@@ -3412,6 +3413,7 @@ struct ReportEngine: Sendable {
             }
             guard let (exitCode, data) = schoolResult else {
                 unlanded.append(kind)
+                schoolOutcomes.append(CollectOutcome(kind: kind, exitCode: launchFailureExitCode))
                 stateStore?.record(.failed(exitCode: nil), report: kind, at: collectStart)
                 continue
             }
@@ -3447,8 +3449,9 @@ struct ReportEngine: Sendable {
         // Total-outage guard for School: commands were attempted but none succeeded.
         // Without this, a dead School tenant silently records Success on every run.
         // Checked after the full loop (same as Jamf Pro collect) so partial failures
-        // still warm the cache. Launch-failures (nil schoolResult) are excluded from
-        // schoolOutcomes intentionally — they carry no exit code signal.
+        // still warm the cache. A launch failure (nil schoolResult) counts as
+        // `launchFailureExitCode`, as in the Pro loop: an all-launch-failure run is an
+        // outage, not a Partial run with exit 0.
         if Self.isCollectDead(schoolOutcomes, savedKinds: schoolSaved) {
             let failedCount = schoolOutcomes.count
             let msg = "[error] all \(failedCount) live jamf-cli school call(s) failed for " +

@@ -176,16 +176,16 @@ final class ScheduledRunUndecodableConfigTests: XCTestCase {
         }
     }
 
-    /// A backup needs only the profile: it runs, with a warning, and a profile of another
+    /// A backup needs only the profile: it runs, and a profile of another
     /// product is refused as it is with no config.yaml.
-    func testABackupStillRunsWithAWarning() async throws {
+    func testABackupStillRuns() async throws {
         try writeConfig("thresholds: not-a-mapping\n")
         _ = await runSchedule(schedule(.backup), verbose: false)
         let logs = try WorkspacePaths.runHistoryDir(for: profile)
         let log = try XCTUnwrap(FileManager.default.contentsOfDirectory(atPath: logs.path)
             .first { $0.hasSuffix(".log") })
         let text = try String(contentsOf: logs.appendingPathComponent(log), encoding: .utf8)
-        XCTAssertTrue(text.contains("[warn] '\(profile)': config.yaml does not decode"), text)
+        // The decode warning now comes from the Protect step (ProtectBackupTests), once.
         XCTAssertFalse(text.contains("nothing ran"), text)
         XCTAssertTrue(text.contains("backup"), text)
 

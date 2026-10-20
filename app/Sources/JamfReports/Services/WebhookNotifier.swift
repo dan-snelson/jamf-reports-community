@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Opt-in scheduled-run webhook digest (v2.2.0 Phase 3). Posts a compact
 /// summary of a completed scheduled run to a Microsoft Teams or Slack incoming
@@ -270,7 +271,9 @@ enum WebhookNotifier {
     /// with a 2xx response. Returns `false` on encode failure, non-2xx, or
     /// network error so callers can record a warning in the run audit trail.
     @discardableResult
-    static func send(config: NotifyConfig, title: String, facts: [Fact]) async -> Bool {
+    static func send(
+        config: NotifyConfig, title: String, facts: [Fact], failure: DeliveryFailure? = nil
+    ) async -> Bool {
         let ep = endpoint(for: config)
         guard case .url(let url) = ep else { return ep == .notConfigured }
         AppLogger.webhook.debug("posting \(config.resolvedProvider.rawValue, privacy: .public) digest")
@@ -280,31 +283,17 @@ enum WebhookNotifier {
             )
             return false
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body
-        request.timeoutInterval = 10
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                AppLogger.webhook.info("WebhookNotifier: webhook returned HTTP \(http.statusCode)")
-                return false
-            }
-            return true
-        } catch {
-            AppLogger.webhook.warning(
-                "WebhookNotifier: post failed: \(error.localizedDescription, privacy: .private)"
-            )
-            return false
-        }
+        return await deliver(
+            to: url, body: body, provider: config.resolvedProvider, kind: "", failure: failure)
     }
 
     /// Post a failed-run digest using the attention-styled card/blocks. Gated on
     /// `config.isUsable` — no-op when webhook is off or URL is not https.
     /// Never throws.
     @discardableResult
-    static func sendFailed(config: NotifyConfig, title: String, facts: [Fact]) async -> Bool {
+    static func sendFailed(
+        config: NotifyConfig, title: String, facts: [Fact], failure: DeliveryFailure? = nil
+    ) async -> Bool {
         let ep = endpoint(for: config)
         guard case .url(let url) = ep else { return ep == .notConfigured }
         guard let body = failedPayload(provider: config.resolvedProvider, title: title, facts: facts) else {
@@ -313,31 +302,17 @@ enum WebhookNotifier {
             )
             return false
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body
-        request.timeoutInterval = 10
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                AppLogger.webhook.info("WebhookNotifier: failed-run webhook returned HTTP \(http.statusCode)")
-                return false
-            }
-            return true
-        } catch {
-            AppLogger.webhook.warning(
-                "WebhookNotifier: failed-run post failed: \(error.localizedDescription, privacy: .private)"
-            )
-            return false
-        }
+        return await deliver(
+            to: url, body: body, provider: config.resolvedProvider, kind: "failed-run", failure: failure)
     }
 
     /// Post a metric-alert digest using the attention-styled card/blocks. Gated
     /// on `config.isUsable` — no-op when webhook is off or URL is not https.
     /// Never throws.
     @discardableResult
-    static func sendAlert(config: NotifyConfig, title: String, facts: [Fact]) async -> Bool {
+    static func sendAlert(
+        config: NotifyConfig, title: String, facts: [Fact], failure: DeliveryFailure? = nil
+    ) async -> Bool {
         let ep = endpoint(for: config)
         guard case .url(let url) = ep else { return ep == .notConfigured }
         guard let body = alertPayload(provider: config.resolvedProvider, title: title, facts: facts) else {
@@ -346,21 +321,42 @@ enum WebhookNotifier {
             )
             return false
         }
+        return await deliver(
+            to: url, body: body, provider: config.resolvedProvider, kind: "alert", failure: failure)
+    }
+
+    /// Why the last post through a `send` call did not land, for a caller that reports it.
+    /// Holds a status or an error class, never the URL, which is the credential.
+    final class DeliveryFailure: Sendable {
+        private let stored = OSAllocatedUnfairLock<String?>(initialState: nil)
+        var reason: String? { stored.withLock { $0 } }
+        fileprivate func record(_ reason: String) { stored.withLock { $0 = reason } }
+    }
+
+    private static func deliver(
+        to url: URL, body: Data, provider: NotifyConfig.Provider, kind: String,
+        failure: DeliveryFailure?
+    ) async -> Bool {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
         request.timeoutInterval = 10
+        let what = kind.isEmpty ? "webhook" : "\(kind) webhook"
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                AppLogger.webhook.info("WebhookNotifier: alert webhook returned HTTP \(http.statusCode)")
+                failure?.record("HTTP \(http.statusCode) from the \(provider.rawValue) webhook")
+                AppLogger.webhook.error(
+                    "WebhookNotifier: \(what, privacy: .public) (\(provider.rawValue, privacy: .public)) returned HTTP \(http.statusCode)")
                 return false
             }
             return true
         } catch {
+            let code = (error as NSError)
+            failure?.record("could not reach the \(provider.rawValue) webhook (\(code.domain) \(code.code))")
             AppLogger.webhook.warning(
-                "WebhookNotifier: alert post failed: \(error.localizedDescription, privacy: .private)"
+                "WebhookNotifier: \(what, privacy: .public) post failed: \(error.localizedDescription, privacy: .private)"
             )
             return false
         }

@@ -168,10 +168,14 @@ enum ProtectBackup {
         let failures = fileManager.fileExists(
             atPath: directory.appendingPathComponent(failuresFileName).path)
         let state: BackupProductResult.State
+        var reason: String?
         if exit == CLIBridge.exitCodeTimedOut {
             state = .failed
         } else if exit == 0 {
-            state = failures ? .partial : .ok
+            // An empty or unreadable folder after a clean exit is not a backup (counts read
+            // as empty when the folder cannot be listed).
+            if counts.isEmpty { reason = "no objects exported" }
+            state = failures || counts.isEmpty ? .partial : .ok
         } else if (exit == CLIBridge.exitCodePartialFailure || failures), !counts.isEmpty {
             state = .partial
         } else {
@@ -179,7 +183,7 @@ enum ProtectBackup {
         }
         // A failed run's files are discarded, so the record claims none.
         return BackupProductResult(
-            state: state, exitCode: exit,
+            state: state, exitCode: exit, reason: reason,
             objectCounts: state == .failed ? [:] : counts,
             hasFailuresFile: state != .failed && failures)
     }
@@ -228,7 +232,24 @@ extension CLIBridge {
         sharedStorage: () -> String?,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> BackupProductResult? {
-        let config = try? ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        let configURL = workspace.appendingPathComponent("config.yaml")
+        let config: ReportConfig?
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            do {
+                config = try ConfigLoader.load(from: configURL)
+            } catch {
+                // Whether Protect is connected cannot be told, so say so instead of leaving it out.
+                let reason = LogRedactor.redact(
+                    "config.yaml does not decode, so Protect cannot be told from it: "
+                        + error.localizedDescription)
+                onLine(.init(timestamp: Date(), level: .warn,
+                             text: "[warn] Jamf Protect not backed up: \(reason). "
+                                 + "The Jamf Pro backup is unaffected."))
+                return BackupProductResult(state: .skipped, reason: reason)
+            }
+        } else {
+            config = nil
+        }
         let named = config?.protect?.resolvedProfile ?? ""
         let refusal = config?.protect?.isEnabled == true && !named.isEmpty
             ? await ProfileAuthMethod.protectRefusal(profile: named) : nil
@@ -320,7 +341,7 @@ extension CLIBridge {
                 + "\(ProtectBackup.folderName)/\(ProtectBackup.failuresFileName) "
                 + "in the backup folder"
         } else {
-            detail = "see the lines above for the resources that failed"
+            detail = result.reason ?? "see the lines above for the resources that failed"
         }
         onLine(.init(timestamp: Date(), level: .warn,
                      text: "[warn] Jamf Protect backup is "

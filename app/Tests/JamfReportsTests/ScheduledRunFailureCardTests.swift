@@ -124,4 +124,22 @@ final class ScheduledRunFailureCardTests: XCTestCase {
         await post("a", "refused", state: state, at: now, config: working)
         XCTAssertEqual(WebhookCapture.posted.count, 1)
     }
+
+    /// A webhook that answers non-2xx names the status in the run record, not just "failed".
+    func testARejectedSendNamesTheStatusInTheRunRecord() async throws {
+        WebhookCapture.respond(with: 503)
+        let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+        let recorder = try XCTUnwrap(ScheduledRunRecorder(
+            workspace: workspace,
+            label: "com.github.tonyyo11.jamf-reports-community.card.snapshot-only"))
+        await ScheduledRunSignals.notifyScheduledRunFailure(
+            config: try loadConfig(), profile: profile, mode: .snapshotOnly,
+            errorDescription: "refused", recorder: recorder, scheduleKey: "a",
+            stateRoot: root.appendingPathComponent("card-state"))
+        recorder.finish(exitCode: 1)
+        let text = try String(contentsOf: recorder.logURL, encoding: .utf8)
+        XCTAssertTrue(text.contains("failure webhook notification failed for '\(profile)': HTTP 503"),
+                      text)
+        XCTAssertFalse(text.contains(WebhookCapture.captureHost), "the URL is never written")
+    }
 }

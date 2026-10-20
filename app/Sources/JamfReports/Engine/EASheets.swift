@@ -177,7 +177,10 @@ struct EASheetWriter: Sendable {
             let rawDate = entry.value.trimmingCharacters(in: .whitespaces)
             guard !rawDate.isEmpty else { continue }
             let parsedDate = dateParser.parse(rawDate)
-            let daysUntil = parsedDate.map { Int($0.timeIntervalSince(now) / 86400) }
+            // Floor, not truncation: a date that passed an hour ago is -1 days, not 0.
+            let daysUntil = parsedDate.map {
+                Int(($0.timeIntervalSince(now) / 86400).rounded(.down))
+            }
 
             let fmt: CellFormat
             let status: String

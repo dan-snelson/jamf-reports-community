@@ -147,6 +147,44 @@ final class EASheetsTests: XCTestCase {
                        "two Macs share the name, so no serial is guessed")
     }
 
+    // MARK: - Date status
+
+    /// Status and Days Until for a date `offset` seconds from now, with the given warning window.
+    private func dateStatus(offset: TimeInterval, warnDays: Int = 30) throws -> (String, String) {
+        let stamp = ISO8601DateFormatter().string(from: Date().addingTimeInterval(offset))
+        try results([("Mac-1", "Cert", stamp)])
+        let (wb, _) = try write([
+            CustomEAConfig(name: "Cert", column: "Cert", type: .date, warningDays: warnDays),
+        ])
+        let found = try row(try grid(wb, "Cert"), "Mac-1")
+        return (try XCTUnwrap(found[4]), try XCTUnwrap(found[3]))
+    }
+
+    func testDateExpiredAnHourAgoIsExpiredNotExpiringToday() throws {
+        let (status, days) = try dateStatus(offset: -3600)
+        XCTAssertEqual(status, "Expired")
+        // The writer tab-prefixes a leading "-" so a spreadsheet never reads it as a formula.
+        XCTAssertEqual(days.trimmingCharacters(in: .whitespaces), "-1")
+    }
+
+    func testDateExpiringInAnHourIsExpiringToday() throws {
+        let (status, days) = try dateStatus(offset: 3600)
+        XCTAssertEqual(status, "Expiring (0d)")
+        XCTAssertEqual(days, "0")
+    }
+
+    func testDateWindowBoundaryIsInclusiveOfTheWarningDays() throws {
+        let day: TimeInterval = 86400
+        XCTAssertEqual(try dateStatus(offset: 30 * day + 3600).0, "Expiring (30d)")
+        XCTAssertEqual(try dateStatus(offset: 31 * day + 3600).0, "OK")
+    }
+
+    func testDateInTheMiddleOfTheWindowShowsWholeDaysRemaining() throws {
+        let (status, days) = try dateStatus(offset: 10 * 86400 + 12 * 3600)
+        XCTAssertEqual(status, "Expiring (10d)")
+        XCTAssertEqual(days, "10")
+    }
+
     // MARK: - Matching
 
     func testEANameMatchesIgnoringCaseAndPadding() throws {

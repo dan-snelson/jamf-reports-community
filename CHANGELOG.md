@@ -214,6 +214,8 @@ versions in this repository map to git tags.
   report now logs a warning and lists each custom EA on the EA Warnings tab as "snapshot
   unreadable" with the reason, instead of leaving out the EA tabs and the warnings tab with no
   message. (#284)
+- A custom EA date tab no longer shows "Expiring (0d)" for a date that passed less than a day ago.
+  It now reads Expired, with the day count rounded down. (#284)
 
 ### Removed
 

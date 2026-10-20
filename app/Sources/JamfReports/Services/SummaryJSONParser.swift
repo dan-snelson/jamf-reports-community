@@ -449,11 +449,12 @@ struct SummaryJSONParser {
     }
 
     static func parse(_ url: URL) throws -> DailySummary {
-        if let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           size > maxSummaryFileBytes {
+        do {
+            return try decode(try BoundedFile.read(
+                url, limit: maxSummaryFileBytes, followSymlinks: false))
+        } catch BoundedFile.Failure.tooLarge {
             throw CocoaError(.fileReadTooLarge, userInfo: [NSFilePathErrorKey: url.path])
         }
-        return try decode(try Data(contentsOf: url))
     }
 
     /// The summary in `data`; throws when it does not decode or holds a number past

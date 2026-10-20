@@ -465,4 +465,63 @@ final class BoundedReadsTests: XCTestCase {
         let candidates = within { CollectedEACandidates.load(dataDir: dataDir, tracked: []) }
         XCTAssertEqual(candidates?.isEmpty, true)
     }
+
+    // MARK: - Daily summaries, run-in-progress probe, backup and snapshot manifests
+
+    func testSummaryParseRefusesAFIFOALinkAndAnOversizeFile() throws {
+        let dir = root.appendingPathComponent("summaries", isDirectory: true)
+        let real = dir.appendingPathComponent("summary_2026-04-01.json")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json = #"{"date":"2026-04-01","totalDevices":5,"source":"jamf-cli"}"#
+        try Data(json.utf8).write(to: real)
+        try link(dir.appendingPathComponent("summary_2026-04-02.json"), to: real)
+        try fifo(at: dir.appendingPathComponent("summary_2026-04-03.json"))
+        let big = dir.appendingPathComponent("summary_2026-04-04.json")
+        try sparse(big, bytes: UInt64(SummaryJSONParser.maxSummaryFileBytes) + 1)
+        XCTAssertThrowsError(try SummaryJSONParser.parse(big)) {
+            XCTAssertEqual(($0 as? CocoaError)?.code, .fileReadTooLarge)
+        }
+        let dates = within { SummaryJSONParser.parseDirectory(dir).map(\.date) }
+        XCTAssertEqual(dates, ["2026-04-01"])
+    }
+
+    func testRunInProgressProbeReadsAFIFOOrALinkAsNotRunning() throws {
+        let logs = try logsDir()
+        let pipe = logs.appendingPathComponent("pipe.log")
+        try fifo(at: pipe)
+        XCTAssertEqual(within { ScheduledRunRecorder.isRunInProgress(logURL: pipe) }, false)
+        let real = logs.appendingPathComponent("real.log")
+        try Data("x\n".utf8).write(to: real)
+        let linked = logs.appendingPathComponent("linked.log")
+        try link(linked, to: real)
+        XCTAssertFalse(ScheduledRunRecorder.isRunInProgress(logURL: linked))
+    }
+
+    func testBackupLibraryReadsAFIFOOrOversizeManifestAsNoManifest() throws {
+        let backups = try workspace().appendingPathComponent("backups", isDirectory: true)
+        try fifo(at: backups.appendingPathComponent("20260601T214020/manifest.json"))
+        let big = backups.appendingPathComponent("20260602T214020/manifest.json")
+        try sparse(big, bytes: UInt64(BoundedFile.documentLimit) + 1)
+        let profile = profile
+        let labels = within { BackupLibrary().list(profile: profile).map(\.label) }
+        XCTAssertEqual(labels, ["", ""])
+    }
+
+    func testSnapshotManifestReadsAFIFOOrLinkAsAbsentAndSkipsThem() throws {
+        let kind = root.appendingPathComponent("data/computers", isDirectory: true)
+        let snapshot = kind.appendingPathComponent("computers_20260601T000000.json")
+        try fm.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data("[]".utf8).write(to: snapshot)
+        try fifo(at: kind.appendingPathComponent(SnapshotManifest.fileName))
+        let result = within { SnapshotManifest.verify(snapshot: snapshot, data: Data("[]".utf8)) }
+        XCTAssertEqual(result, .absent)
+
+        let flat = root.appendingPathComponent("flat", isDirectory: true)
+        try fifo(at: flat.appendingPathComponent("summary_2026-04-01.json"))
+        try link(flat.appendingPathComponent("summary_2026-04-02.json"), to: snapshot)
+        try fifo(at: flat.appendingPathComponent("computers.last"))
+        let flatDir: URL = flat
+        XCTAssertEqual(within { SnapshotManifest.scanFlatDir(flatDir).unverified }, 0)
+        XCTAssertEqual(within { SnapshotManifest.scanStateDir(flatDir).unverified }, 0)
+    }
 }

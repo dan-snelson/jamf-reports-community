@@ -548,6 +548,22 @@ final class SharedConfigPinTests: XCTestCase {
             workspace: workspace, config: nil, volumeIsLocal: { _ in false }))
     }
 
+    func testAnICloudDesktopAndDocumentsWorkspaceIsPinnedAndCoordinated() throws {
+        try writeConfig(shared: false, outputDir: outside, allowAbsolute: true)
+        let local = CloudStorage.SyncProbe(
+            fileProviderDomain: { _ in nil }, isUbiquitous: { _ in false })
+        XCTAssertNil(SharedConfigPin.check(
+            profile: profile, appSupport: appSupport, syncProbe: local).pinned)
+        // First sight on synced storage: the absolute output folder waits for a Confirm.
+        let synced = SharedConfigPin.check(
+            profile: profile, appSupport: appSupport, syncProbe: .iCloudEverywhere)
+        XCTAssertEqual(synced.drifts.map(\.key), [.outputDir])
+
+        XCTAssertTrue(SharedWorkspace.isEffectivelyShared(
+            workspace: workspace, config: nil, volumeIsLocal: { _ in true },
+            syncProbe: .iCloudEverywhere))
+    }
+
     // MARK: - Headless folders
 
     func testChangedOutputDirFallsBackToTheWorkspaceWithOneWarn() async throws {

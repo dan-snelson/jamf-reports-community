@@ -81,7 +81,7 @@ struct ExistingCLISetupView: View {
         guard let url = WorkspaceFolderPicker.choose() else { return }
         // Same gate as Settings: a synced folder widens who can read raw fleet
         // data, and that is a call the operator makes knowingly, right here.
-        if CloudStorage.provider(for: url) != nil {
+        if CloudStorage.isSharedStorage(url) {
             pendingSharedRoot = url
             return
         }

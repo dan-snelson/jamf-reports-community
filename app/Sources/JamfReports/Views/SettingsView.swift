@@ -42,6 +42,8 @@ struct SettingsView: View {
     // Workspace location (2.7.0). Held in @State so the card reflects a change
     // without waiting for the next `.task`; the store is the source of truth.
     @State private var workspaceRootPath: String = ProfileService.workspacesRoot().path
+    /// Read off `body` by the location card's task: detection reads the folder and its parents.
+    @State private var workspaceRootStorage: CloudStorage.SharedStorage?
     @State private var workspaceRootMessage: String? = nil
     @State private var pendingSharedRoot: URL? = nil
 
@@ -183,10 +185,8 @@ struct SettingsView: View {
                     .truncationMode(.middle)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if !workspace.demoMode, let provider = CloudStorage.provider(
-                    for: URL(fileURLWithPath: workspaceRootPath)
-                ) {
-                    Label(Self.providerLabel(provider.displayName), systemImage: "person.2")
+                if !workspace.demoMode, let storage = workspaceRootStorage {
+                    Label(Self.providerLabel(storage.displayName), systemImage: "person.2")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                     .fixedSize(horizontal: false, vertical: true)
@@ -221,6 +221,10 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Workspace location")
+        .task(id: workspaceRootPath) {
+            workspaceRootStorage = CloudStorage.sharedStorage(
+                for: URL(fileURLWithPath: workspaceRootPath))
+        }
         .sharedFolderConsent(pending: $pendingSharedRoot) { applyWorkspaceRoot($0) }
     }
 
@@ -232,7 +236,7 @@ struct SettingsView: View {
         // the operator's call to make — but it must be a call they knowingly
         // make, at the moment they make it, not something they read later in
         // the wiki. A local folder skips the prompt entirely.
-        if CloudStorage.provider(for: url) != nil {
+        if CloudStorage.isSharedStorage(url) {
             pendingSharedRoot = url
             return
         }

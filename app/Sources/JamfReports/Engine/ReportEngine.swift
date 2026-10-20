@@ -1023,8 +1023,10 @@ struct ReportEngine: Sendable {
     ///
     /// Derived from the data directory rather than a passed-in flag so the
     /// summary writer needs no new parameter threading through its callers.
-    static func collectingHostLabel(dataDir: URL) -> String? {
-        guard CloudStorage.provider(for: dataDir) != nil else { return nil }
+    static func collectingHostLabel(
+        dataDir: URL, syncProbe: CloudStorage.SyncProbe = .live
+    ) -> String? {
+        guard CloudStorage.isSharedStorage(dataDir, syncProbe: syncProbe) else { return nil }
         return SharedWorkspace.currentHost.display
     }
 

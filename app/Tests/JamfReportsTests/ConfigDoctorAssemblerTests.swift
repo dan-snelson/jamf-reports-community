@@ -110,6 +110,20 @@ final class ConfigDoctorAssemblerTests: XCTestCase {
         XCTAssertNil(inputs.claim)
     }
 
+    /// The coordination flag is the gate's rule: a sync marker, which no path shows, turns it
+    /// on, and an explicit `enabled: false` still turns it off.
+    func testCloudStorageInputsCoordinatesWhereTheGateDoes() throws {
+        let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
+        try FileManager.default.createDirectory(
+            at: workspace.appendingPathComponent(".stfolder"), withIntermediateDirectories: true)
+
+        XCTAssertTrue(ConfigDoctorService.cloudStorageInputs(profile: profile, config: nil)
+            .coordinationEnabled)
+        let off = ReportConfig(sharedWorkspace: SharedWorkspaceConfig(enabled: false))
+        XCTAssertFalse(ConfigDoctorService.cloudStorageInputs(profile: profile, config: off)
+            .coordinationEnabled)
+    }
+
     // MARK: - workspaceContinuityInputs: active-root summary count from disk
 
     func testWorkspaceContinuityInputsCountsActiveRootSummariesFromDisk() throws {

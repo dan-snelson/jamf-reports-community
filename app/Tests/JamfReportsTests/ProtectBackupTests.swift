@@ -76,6 +76,19 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertTrue(empty.contains("protect.profile is empty"), empty)
     }
 
+    func test_plan_skipsOnAnICloudDesktopAndDocumentsFolder() throws {
+        let config = try loadConfig(connectedConfig)
+        let folder = try makeTempDir()
+        guard case .skip(let reason) = ProtectBackup.plan(
+            config: config, workspaceProfile: "ws", pinAllows: { true },
+            sharedStorage: {
+                BackupMaintenance.sharedStorageDescription(
+                    folder, profile: "ws", volumeIsLocal: { _ in true },
+                    syncProbe: .iCloudEverywhere)
+            }) else { return XCTFail("synced") }
+        XCTAssertTrue(reason.contains("on iCloud Desktop & Documents"), reason)
+    }
+
     func test_plan_skipsAProfileOfAnotherProduct() throws {
         let config = try loadConfig(connectedConfig)
         let plan = ProtectBackup.plan(

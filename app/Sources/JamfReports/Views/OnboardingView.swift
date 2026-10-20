@@ -751,6 +751,9 @@ struct OnboardingView: View {
                     }
 
                     configNote(flow.schoolConfigNote)
+                    if flow.schoolConnected, let check = flow.schoolPlatformCheck {
+                        SchoolPlatformFields.banner(check)
+                    }
 
                     if !flow.schoolConnected {
                         Divider().background(Theme.Colors.hairline)
@@ -792,6 +795,8 @@ struct OnboardingView: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
+
+                        SchoolPlatformFields(flow: flow)
 
                         if let err = flow.schoolConnectionError {
                             Text(err)

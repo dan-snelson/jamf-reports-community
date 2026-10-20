@@ -605,10 +605,18 @@ private struct AgentsTab: View {
             // with the header.
             .menuIndicator(.hidden)
             .fixedSize()
+            .accessibilityLabel(
+                "Actions for " + (agent.wrappedValue.name.isEmpty ? "agent" : agent.wrappedValue.name))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
     }
+}
+
+/// Spoken name of an icon-only remove button: what it removes, by name when it has one.
+func removeButtonLabel(noun: String, name: String) -> String {
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
+    return trimmed.isEmpty ? "Remove \(noun)" : "Remove \(noun) \(trimmed)"
 }
 
 // MARK: - Custom EAs tab
@@ -891,14 +899,19 @@ private struct PlatformTab: View {
                 VStack(alignment: .leading, spacing: 8) {
                     FieldLabel(label: "Compliance benchmarks")
                     ForEach(ws.configState.complianceBenchmarks.indices, id: \.self) { i in
+                        let benchmark = safeElementBinding(
+                            $ws.configState.complianceBenchmarks, i, default: "")
                         HStack(spacing: 8) {
-                            PNPTextField(value: safeElementBinding(
-                                $ws.configState.complianceBenchmarks, i, default: ""))
+                            PNPTextField(value: benchmark)
                             Button(role: .destructive) { ws.removeComplianceBenchmark(at: i) } label: {
                                 Image(systemName: "minus.circle.fill")
                                     .foregroundStyle(Theme.Colors.danger)
+                                    .frame(minWidth: 24, minHeight: 24)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(
+                                removeButtonLabel(noun: "benchmark", name: benchmark.wrappedValue))
                         }
                     }
                     PNPButton(title: "Add benchmark", icon: "plus", style: .ghost, size: .sm, action: { ws.addComplianceBenchmark() })

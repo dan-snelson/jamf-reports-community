@@ -246,4 +246,11 @@ final class AccessibilitySweepTests: XCTestCase {
             SchoolDevicesTable.checkinAccessibilityValue(device, stale: false, now: now),
             "45 days ago")
     }
+
+    /// Icon-only remove buttons say what they remove.
+    func testRemoveButtonLabelNamesTarget() {
+        XCTAssertEqual(removeButtonLabel(noun: "benchmark", name: "CIS Level 1"),
+                       "Remove benchmark CIS Level 1")
+        XCTAssertEqual(removeButtonLabel(noun: "benchmark", name: "  "), "Remove benchmark")
+    }
 }

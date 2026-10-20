@@ -201,11 +201,20 @@ enum TickScheduler {
         !entries.isEmpty && entries.allSatisfy { $0["Weekday"] == nil && $0["Day"] == nil }
     }
 
-    /// The first wake since `lastTick`, a turned-away one included, came more than `offGap`
-    /// after it. No `lastTick` (a state file from before it) or one ahead of now is no gap.
-    static func wasOff(lastTick: Date?, firstWake: Date, now: Date) -> Bool {
-        guard let lastTick, lastTick <= now else { return false }
-        return min(firstWake, now).timeIntervalSince(lastTick) > offGap
+    /// The Mac was off or asleep since the previous wake that took the lock: the first wake
+    /// since `lastTick`, a turned-away one included, came more than `offGap` after it, or this
+    /// wake came more than `offGap` after the latest turned-away one (a lid closed during a run).
+    /// A stamp ahead of now reads as absent; no `lastTick` (a file from before it) is no gap
+    /// before the refusals.
+    static func wasOff(
+        lastTick: Date?, firstBlocked: Date?, latestBlocked: Date?, now: Date
+    ) -> Bool {
+        func present(_ stamp: Date?) -> Date? { stamp.flatMap { $0 <= now ? $0 : nil } }
+        if let latest = present(latestBlocked), now.timeIntervalSince(latest) > offGap {
+            return true
+        }
+        guard let lastTick = present(lastTick) else { return false }
+        return (present(firstBlocked) ?? now).timeIntervalSince(lastTick) > offGap
     }
 
     /// `stamp`, or `.distantPast` for none or one beyond clock skew in the future (a clock set
@@ -555,19 +564,27 @@ struct TickLock: Sendable {
         return now.timeIntervalSince(modified) > Self.staleAfter
     }
 
-    /// Record that a wake was turned away. Keeps the FIRST refusal, which the non-catch-up
-    /// window and the off gap are measured from; a later blocked wake never overwrites it.
+    /// Record that a wake was turned away, as two lines: the FIRST refusal, which the
+    /// non-catch-up window and the off gap are measured from and a later wake never overwrites,
+    /// then the latest. Rewritten whole, atomically.
     static func noteBlocked(url: URL = defaultBlockedURL, now: Date = Date()) {
-        guard !FileManager.default.fileExists(atPath: url.path) else { return }
-        try? Data(ISO8601DateFormatter().string(from: now).utf8).write(to: url, options: .atomic)
+        let latest = ISO8601DateFormatter().string(from: now)
+        let first = (try? String(contentsOf: url, encoding: .utf8))?
+            .split(whereSeparator: \.isNewline).first.map(String.init) ?? latest
+        try? Data("\(first)\n\(latest)\n".utf8).write(to: url, options: .atomic)
     }
 
-    /// Read and clear the stamp: the first refused wake, nil when no wake was blocked since the
-    /// last wake that took the lock.
-    static func takeBlockedSince(url: URL = defaultBlockedURL) -> Date? {
+    /// Read and clear the stamp: the first and the latest refused wake, nil when no wake was
+    /// blocked since the last wake that took the lock. A one-line stamp (an earlier build) is
+    /// both.
+    static func takeBlockedSince(url: URL = defaultBlockedURL) -> (first: Date, latest: Date)? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         try? FileManager.default.removeItem(at: url)
-        let stamp = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ISO8601DateFormatter().date(from: stamp)
+        let formatter = ISO8601DateFormatter()
+        let stamps = text.split(whereSeparator: \.isNewline).map {
+            formatter.date(from: $0.trimmingCharacters(in: .whitespaces))
+        }
+        guard let parsed = stamps.first, let first = parsed else { return nil }
+        return (first, stamps.dropFirst().first.flatMap { $0 } ?? first)
     }
 }

@@ -60,10 +60,11 @@ func runTick(
 
     var state = TickState.load()
     let wasOff = TickScheduler.wasOff(
-        lastTick: state.lastTick, firstWake: blocked ?? now, now: now)
+        lastTick: state.lastTick, firstBlocked: blocked?.first, latestBlocked: blocked?.latest,
+        now: now)
     let due = TickScheduler.due(
         schedules: schedules, state: state, runNowLabels: runNowLabels, now: now,
-        nonCatchUpAnchor: blocked, wasOff: wasOff,
+        nonCatchUpAnchor: blocked?.first, wasOff: wasOff,
         summaryMissingToday: { summaryMissing(for: $0, profiles: profiles, now: now) })
     // After the decision, which reads the previous wake. Best-effort: without it a daily
     // schedule just waits for its fire. A wake a long run turns away stamps `.tick.blocked`,

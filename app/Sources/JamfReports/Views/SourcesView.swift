@@ -24,6 +24,10 @@ struct SourcesView: View {
     /// Newest snapshot per kind, read off the main actor when the plan is built.
     @State private var cachedAt: [String: Date] = [:]
     @State private var expandedProducts: Set<CollectSourcesPlan.Product> = []
+    /// A School workspace's own profile from `config list`, for the Platform API row.
+    @State private var schoolResolved: ProfileAuthMethod.Resolved?
+    @State private var schoolPlatformCheck: SchoolPlatformCheck.Verdict?
+    @State private var reauthOpensPlatform = false
 
     private var isSchoolWorkspace: Bool {
         sourcesPlan?.sources.first?.product == .school
@@ -62,6 +66,7 @@ struct SourcesView: View {
                 if !isSchoolWorkspace { eaCard }
             }
             doctorCard
+            if isSchoolWorkspace { schoolPlatformCard }
             ConnectionCard()
             // Both are Jamf Pro: the matrix lists `pro` commands, and a School workspace never
             // collects Protect (`ProfileProductType.detect`).
@@ -81,9 +86,13 @@ struct SourcesView: View {
                 prefillURL: activeProfileServerURL,
                 prefillAuthMethod: activeProfileAuthMethod,
                 isSchool: isSchoolWorkspace,
+                schoolPlatform: isSchoolWorkspace ? schoolPlatformRow : nil,
+                opensSchoolPlatform: reauthOpensPlatform,
+                onSchoolPlatformCheck: { schoolPlatformCheck = $0 },
                 onSaved: {
                     workspace.credentialsChanged()
                     runDoctor()
+                    reloadSourcesPlan()
                 }
             )
         }
@@ -92,6 +101,8 @@ struct SourcesView: View {
             reloadCapabilities()
         }
         .onChange(of: workspace.profile) { _, _ in
+            schoolResolved = nil
+            schoolPlatformCheck = nil
             doctorOutcome = nil
             doctorRunning = false
             reload()
@@ -360,6 +371,7 @@ struct SourcesView: View {
                     // under the demo's name, and the check runs `jamf-cli doctor`.
                     Button("Update credentials\u{2026}") {
                         guard !workspace.demoMode else { return }
+                        reauthOpensPlatform = false
                         showingReauth = true
                     }
                     .disabled(workspace.demoMode)
@@ -433,6 +445,7 @@ struct SourcesView: View {
                         .foregroundStyle(Theme.Text.secondary)
                     Spacer()
                     PNPButton(title: "Update credentials\u{2026}", icon: "key.horizontal", size: .sm) {
+                        reauthOpensPlatform = false
                         showingReauth = true
                     }
                 }
@@ -715,7 +728,7 @@ struct SourcesView: View {
         let version = workspace.jamfCLIVersion
         let skipExpensive = UserDefaults.standard.bool(forKey: "skipExpensiveCollections")
         Task {
-            let (plan, dates) = await Task.detached(priority: .userInitiated) {
+            let (plan, dates, school) = await Task.detached(priority: .userInitiated) {
                 let config = ProfileService.workspaceURL(for: profile).flatMap {
                     try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
                 }
@@ -733,12 +746,15 @@ struct SourcesView: View {
                     installedVersion: version, skipExpensive: skipExpensive,
                     authMethod: auth?.authMethod, tenantLevel: auth?.isTenantLevel == true,
                     collectSkip: ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip)))
+                let school = detected.type == .jamfSchool
+                    ? ProfileAuthMethod.resolve(profile: profile) : nil
                 return (plan, Self.newestSnapshots(
-                    kinds: plan.sources.map(\.kind), profile: profile))
+                    kinds: plan.sources.map(\.kind), profile: profile), school)
             }.value
             guard profile == workspace.profile, !workspace.demoMode else { return }
             sourcesPlan = plan
             cachedAt = dates
+            schoolResolved = school
         }
     }
 
@@ -857,6 +873,41 @@ struct SourcesView: View {
             return WorkspaceRootStore.displayPath(profile: workspace.profile, subpath: suffix) + "/"
         }
         return dataPath + "/"
+    }
+
+    // MARK: - Jamf School Platform API
+
+    private var schoolPlatformRow: SchoolPlatformRow {
+        .state(resolved: schoolResolved, lastCheck: schoolPlatformCheck)
+    }
+
+    /// Opens Update credentials on the School form: `school setup` rebuilds the whole profile,
+    /// so the Platform API fields are added there with the Network ID and API key.
+    private var schoolPlatformCard: some View {
+        Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Text(schoolPlatformRow.label)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(schoolPlatformRow == .rejected
+                                         ? Theme.Colors.warn : Theme.Colors.fg)
+                    Spacer()
+                    PNPButton(title: schoolPlatformRow.actionTitle, icon: "key.horizontal",
+                              size: .sm) {
+                        guard !workspace.demoMode else { return }
+                        reauthOpensPlatform = true
+                        showingReauth = true
+                    }
+                    .disabled(workspace.demoMode)
+                    .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
+                }
+                Text(SchoolPlatformCheck.experimentalNote)
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let check = schoolPlatformCheck { SchoolPlatformFields.banner(check) }
+            }
+        }
     }
 
     // MARK: - Additional products card

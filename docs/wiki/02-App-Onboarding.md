@@ -190,7 +190,10 @@ The Connect School step registers a
 `jamf-cli school` profile (School URL + Network ID + API key, passed over stdin and cleared)
 and wires `school_cli.enabled`/`profile` into the workspace config, so the first report and
 every later collect route to the Jamf School engine. jamf-cli must still be installed to get
-past the Install CLI step, but no Jamf Pro credentials are entered. Please
+past the Install CLI step, but no Jamf Pro credentials are entered. An optional, experimental
+switch on the same step, **Do you also have Platform API configured for Jamf School?**, adds
+the Platform API region, tenant ID, client ID and secret to the same School profile (never a
+profile of its own) and checks them by listing blueprints once. Please
 [open an issue or pull request](https://github.com/tonyyo11/jamf-reports-community/issues) if
 something looks off. See
 [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School) for the

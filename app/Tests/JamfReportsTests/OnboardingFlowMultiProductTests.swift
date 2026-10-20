@@ -700,7 +700,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let detected = ProfileProductType.detect(from: config, profile: profile)
         XCTAssertEqual(detected.type, .jamfSchool,
                        "school_cli.enabled written by writeSchoolConfig must route detection to Jamf School")
-        XCTAssertFalse(detected.runsProtect, "a School profile never runs Protect")
+        XCTAssertFalse(detected.runsProtect, "no protect block, no Protect")
         XCTAssertEqual(config.schoolCli?.resolvedProfile, profile,
                        "school_cli.profile must be the workspace profile on the School-only path")
     }

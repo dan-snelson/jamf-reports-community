@@ -7,12 +7,13 @@ import Foundation
 /// Routing rules:
 /// - `school_cli.enabled == true` and `school_cli.profile` blank or the workspace's own
 ///   profile → `.jamfSchool` (school collect only, never pro).
-/// - Otherwise → `.jamfPro`, and `protect?.enabled == true` means Protect augments the Pro run.
-///   That includes a `school_cli.profile` naming some other jamf-cli profile: a School login
+/// - Otherwise → `.jamfPro`.
+/// - Either way, `protect?.enabled == true` means Protect augments the run (2.11: Jamf Protect
+///   works with Jamf School too, Experimental). The `.jamfPro` case includes a `school_cli.profile` naming some other jamf-cli profile: a School login
 ///   recorded in a Jamf Pro workspace (written by builds before 2.10) is not used there.
 ///
-/// Protect is an ADD-ON to a Jamf Pro profile, not a standalone product type.
-/// A School profile cannot also run Protect (school setup uses API-key auth, not OAuth2).
+/// Protect is an ADD-ON to a Jamf Pro or Jamf School workspace, not a standalone product type;
+/// it runs with its own `protect.profile` login.
 enum ProfileProductType: Equatable, Sendable {
     case jamfPro
     case jamfSchool
@@ -23,8 +24,7 @@ enum ProfileProductType: Equatable, Sendable {
 /// Result of `ProfileProductType.detect(from:profile:)`.
 struct DetectedProduct: Sendable {
     let type: ProfileProductType
-    /// True when a Jamf Pro profile also has `protect.enabled == true`.
-    /// Always false for School profiles.
+    /// True when the workspace also has `protect.enabled == true`.
     let runsProtect: Bool
 }
 
@@ -43,7 +43,8 @@ extension ProfileProductType {
             return DetectedProduct(type: .jamfPro, runsProtect: false)
         }
         if config.schoolCli?.isPrimary(forWorkspace: profile) == true {
-            return DetectedProduct(type: .jamfSchool, runsProtect: false)
+            return DetectedProduct(
+                type: .jamfSchool, runsProtect: config.protect?.isEnabled == true)
         }
         return DetectedProduct(type: .jamfPro, runsProtect: config.protect?.isEnabled == true)
     }
@@ -59,6 +60,9 @@ extension ProfileProductType {
 /// Protect failure semantics: if `protectCollect` throws, the error is logged as a warning
 /// and the function returns normally — the Pro run already succeeded and is the primary
 /// deliverable. Do not rethrow.
+///
+/// A Jamf School collect is followed by Protect under the same rules (it has no stand-down
+/// or once-a-day guard, so it always counts as `.collected`).
 ///
 /// Protect runs only when the Pro collect returned `.collected`. A Pro collect that
 /// stood down for a peer on a shared workspace, or found today's full collect already
@@ -175,11 +179,23 @@ enum CollectRouter {
         // Shared workspace: say which pinned config.yaml keys changed on this Mac before any
         // collect reads them, for Jamf Pro, Protect and Jamf School alike.
         SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
+        func followWithProtect(_ disposition: ReportEngine.CollectDisposition) async {
+            await collectProtect(
+                detected: detected, config: config, profile: profile, disposition: disposition,
+                workspacePaths: workspacePaths, protectCollect: protectCollect,
+                resolved: resolved, onLine: onLine)
+        }
         switch detected.type {
         case .jamfSchool:
             onLine(.init(timestamp: Date(), level: .info,
                          text: "[info] routing \(profile) → Jamf School collect"))
-            try await schoolCollect(profile, workspacePaths, tiers, force, onLine)
+            do {
+                try await schoolCollect(profile, workspacePaths, tiers, force, onLine)
+            } catch let verdict as ReportEngineError where verdict.isCollectVerdict {
+                await followWithProtect(.collected)
+                throw verdict
+            }
+            await followWithProtect(.collected)
 
         case .jamfPro:
             let disposition: ReportEngine.CollectDisposition
@@ -190,21 +206,16 @@ enum CollectRouter {
             } catch let verdict as ReportEngineError where verdict.isCollectVerdict {
                 // The Pro run reached Jamf and failed (dead credentials, a dead run): Protect has
                 // its own login and may still answer. The Pro error stays the run's result.
-                await collectProtect(
-                    detected: detected, config: config, profile: profile, disposition: .collected,
-                    workspacePaths: workspacePaths, protectCollect: protectCollect,
-                    resolved: resolved, onLine: onLine)
+                // The School case below follows the same rule.
+                await followWithProtect(.collected)
                 throw verdict
             }
-            await collectProtect(
-                detected: detected, config: config, profile: profile, disposition: disposition,
-                workspacePaths: workspacePaths, protectCollect: protectCollect,
-                resolved: resolved, onLine: onLine)
+            await followWithProtect(disposition)
         }
     }
 
-    /// The Protect half of a Jamf Pro run. Never throws: a Protect failure is a `[partial]`
-    /// line and the Pro run's result stands.
+    /// The Protect half of a Jamf Pro or Jamf School run. Never throws: a Protect failure is a
+    /// `[partial]` line and the Pro or School run's result stands.
     private static func collectProtect(
         detected: DetectedProduct,
         config: ReportConfig?,

@@ -586,15 +586,16 @@ extension WorkspaceStore {
         let config = ProfileService.workspaceURL(for: profile).flatMap {
             try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
         }
-        // A Jamf School workspace runs `schoolCollect`, which lands none of these kinds and
-        // records no per-kind state, so judging it by them only raised alarms (2.10).
-        if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
-            return []
-        }
         let protectProfile = ConnectedProducts.read(profile: profile).protectProfile
         let protectCollected = protectProfile.map {
             protectPinAllows(profile) && protectResolved($0)?.protectRefusal(profile: $0) == nil
         } ?? false
+        // A Jamf School workspace runs `schoolCollect`, which lands none of the Jamf Pro kinds and
+        // records no per-kind state, so judging it by them only raised alarms (2.10). Protect
+        // follows a School collect as it follows a Pro one (2.11), so its kinds still count.
+        if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
+            return protectCollected ? DataFreshnessHealth.protectKinds : []
+        }
         return expectedKinds(
             skipExpensive: UserDefaults.standard.bool(forKey: "skipExpensiveCollections"),
             authMethod: auth?.authMethod,

@@ -84,6 +84,30 @@ final class SchoolWorkspaceTests: XCTestCase {
                 .contains("computers"))
     }
 
+    /// Protect follows a School collect (2.11), so a connected Protect's kinds are owed there.
+    func testASchoolWorkspaceWithProtectConnectedExpectsTheProtectKinds() throws {
+        let workspace = tempRoot.appendingPathComponent("campus", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try Data("""
+        school_cli:
+          enabled: true
+          profile: "campus"
+        protect:
+          enabled: true
+          profile: "campus-protect"
+        """.utf8).write(to: workspace.appendingPathComponent("config.yaml"))
+        func expected(_ product: JamfCLIProduct, pinAllows: Bool = true) -> [String] {
+            WorkspaceStore.expectedKinds(
+                profile: "campus", jamfCLIVersion: "1.33.0", auth: nil,
+                protectResolved: { _ in .init(authMethod: "oauth2", isTenantLevel: false,
+                                               product: product) },
+                protectPinAllows: { _ in pinAllows })
+        }
+        XCTAssertEqual(expected(.protect), DataFreshnessHealth.protectKinds)
+        XCTAssertEqual(expected(.school), [], "a protect.profile of another product is skipped")
+        XCTAssertEqual(expected(.protect, pinAllows: false), [])
+    }
+
     // MARK: - Generate
 
     func testTheGenerateSheetOffersTheSchoolWorkbookOnly() {

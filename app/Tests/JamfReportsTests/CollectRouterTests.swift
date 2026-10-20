@@ -67,7 +67,7 @@ final class CollectRouterTests: XCTestCase {
         """)
         let result = ProfileProductType.detect(from: config, profile: "ws")
         XCTAssertEqual(result.type, .jamfSchool)
-        XCTAssertFalse(result.runsProtect, "School profiles never run Protect")
+        XCTAssertFalse(result.runsProtect, "no protect block, no Protect")
     }
 
     /// A blank or absent school_cli.profile means the workspace's own profile → .jamfSchool.
@@ -136,8 +136,8 @@ final class CollectRouterTests: XCTestCase {
         XCTAssertFalse(result.runsProtect)
     }
 
-    /// School + protect.enabled present → School wins; runsProtect is false.
-    func test_detect_schoolTakesPrecedenceOverProtect() throws {
+    /// School + protect.enabled present → School collect, and Protect follows it (2.11).
+    func test_detect_schoolWithProtect_returnsSchoolRunsProtect() throws {
         let config = try ConfigLoader.loadFromString("""
         school_cli:
           enabled: true
@@ -148,7 +148,7 @@ final class CollectRouterTests: XCTestCase {
         """)
         let result = ProfileProductType.detect(from: config, profile: "ws")
         XCTAssertEqual(result.type, .jamfSchool)
-        XCTAssertFalse(result.runsProtect, "School profiles never augment with Protect")
+        XCTAssertTrue(result.runsProtect, "Protect augments a Jamf School workspace too")
     }
 
     // MARK: - CollectRouter.run dispatch
@@ -194,7 +194,7 @@ final class CollectRouterTests: XCTestCase {
 
         XCTAssertEqual(spy.schoolCallCount, 1, "School collect must be called exactly once")
         XCTAssertEqual(spy.proCallCount, 0, "Pro collect must not be called for a School profile")
-        XCTAssertEqual(spy.protectCallCount, 0, "Protect collect must not be called for a School profile")
+        XCTAssertEqual(spy.protectCallCount, 0, "Protect collect must not run without protect.enabled")
     }
 
     /// A Jamf Pro workspace holding a foreign school_cli.profile (written by earlier builds)
@@ -503,6 +503,55 @@ final class CollectRouterTests: XCTestCase {
         XCTAssertEqual([spy.proCallCount, spy.protectCallCount], [0, 0])
     }
 
+    // MARK: - Protect after a Jamf School collect (2.11)
+
+    func test_router_schoolWithProtect_callsSchoolThenProtect() async throws {
+        let (spy, _, thrown) = try await runProtectEnabledProfile(school: true)
+        XCTAssertNil(thrown)
+        XCTAssertEqual(
+            [spy.proCallCount, spy.schoolCallCount, spy.protectCallCount], [0, 1, 1])
+    }
+
+    /// A School run that reached Jamf and failed still runs Protect, then rethrows its error.
+    func test_router_schoolVerdictThrow_stillRunsProtectAndRethrows() async throws {
+        let verdicts: [ReportEngineError] = [
+            .authExpired(profile: "p", failedCount: 3),
+            .collectDead(profile: "p", failedCount: 3),
+        ]
+        for verdict in verdicts {
+            let (spy, _, thrown) = try await runProtectEnabledProfile(
+                proThrowing: verdict, school: true)
+            XCTAssertEqual(spy.protectCallCount, 1, "\(verdict)")
+            XCTAssertEqual(thrown?.localizedDescription, verdict.localizedDescription)
+        }
+    }
+
+    func test_router_schoolPreflightThrow_doesNotRunProtect() async throws {
+        let errors: [Error] = [
+            ReportEngineError.jamfCLINotFound, ReportEngineError.invalidProfile("x"),
+            CLIBridgeError.tickLockHeld,
+        ]
+        for error in errors {
+            let (spy, _, thrown) = try await runProtectEnabledProfile(
+                proThrowing: error, school: true)
+            XCTAssertEqual(spy.protectCallCount, 0, "\(error)")
+            XCTAssertEqual(thrown?.localizedDescription, error.localizedDescription)
+        }
+    }
+
+    func test_router_schoolWithBlankOrWrongProtectProfile_skipsWithOneWarn() async throws {
+        let (blank, blankLines, _) = try await runProtectEnabledProfile(
+            protectProfile: "", school: true)
+        XCTAssertEqual(blank.protectCallCount, 0)
+        XCTAssertEqual(blankLines.filter { $0.hasPrefix("[warn] Jamf Protect not collected") },
+                       ["[warn] Jamf Protect not collected: protect.profile is blank"])
+        let (wrong, wrongLines, _) = try await runProtectEnabledProfile(
+            resolved: protectLogin(.school), school: true)
+        XCTAssertEqual(wrong.protectCallCount, 0)
+        XCTAssertEqual(
+            wrongLines.filter { $0.hasPrefix("[warn] Jamf Protect not collected") }.count, 1)
+    }
+
     // MARK: - protect.profile must be a Protect login
 
     /// Answers for the Protect profile only; the workspace's own profile stays unresolved.
@@ -558,7 +607,8 @@ final class CollectRouterTests: XCTestCase {
         proThrowing proError: Error? = nil,
         protectThrowing protectError: Error? = nil,
         protectProfile: String = "my-protect",
-        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved? = { _ in nil }
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved? = { _ in nil },
+        school: Bool = false
     ) async throws -> (spy: RouterSpy, lines: [String], thrown: Error?) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("CollectRouterTests-\(UUID().uuidString)", isDirectory: true)
@@ -574,13 +624,16 @@ final class CollectRouterTests: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        let config = try ConfigLoader.loadFromString("""
+        let schoolBlock = school ? "school_cli:\n  enabled: true\n" : ""
+        let config = try ConfigLoader.loadFromString(schoolBlock + """
         protect:
           enabled: true
           profile: "\(protectProfile)"
         """)
+        // A School run throws through the School spy; `proThrowing` names the run's error.
         let spy = RouterSpy(
-            proDisposition: disposition, proError: proError, protectError: protectError)
+            proDisposition: disposition, proError: school ? nil : proError,
+            schoolError: school ? proError : nil, protectError: protectError)
         let lines = RouterLineCollector()
 
         var thrown: Error?
@@ -639,6 +692,7 @@ private struct RouterSpy {
     /// lets Protect follow.
     var proDisposition: ReportEngine.CollectDisposition = .collected
     var proError: Error?
+    var schoolError: Error?
     var protectError: Error?
 
     var proCallCount: Int { proCounter.value }
@@ -658,7 +712,11 @@ private struct RouterSpy {
 
     var schoolCollect: CollectRouter.SchoolCollect {
         let counter = schoolCounter
-        return { _, _, _, _, _ in counter.increment() }
+        let error = schoolError
+        return { _, _, _, _, _ in
+            counter.increment()
+            if let error { throw error }
+        }
     }
 
     var protectCollect: CollectRouter.ProtectCollect {

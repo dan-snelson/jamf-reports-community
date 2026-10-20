@@ -220,6 +220,15 @@ struct BackupsView: View {
     @ViewBuilder
     private var protectBanner: some View {
         if let syncedChoice { syncedStorageBanner(syncedChoice) }
+        if latestBackup?.proFailed == true {
+            InlineBanner(icon: "exclamationmark.triangle.fill", tone: .warn) {
+                Text("The latest backup's Jamf Pro part failed, so it holds only what Jamf "
+                     + "Protect exported. Run History has the error; Diff compares Jamf Pro "
+                     + "backups and skips this one.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.secondary)
+            }
+        }
         if let protect = latestBackup?.protect, !isSyncedStorageSkip(protect) {
             InlineBanner(
                 icon: protect.isIncomplete ? "exclamationmark.triangle.fill" : "shield",
@@ -303,7 +312,11 @@ struct BackupsView: View {
                             Text(backup.label.isEmpty ? backup.name : backup.label)
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(Theme.Text.primary)
-                            if backup.label.isEmpty {
+                            if backup.proFailed {
+                                Text("Jamf Pro part failed: Jamf Protect only")
+                                    .font(Theme.Fonts.mono(10.5))
+                                    .foregroundStyle(Theme.Colors.warn)
+                            } else if backup.label.isEmpty {
                                 Text("No label set")
                                     .font(Theme.Fonts.mono(10.5))
                                     .foregroundStyle(Theme.Text.tertiary(contrast).opacity(0.65))
@@ -762,7 +775,8 @@ struct BackupLibrary {
             sizeBytes: manifest.sizeBytes ?? stats.sizeBytes,
             fileCount: manifest.fileCount ?? stats.fileCount,
             url: dir,
-            protect: manifest.protect
+            protect: manifest.protect,
+            proFailed: manifest.pro?.state == .failed
         )
     }
 
@@ -778,7 +792,8 @@ struct BackupLibrary {
             created: parseDate(object["created_at"] as? String),
             fileCount: object["file_count"] as? Int,
             sizeBytes: object["size_bytes"] as? Int64,
-            protect: BackupProductResult.protect(inManifest: object)
+            protect: BackupProductResult.protect(inManifest: object),
+            pro: BackupProductResult.pro(inManifest: object)
         )
     }
 
@@ -815,6 +830,7 @@ struct BackupLibrary {
         var fileCount: Int?
         var sizeBytes: Int64?
         var protect: BackupProductResult?
+        var pro: BackupProductResult?
     }
 }
 

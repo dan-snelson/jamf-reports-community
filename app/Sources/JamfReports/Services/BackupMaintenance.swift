@@ -94,7 +94,9 @@ enum BackupMaintenance {
     ///    silently stop pruning every existing single-Mac install.
     ///
     /// A fourth rule (2.11): a backup whose manifest records a partial or failed Jamf
-    /// Protect part is left out of the candidates altogether.
+    /// Protect part is left out of the candidates until a newer candidate's Protect part is
+    /// complete; from then on it is counted and pruned like any other. A backup whose Jamf
+    /// Pro part failed is held by the same rule and then removed without being counted.
     static func pruneScheduledBackups(
         profile: String,
         keep: Int,
@@ -131,20 +133,6 @@ enum BackupMaintenance {
             candidates = mine
         }
 
-        // A backup whose Protect part is partial or failed is evidence of what went wrong and
-        // the only copy of what did land, so retention neither counts nor removes it.
-        let incompleteProtect = candidates.filter {
-            BackupProductResult.protect(inBackup: $0)?.keepsBackupFromPruning == true
-        }
-        if !incompleteProtect.isEmpty {
-            candidates.removeAll { incompleteProtect.contains($0) }
-            onLine?(.init(
-                timestamp: Date(), level: .info,
-                text: "[info] keeping \(incompleteProtect.count) scheduled backup(s) whose "
-                    + "Jamf Protect part is incomplete; they are never pruned automatically."
-            ))
-        }
-
         let stamped = candidates.compactMap { url -> (url: URL, key: (Date, Int))? in
             guard let parsed = CloudStorage.backupDirectoryTimestamp(
                 name: url.lastPathComponent
@@ -163,14 +151,41 @@ enum BackupMaintenance {
             return
         }
 
+        // A backup whose Protect part is partial or failed is the only copy of what did land,
+        // so retention neither counts nor removes it until a newer Protect part completes. One
+        // whose Jamf Pro part failed holds only Protect objects: held the same way, then
+        // removed without counting, so a run of Jamf Pro failures never displaces the newest
+        // Jamf Pro backups.
+        var newerProtectComplete = false
+        var held = 0
+        var superseded: [URL] = []
         let scheduled = stamped
             .sorted { lhs, rhs in
                 lhs.key.0 == rhs.key.0 ? lhs.key.1 > rhs.key.1 : lhs.key.0 > rhs.key.0
             }
             .map(\.url)
+            .filter { url in
+                let protect = BackupProductResult.protect(inBackup: url)
+                let proFailed = BackupProductResult.pro(inBackup: url)?.state == .failed
+                defer { if protect?.isComplete == true { newerProtectComplete = true } }
+                if newerProtectComplete {
+                    if proFailed { superseded.append(url) }
+                    return !proFailed
+                }
+                guard protect?.keepsBackupFromPruning == true || proFailed else { return true }
+                held += 1
+                return false
+            }
+        if held > 0 {
+            onLine?(.init(
+                timestamp: Date(), level: .info,
+                text: "[info] keeping \(held) scheduled backup(s) with an incomplete Jamf "
+                    + "Protect or failed Jamf Pro part until a later backup's Jamf Protect part "
+                    + "completes."
+            ))
+        }
 
-        guard scheduled.count > keep else { return }
-        for url in scheduled.dropFirst(keep) {
+        for url in scheduled.dropFirst(keep) + superseded {
             do {
                 try fm.removeItem(at: url)
                 onLine?(.init(

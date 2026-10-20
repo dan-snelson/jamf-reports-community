@@ -340,6 +340,8 @@ struct BackupRecord: Identifiable, Sendable, Hashable {
     let url: URL
     /// The Jamf Protect part, when the backup's manifest records one.
     var protect: BackupProductResult?
+    /// The Jamf Pro part failed, so the folder holds only what Jamf Protect exported.
+    var proFailed = false
 
     var createdLabel: String { FileDisplay.date(created) }
     var sizeLabel: String { FileDisplay.size(sizeBytes) }
@@ -352,7 +354,7 @@ struct BackupRecord: Identifiable, Sendable, Hashable {
 
     /// A diff compares the contents of two backups, so both need files and they must differ.
     static func canDiff(_ backup: BackupRecord, against other: BackupRecord?) -> Bool {
-        guard let other else { return false }
+        guard let other, !backup.proFailed, !other.proFailed else { return false }
         return backup.id != other.id && !backup.isEmpty && !other.isEmpty
     }
 
@@ -379,7 +381,8 @@ struct BackupRecord: Identifiable, Sendable, Hashable {
     /// VoiceOver label for a backup row: display name, file count, size, date.
     var accessibilityLabel: String {
         let displayName = label.isEmpty ? name : label
-        return "\(displayName), \(fileCount) files, \(sizeLabel), created \(createdLabel)"
+        let failed = proFailed ? ", Jamf Pro part failed" : ""
+        return "\(displayName)\(failed), \(fileCount) files, \(sizeLabel), created \(createdLabel)"
     }
 
     /// VoiceOver summary describing the backup's content and purpose.

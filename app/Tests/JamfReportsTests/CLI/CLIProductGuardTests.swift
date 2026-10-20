@@ -133,8 +133,9 @@ final class CLIProductGuardTests: XCTestCase {
                 name: "x", profile: school, allProfiles: all, exclude: nil,
                 mode: mode, cadence: "Daily 06:20", tiers: nil, disabled: false)
         }
+        // The same rule and words as the `backup` command.
         XCTAssertThrowsError(try add("backup")) {
-            XCTAssertTrue("\($0)".contains(CollectRouter.schoolBackupReason(profile: school)), "\($0)")
+            XCTAssertEqual("\($0)", Backup.refusal(profile: school))
         }
         // School collects and generates; an all-profiles schedule skips per profile at run time.
         XCTAssertNoThrow(try add("snapshot-only"))

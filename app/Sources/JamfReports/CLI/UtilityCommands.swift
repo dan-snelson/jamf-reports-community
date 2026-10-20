@@ -2,12 +2,14 @@ import ArgumentParser
 import Foundation
 
 struct Backup: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Back up a Jamf Pro profile's config objects, and Jamf Protect too when connected. "
-            + "Refuses a Jamf School or other-product profile.")
+    static let configuration = CommandConfiguration(
+        abstract: "Back up a Jamf Pro profile's config objects, and Jamf Protect too when "
+            + "connected. Refuses a Jamf School or other-product profile.")
     @Option(help: "Workspace profile slug.") var profile: String
 
     static func refusal(profile: String) -> String? {
-        CollectRouter.backupRefusal(profile: profile, config: collectRoutingConfig(profile: profile))
+        CollectRouter.backupRefusal(
+            profile: profile, config: collectRoutingConfig(profile: profile))
     }
 
     func run() async throws {
@@ -200,7 +202,8 @@ struct DiagnosticBundleCommand: AsyncParsableCommand {
 
 struct Device: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Look up one device by serial number or id. Refuses a profile of another product.")
+        abstract: "Look up one device by serial number or id. "
+            + "Refuses a profile of another product.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Device serial number or id.") var id: String
 

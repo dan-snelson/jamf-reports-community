@@ -67,14 +67,12 @@ struct Schedules: AsyncParsableCommand {
             if !allProfiles, runMode != .jamfCLIOnly {
                 let config = collectRoutingConfig(profile: profile)
                 // A School workspace collects and generates, but has nothing for `pro backup`.
-                if runMode == .backup,
-                   ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
-                    throw Invalid(description: CollectRouter.schoolBackupReason(profile: profile)
-                        + "; there is nothing to back up")
-                }
-                if let refusal = CollectRouter.proRunRefusal(
-                    profile: profile, operation: "A \(runMode.rawValue) schedule", config: config
-                ) { throw Invalid(description: refusal) }
+                let refusal = runMode == .backup
+                    ? CollectRouter.backupRefusal(profile: profile, config: config)
+                    : CollectRouter.proRunRefusal(
+                        profile: profile, operation: "A \(runMode.rawValue) schedule",
+                        config: config)
+                if let refusal { throw Invalid(description: refusal) }
             }
             let tierSet: Set<CollectionTier>? = tiers.map(CLIRun.parseTiers)
             let excluded = exclude?.split(separator: ",")

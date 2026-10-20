@@ -3486,8 +3486,8 @@ struct ReportEngine: Sendable {
         }
         guard let summariesDir = try? workspacePaths.summariesDir(for: profile) else {
             if landedKinds.contains(SchoolFleetService.devicesKind) {
-                onLine(.init(timestamp: Date(), level: .warn,
-                    text: "\(summaryNotWrittenMarker) the summaries directory could not be resolved"))
+                onLine(.init(timestamp: Date(), level: .warn, text: "\(summaryNotWrittenMarker) "
+                    + "the summaries directory could not be resolved"))
             }
             return
         }

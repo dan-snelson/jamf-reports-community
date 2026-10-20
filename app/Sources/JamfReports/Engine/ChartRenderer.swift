@@ -30,18 +30,20 @@ enum ChartPalette {
         CGColor(red: 0.204, green: 0.596, blue: 0.859, alpha: 1), // #3498DB
     ]
 
-    /// Compliance band colors for the mSCP/STIG donut and band trend.
+    /// Compliance band colors for the mSCP/STIG donut and band trend, from the in-app
+    /// band colors so a band has one color everywhere.
     /// Order: Pass, Low, Med-Low, Medium, High (5 entries — no No-Data here).
-    static let complianceBandColors: [CGColor] = [
-        CGColor(red: 0.267, green: 0.447, blue: 0.769, alpha: 1), // Pass  — blue
-        CGColor(red: 0.180, green: 0.620, blue: 0.341, alpha: 1), // Low   — green
-        CGColor(red: 1.000, green: 0.792, blue: 0.188, alpha: 1), // Med-Low — gold
-        CGColor(red: 0.941, green: 0.486, blue: 0.129, alpha: 1), // Medium — orange
-        CGColor(red: 0.753, green: 0.224, blue: 0.169, alpha: 1), // High  — red
-    ]
+    static let complianceBandColors: [CGColor] =
+        [ComplianceBandingService.Band.pass, .low, .medLow, .medium, .high]
+            .map { cgColor(hex: $0.colorHex) }
+
+    static func cgColor(hex: UInt32) -> CGColor {
+        CGColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
 
     /// Grey for "No Data" slices in the compliance donut.
-    static let noDataColor: CGColor = CGColor(red: 0.557, green: 0.557, blue: 0.576, alpha: 1)
+    static let noDataColor: CGColor = cgColor(hex: ComplianceBandingService.Band.noData.colorHex)
 
     /// Compliance band colors extended with No-Data grey (6 entries for donut use).
     /// Order: Pass, Low, Med-Low, Medium, High, No-Data.
@@ -624,25 +626,34 @@ enum ChartRenderer {
         plotRect: CGRect,
         size: CGSize
     ) {
-        let itemHeight: CGFloat = 16
         let swatchSize: CGFloat = 10
-        let itemSpacing: CGFloat = 120
-        let legendTop = plotRect.minY - 30
+        let labelGap: CGFloat = 4
+        let itemGap: CGFloat = 16
         let labelColor = CGColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1)
 
         var x = plotRect.minX
+        var y = plotRect.minY - 30
         for (label, color) in series {
-            if x + itemSpacing > plotRect.maxX {
+            let pitch = swatchSize + labelGap + textWidth(label, fontSize: labelFontSize) + itemGap
+            if x > plotRect.minX, x + pitch - itemGap > plotRect.maxX {
                 x = plotRect.minX
+                y -= legendItemHeight
             }
             ctx.setFillColor(color)
-            ctx.fill(CGRect(x: x, y: legendTop - swatchSize, width: swatchSize, height: swatchSize))
-            drawText(ctx: ctx, text: String(label.prefix(14)),
-                     at: CGPoint(x: x + swatchSize + 4, y: legendTop - swatchSize/2),
+            ctx.fill(CGRect(x: x, y: y - swatchSize, width: swatchSize, height: swatchSize))
+            drawText(ctx: ctx, text: label,
+                     at: CGPoint(x: x + swatchSize + labelGap, y: y - swatchSize / 2),
                      fontSize: labelFontSize, color: labelColor, alignment: .left)
-            x += itemSpacing
+            x += pitch
         }
-        _ = itemHeight
+    }
+
+    static func textWidth(_ text: String, fontSize: CGFloat) -> CGFloat {
+        let font = CTFontCreateWithName("Helvetica" as CFString, fontSize, nil)
+        let attrs: [CFString: Any] = [kCTFontAttributeName: font]
+        guard let str = CFAttributedStringCreate(nil, text as CFString, attrs as CFDictionary)
+        else { return 0 }
+        return CTLineGetBoundsWithOptions(CTLineCreateWithAttributedString(str), []).width
     }
 
     private static func drawTitle(ctx: CGContext, title: String, size: CGSize) {

@@ -107,6 +107,22 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertTrue(AttentionLog.openItems(profile: profile).isEmpty)
     }
 
+    func testAPeerWithAClockAheadCannotHideThisMacsLaterCommits() throws {
+        // A peer stamped its set an hour ahead of this Mac's clock.
+        let peer = #"{"code":"schoolZeroDevices","message":"0","count":1,"profile":"attn","#
+            + #""first_seen":"2026-10-20T08:00:00Z","last_seen":"2026-10-20T08:00:00Z"}"#
+        try Data((#"{"label":"peer","attention_at":\#(at(3600).timeIntervalSince1970),"#
+            + #""attention":[\#(peer)]}"#).utf8)
+            .write(to: try automation().appendingPathComponent("peer_status.json"))
+
+        try run(into: "a", now: at(0)) { AttentionLog.raise(.webhookRejected, "HTTP 404") }
+        XCTAssertEqual(Set(AttentionLog.openItems(profile: profile).map(\.code)),
+                       [.schoolZeroDevices, .webhookRejected], "the raise is not lost")
+        try run(into: "b", now: at(60)) { AttentionLog.clear(.webhookRejected) }
+        XCTAssertEqual(AttentionLog.openItems(profile: profile).map(\.code), [.schoolZeroDevices],
+                       "nor is the clear")
+    }
+
     func testARunThatCheckedNothingChangesNothing() throws {
         try run(into: "a", now: at(0)) { AttentionLog.raise(.webhookRejected, "HTTP 404") }
         try run(into: "b", now: at(60)) {}

@@ -78,10 +78,13 @@ final class AttentionLog: Sendable {
         guard let target = record?.statusURL ?? (usesAppRecord
             ? folder.appendingPathComponent("\(WorkspaceStore.appCollectRunLabel)_status.json")
             : nil) else { return }
+        let newest = Self.newestRecord(inFolder: folder)
         let merged = AttentionItem.merging(
-            Self.openItems(inFolder: folder), changes, profile: profile,
-            runLog: record?.runLog, now: now)
-        Self.write(merged, at: now, into: target)
+            newest?.items ?? [], changes, profile: profile, runLog: record?.runLog, now: now)
+        // Stamped after the set it merged, so a peer whose clock runs ahead cannot make this
+        // commit read as older and lose it.
+        let at = max(now.timeIntervalSince1970, (newest?.at ?? 0) + 0.001)
+        Self.write(merged, at: at, into: target)
     }
 
     // MARK: - Reading
@@ -94,11 +97,17 @@ final class AttentionLog: Sendable {
     }
 
     static func openItems(inFolder folder: URL) -> [AttentionItem] {
+        newestRecord(inFolder: folder)?.items ?? []
+    }
+
+    private static func newestRecord(
+        inFolder folder: URL
+    ) -> (at: Double, items: [AttentionItem])? {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
         return files.filter { $0.lastPathComponent.hasSuffix("_status.json") }
             .compactMap(stored(in:))
-            .max { $0.at < $1.at }?.items ?? []
+            .max { $0.at < $1.at }
     }
 
     /// The `attention` keys of the status file at `url`, for a rewrite to carry over.
@@ -142,7 +151,7 @@ final class AttentionLog: Sendable {
 
     // MARK: - Writing
 
-    private static func write(_ items: [AttentionItem], at now: Date, into target: URL) {
+    private static func write(_ items: [AttentionItem], at: Double, into target: URL) {
         var payload: [String: Any] = [
             "label": String(target.lastPathComponent.dropLast("_status.json".count)),
         ]
@@ -156,7 +165,7 @@ final class AttentionLog: Sendable {
         do {
             payload[attentionKey] = try JSONSerialization.jsonObject(
                 with: encoder.encode(items))
-            payload[attentionAtKey] = now.timeIntervalSince1970
+            payload[attentionAtKey] = at
             try ScheduledRunRecorder.replaceStatusFile(at: target, with: payload)
         } catch {
             AppLogger.schedule.error(

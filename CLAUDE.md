@@ -1066,7 +1066,8 @@ refused before that writes nothing), `recordingCollect`, `CollectRouter.run`, `C
 run. A commit merges the run's changes into the workspace's open set (the `attention` array of the
 `automation/*_status.json` with the newest `attention_at`): a code seen again keeps `first_seen`
 and counts up, a cleared one is removed; the result goes into the run's status file, else the app
-record (`appCollectRunLabel`'s). It never creates `automation/`. Items decode leniently: a file
+record (`appCollectRunLabel`'s), stamped `max(now, newest attention_at + 1 ms)` so a peer whose
+clock runs ahead cannot make this Mac's later commit read as older. It never creates `automation/`. Items decode leniently: a file
 without the keys is no record, an unknown code is skipped. The banner entry ranks below failing
 collects and the Doctor-driven entries, above stale data ("2 things need attention: …"); its
 button follows the newest item's code (`AttentionCode.destination`: Automation for the webhook,

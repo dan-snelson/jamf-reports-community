@@ -97,6 +97,8 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- A webhook that answers with an error now shows in the log as an error with the HTTP status,
+  and the failure-card and heartbeat "notification failed" lines say why. (#284)
 - A backup of a workspace whose config.yaml does not decode now says Jamf Protect was not backed
   up, with the reason, instead of leaving Protect out silently. (#284)
 - A Jamf Protect backup that exits cleanly but exported nothing now reads as Partial, not as

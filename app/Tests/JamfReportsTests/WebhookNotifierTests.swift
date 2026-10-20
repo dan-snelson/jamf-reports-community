@@ -532,4 +532,23 @@ final class WebhookNotifierTests: XCTestCase {
         XCTAssertTrue(minimal.contains { $0.value == "background item disabled" })
         XCTAssertFalse(minimal.contains { $0.value.contains("missed their run") })
     }
+
+    func testANon2xxAnswerFailsTheSendAndReportsTheStatusWithoutTheURL() async {
+        WebhookCapture.start()
+        defer { WebhookCapture.stop() }
+        WebhookCapture.respond(with: 404)
+        let config = NotifyConfig(
+            enabled: true, provider: "slack", url: WebhookCapture.webhookURL)
+        for send in [WebhookNotifier.send, WebhookNotifier.sendFailed, WebhookNotifier.sendAlert] {
+            let failure = WebhookNotifier.DeliveryFailure()
+            let delivered = await send(config, "t", facts, failure)
+            XCTAssertFalse(delivered)
+            XCTAssertEqual(failure.reason, "HTTP 404 from the slack webhook")
+        }
+        WebhookCapture.respond(with: 200)
+        let ok = WebhookNotifier.DeliveryFailure()
+        let delivered = await WebhookNotifier.send(config: config, title: "t", facts: facts, failure: ok)
+        XCTAssertTrue(delivered)
+        XCTAssertNil(ok.reason)
+    }
 }

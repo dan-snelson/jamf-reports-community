@@ -182,17 +182,20 @@ enum ScheduledRunSignals {
         let folder = stateRoot.appendingPathComponent(
             ProfileName.labelComponent(scheduleKey), isDirectory: true)
         let day = SummaryJSONParser.dateFormatter.string(from: now)
+        let failure = WebhookNotifier.DeliveryFailure()
         let outcome = await DayMarker(name: "failure-card").sendOnce(
             day: "\(day)-\(failureFingerprint(errorDescription))", in: [folder], now: now,
             onLine: { fputs($0 + "\n", stderr) }
         ) {
             await WebhookNotifier.sendFailed(
-                config: notify, title: "Jamf Report — \(profile)", facts: facts)
+                config: notify, title: "Jamf Report — \(profile)", facts: facts, failure: failure)
         }
         if outcome == .failed {
-            let message = "[warn] failure webhook notification failed for '\(profile)'"
+            let message = "[warn] failure webhook notification failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
+            AppLogger.webhook.error("\(message, privacy: .public)")
         }
     }
 
@@ -230,15 +233,19 @@ enum ScheduledRunSignals {
             let facts = heartbeatFacts(
                 detail: target.notify.resolvedDetail, profile: target.profile,
                 newestSummaryDay: SummaryJSONParser.newestSummaryDay(profile: target.profile))
+            let failure = WebhookNotifier.DeliveryFailure()
             let outcome = await marker.sendOnce(
                 day: day, in: [folder], now: now, onLine: { fputs($0 + "\n", stderr) }
             ) {
                 await WebhookNotifier.send(
                     config: target.notify, title: "Jamf Reports heartbeat — \(target.profile)",
-                    facts: facts)
+                    facts: facts, failure: failure)
             }
             if outcome == .failed {
-                fputs("[warn] heartbeat notification failed for '\(target.profile)'\n", stderr)
+                let message = "[warn] heartbeat notification failed for '\(target.profile)': "
+                    + (failure.reason ?? "unknown")
+                fputs(message + "\n", stderr)
+                AppLogger.webhook.error("\(message, privacy: .public)")
             }
         }
     }

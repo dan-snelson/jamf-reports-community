@@ -17,11 +17,6 @@ struct EmptyStateView: View {
         [title, message, commands.joined(separator: ", ")].filter { !$0.isEmpty }.joined(separator: ". ")
     }
 
-    /// Internal accessibility hint text for testing
-    internal var accessibilityHintText: String {
-        primaryAction != nil ? "Activate to \(primaryAction?.label ?? "")" : ""
-    }
-
     init(
         icon: Image? = nil,
         title: String,
@@ -53,34 +48,39 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let icon = icon {
-                HStack {
-                    icon
-                        .font(.system(size: 28))
-                        .foregroundStyle(Theme.Colors.fgMuted)
-                        .accessibilityHidden(true)
-                    Spacer()
-                }
-            }
-
-            Text(title)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(Theme.Colors.fg)
-
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(Theme.Text.tertiary(contrast))
-
-            if !commands.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(commands, id: \.self) { command in
-                        Text(command)
-                            .font(.caption.monospaced())
+            // Only the text is one element; the button stays reachable on its own.
+            VStack(alignment: .leading, spacing: 8) {
+                if let icon = icon {
+                    HStack {
+                        icon
+                            .font(.system(size: 28))
                             .foregroundStyle(Theme.Colors.fgMuted)
+                            .accessibilityHidden(true)
+                        Spacer()
                     }
                 }
-                .padding(.top, 4)
+
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.fg)
+
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+
+                if !commands.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(commands, id: \.self) { command in
+                            Text(command)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(Theme.Colors.fgMuted)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabelText)
 
             if let primaryAction = primaryAction {
                 HStack {
@@ -95,9 +95,6 @@ struct EmptyStateView: View {
                 .padding(.top, 4)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabelText)
-        .accessibilityHint(accessibilityHintText)
     }
 }
 

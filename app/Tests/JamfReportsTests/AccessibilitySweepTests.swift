@@ -212,20 +212,4 @@ final class AccessibilitySweepTests: XCTestCase {
                          "Accessibility label should include: \(component)")
         }
     }
-
-    /// EmptyStateView accessibility hint should use "Activate to" phrasing on macOS (addresses issue #101)
-    func testEmptyStateViewUsesProperMacOSAccessibilityHint() {
-        let emptyState = EmptyStateView(
-            title: "No reports yet",
-            message: "Generate your first report",
-            primaryAction: EmptyStateAction(label: "Generate Report") { }
-        )
-
-        // Should use "Activate to" not "Double-tap to" on macOS
-        let hint = emptyState.accessibilityHintText
-        XCTAssertTrue(hint.contains("Activate to"),
-                     "Accessibility hint should use 'Activate to' for macOS")
-        XCTAssertFalse(hint.contains("Double-tap"),
-                      "Accessibility hint should not use iOS 'Double-tap' phrasing on macOS")
-    }
 }

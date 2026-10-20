@@ -68,6 +68,9 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- Jamf Reports now needs jamf-cli 1.29.0 or later to collect or back up, on every run, not
+  only for full support. An older jamf-cli stops the run with a message saying to update it;
+  Settings says the same. (#226)
 - A scheduled run that fails the same way again posts its failure card once a day per schedule and
   profile, not on every hourly retry; a different failure still posts, and a card that could not
   be sent is tried again. (#284)

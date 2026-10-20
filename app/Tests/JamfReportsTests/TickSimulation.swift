@@ -64,12 +64,11 @@ final class TickSimulation {
                 continue
             }
             let blockedSince = TickLock.takeBlockedSince(url: blockedURL)
-            let wasOff = TickScheduler.wasOff(
-                lastTick: state.lastTick, firstBlocked: blockedSince?.first,
-                latestBlocked: blockedSince?.latest, now: now)
             let due = TickScheduler.due(
                 schedules: [schedule], state: state, runNowLabels: markers, now: now,
-                nonCatchUpAnchor: blockedSince?.first, wasOff: wasOff,
+                nonCatchUpAnchor: TickScheduler.nonCatchUpAnchor(refusals: blockedSince, now: now),
+                wasOff: TickScheduler.wasOff(
+                    lastTick: state.lastTick, refusals: blockedSince, now: now),
                 summaryMissingToday: { [summaryMissing] _ in summaryMissing(now) })
             state.lastTick = now
             _ = await TickLoop.runDue(

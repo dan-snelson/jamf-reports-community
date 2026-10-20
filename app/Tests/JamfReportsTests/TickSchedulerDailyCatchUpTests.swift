@@ -106,6 +106,40 @@ final class TickSchedulerDailyCatchUpTests: XCTestCase {
         XCTAssertEqual(runs, [run(date(9, 8, 8, 0), .catchUp)])
     }
 
+    /// A tick run holds the lock through a night's sleep: it turns away the 23:00 wake and,
+    /// once the Mac wakes and the run carries on, the 08:00 and 08:05 wakes. The night between
+    /// two refusals is an off gap, so Tuesday runs when the lock frees; its 18:00 is off.
+    func testANightBetweenTwoRefusalsIsAnOffGap() async {
+        let s = sim(started: date(9, 7, 18, 0), lastTick: date(9, 7, 22, 55))
+        s.blocked = [date(9, 7, 23, 0)..<date(9, 8, 8, 10)]
+        let runs = await s.run(
+            wakes: [date(9, 7, 23, 0)] + wakes(date(9, 8, 8, 0), date(9, 8, 17, 5)))
+        XCTAssertEqual(runs, [run(date(9, 8, 8, 10), .catchUp)])
+    }
+
+    /// A refusal at 22:00 survives the night. A backup's 07:00 fire is measured from the first
+    /// refusal after the night, not from 22:00: it runs at 07:40 behind morning refusals that
+    /// began 06:55, but not at 08:30 behind ones that began 08:00, nor at a 09:00 first wake.
+    func testAnEveningRefusalDoesNotStretchAMorningBackupsWindow() async {
+        func runs(_ morning: [Date], blockedUntil: Date?) async -> [TickSimRun] {
+            let s = sim("Daily 07:00", mode: .backup, started: date(9, 7, 7, 0),
+                        lastTick: date(9, 7, 21, 55))
+            s.blocked = [date(9, 7, 22, 0)..<date(9, 7, 22, 5)]
+            if let start = morning.first, let blockedUntil {
+                s.blocked.append(start..<blockedUntil)
+            }
+            return await s.run(wakes: [date(9, 7, 22, 0)] + morning)
+        }
+        let late = await runs(wakes(date(9, 8, 9, 0), date(9, 8, 17, 5)), blockedUntil: nil)
+        XCTAssertEqual(late, [])
+        let behind = await runs(
+            wakes(date(9, 8, 8, 0), date(9, 8, 17, 5)), blockedUntil: date(9, 8, 8, 30))
+        XCTAssertEqual(behind, [])
+        let inWindow = await runs(
+            wakes(date(9, 8, 6, 55), date(9, 8, 17, 5)), blockedUntil: date(9, 8, 7, 40))
+        XCTAssertEqual(inWindow, [run(date(9, 8, 7, 40), .fire)])
+    }
+
     // MARK: - 6-7, 11: Run now
 
     /// 6. Off since Monday 17:00; a Run now at 09:00 is Tuesday's first wake. The catch-up it
@@ -264,10 +298,11 @@ final class TickSchedulerDailyCatchUpTests: XCTestCase {
     func testTheOffGapIsMeasuredToTheFirstWakeSinceTheLastTick() {
         let last = date(9, 8, 8, 0)
         func off(
-            _ lastTick: Date?, _ first: Date?, _ latest: Date?, _ now: Date
+            _ lastTick: Date?, _ first: Date?, _ latest: Date?, _ now: Date,
+            afterGap: Date? = nil
         ) -> Bool {
-            TickScheduler.wasOff(
-                lastTick: lastTick, firstBlocked: first, latestBlocked: latest, now: now)
+            let refusals = first.map { ($0, latest ?? $0, afterGap) }
+            return TickScheduler.wasOff(lastTick: lastTick, refusals: refusals, now: now)
         }
         XCTAssertFalse(off(nil, nil, nil, date(9, 8, 9, 0)))
         XCTAssertFalse(off(last, nil, nil, date(9, 8, 8, 15)), "15 minutes is no gap")
@@ -278,6 +313,10 @@ final class TickSchedulerDailyCatchUpTests: XCTestCase {
                       "nothing woke between 08:05 and 09:00")
         XCTAssertTrue(off(nil, date(9, 8, 8, 5), date(9, 8, 8, 5), date(9, 8, 9, 0)),
                       "a gap after a refusal needs no lastTick")
+        XCTAssertTrue(off(last, date(9, 8, 8, 5), date(9, 8, 8, 55), date(9, 8, 9, 0),
+                          afterGap: date(9, 8, 8, 40)), "a gap between two refusals")
+        XCTAssertFalse(off(last, date(9, 8, 8, 5), date(9, 8, 8, 55), date(9, 8, 9, 0),
+                           afterGap: date(9, 8, 9, 30)), "a gap stamped ahead reads as absent")
         XCTAssertFalse(off(date(9, 8, 9, 1), nil, nil, date(9, 8, 9, 0)),
                        "a lastTick ahead of now is no gap")
         XCTAssertFalse(off(last, date(9, 8, 9, 1), date(9, 8, 9, 1), date(9, 8, 8, 10)),
@@ -295,10 +334,24 @@ final class TickSchedulerDailyCatchUpTests: XCTestCase {
         XCTAssertEqual(blocked.first, date(9, 8, 0, 0))
         XCTAssertEqual(blocked.latest, date(9, 8, 0, 35))
         XCTAssertNil(TickLock.takeBlockedSince(url: url), "taking the stamp clears it")
-        // An earlier build's one-line stamp is both.
+        XCTAssertEqual(blocked.afterGap, date(9, 8, 0, 35), "00:05 to 00:35 is a gap")
+        for minute in [0, 5, 10] {
+            TickLock.noteBlocked(url: url, now: date(9, 8, 0, minute))
+        }
+        XCTAssertNil(try XCTUnwrap(TickLock.takeBlockedSince(url: url)).afterGap,
+                     "five-minute steps are no gap")
+        for (h, m) in [(0, 0), (0, 5), (0, 30), (0, 35), (1, 30)] {
+            TickLock.noteBlocked(url: url, now: date(9, 8, h, m))
+        }
+        let gapped = try XCTUnwrap(TickLock.takeBlockedSince(url: url))
+        XCTAssertEqual(gapped.first, date(9, 8, 0, 0))
+        XCTAssertEqual(gapped.latest, date(9, 8, 1, 30))
+        XCTAssertEqual(gapped.afterGap, date(9, 8, 1, 30), "the first refusal after the last gap")
+        // An earlier build's one-line stamp is both, with no gap.
         try Data(ISO8601DateFormatter().string(from: date(9, 8, 0, 0)).utf8).write(to: url)
         let old = try XCTUnwrap(TickLock.takeBlockedSince(url: url))
         XCTAssertEqual(old.latest, date(9, 8, 0, 0))
+        XCTAssertNil(old.afterGap)
     }
 
     // MARK: - State file

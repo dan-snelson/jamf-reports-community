@@ -134,8 +134,9 @@ enum TickScheduler {
     ///   produced it keeps retrying hourly until local midnight (a laptop off the VPN until
     ///   14:00 still gets its day). The default says it exists, so retries stop after the
     ///   backoffs.
-    /// - Parameter nonCatchUpAnchor: When a wake was turned away by the lock,
-    ///   the time of the FIRST such refusal. The non-catch-up window is measured
+    /// - Parameter nonCatchUpAnchor: When a wake was turned away by the lock, the time of the
+    ///   FIRST such refusal since the Mac was last off (`nonCatchUpAnchor(refusals:now:)`).
+    ///   The non-catch-up window is measured
     ///   from the earlier of it and `now`, so a 40-minute collect that blocks
     ///   three wakes cannot swallow the 07:00 backup that came due while it ran.
     ///   `nil` (the default) measures from `now`, the plain uncontended case.
@@ -202,19 +203,27 @@ enum TickScheduler {
     }
 
     /// The Mac was off or asleep since the previous wake that took the lock: the first wake
-    /// since `lastTick`, a turned-away one included, came more than `offGap` after it, or this
-    /// wake came more than `offGap` after the latest turned-away one (a lid closed during a run).
-    /// A stamp ahead of now reads as absent; no `lastTick` (a file from before it) is no gap
+    /// since `lastTick`, a turned-away one included, came more than `offGap` after it; two
+    /// turned-away wakes were that far apart (a run held the lock through a night's sleep); or
+    /// this wake came that long after the latest turned-away one (a lid closed during a run). A
+    /// stamp ahead of now reads as absent; no `lastTick` (a file from before it) is no gap
     /// before the refusals.
-    static func wasOff(
-        lastTick: Date?, firstBlocked: Date?, latestBlocked: Date?, now: Date
-    ) -> Bool {
+    static func wasOff(lastTick: Date?, refusals: TickLock.Refusals?, now: Date) -> Bool {
         func present(_ stamp: Date?) -> Date? { stamp.flatMap { $0 <= now ? $0 : nil } }
-        if let latest = present(latestBlocked), now.timeIntervalSince(latest) > offGap {
+        if present(refusals?.afterGap) != nil { return true }
+        if let latest = present(refusals?.latest), now.timeIntervalSince(latest) > offGap {
             return true
         }
         guard let lastTick = present(lastTick) else { return false }
-        return (present(firstBlocked) ?? now).timeIntervalSince(lastTick) > offGap
+        return (present(refusals?.first) ?? now).timeIntervalSince(lastTick) > offGap
+    }
+
+    /// Where the non-catch-up window is measured from: the first refusal since the Mac was last
+    /// off, so a refusal from the evening before cannot let a morning backup run late. Nil (this
+    /// wake) when no wake was refused since the last gap.
+    static func nonCatchUpAnchor(refusals: TickLock.Refusals?, now: Date) -> Date? {
+        guard let refusals, now.timeIntervalSince(refusals.latest) <= offGap else { return nil }
+        return refusals.afterGap ?? refusals.first
     }
 
     /// `stamp`, or `.distantPast` for none or one beyond clock skew in the future (a clock set
@@ -564,20 +573,32 @@ struct TickLock: Sendable {
         return now.timeIntervalSince(modified) > Self.staleAfter
     }
 
-    /// Record that a wake was turned away, as two lines: the FIRST refusal, which the
-    /// non-catch-up window and the off gap are measured from and a later wake never overwrites,
-    /// then the latest. Rewritten whole, atomically.
+    /// The wakes the lock turned away since the last wake that took it: the first, the latest,
+    /// and the first after a gap of more than `TickScheduler.offGap` between two of them.
+    typealias Refusals = (first: Date, latest: Date, afterGap: Date?)
+
+    /// Record that a wake was turned away. The stamp holds `Refusals` one per line (the third
+    /// only once a gap happened) and is rewritten whole, atomically; the FIRST refusal is never
+    /// overwritten.
     static func noteBlocked(url: URL = defaultBlockedURL, now: Date = Date()) {
-        let latest = ISO8601DateFormatter().string(from: now)
-        let first = (try? String(contentsOf: url, encoding: .utf8))?
-            .split(whereSeparator: \.isNewline).first.map(String.init) ?? latest
-        try? Data("\(first)\n\(latest)\n".utf8).write(to: url, options: .atomic)
+        let formatter = ISO8601DateFormatter()
+        let stamp = formatter.string(from: now)
+        let lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            .split(whereSeparator: \.isNewline).map(String.init)
+        var afterGap = lines.count > 2 ? lines[2] : nil
+        if let latest = (lines.count > 1 ? lines[1] : lines.first).flatMap(formatter.date),
+           now.timeIntervalSince(latest) > TickScheduler.offGap {
+            afterGap = stamp
+        }
+        let text = ([lines.first ?? stamp, stamp] + [afterGap].compactMap { $0 })
+            .joined(separator: "\n")
+        try? Data("\(text)\n".utf8).write(to: url, options: .atomic)
     }
 
-    /// Read and clear the stamp: the first and the latest refused wake, nil when no wake was
-    /// blocked since the last wake that took the lock. A one-line stamp (an earlier build) is
-    /// both.
-    static func takeBlockedSince(url: URL = defaultBlockedURL) -> (first: Date, latest: Date)? {
+    /// Read and clear the stamp; nil when no wake was blocked since the last wake that took the
+    /// lock. A stamp from an earlier build (one or two lines) reads as no gap, its one line as
+    /// both the first and the latest.
+    static func takeBlockedSince(url: URL = defaultBlockedURL) -> Refusals? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         try? FileManager.default.removeItem(at: url)
         let formatter = ISO8601DateFormatter()
@@ -585,6 +606,7 @@ struct TickLock: Sendable {
             formatter.date(from: $0.trimmingCharacters(in: .whitespaces))
         }
         guard let parsed = stamps.first, let first = parsed else { return nil }
-        return (first, stamps.dropFirst().first.flatMap { $0 } ?? first)
+        let latest = stamps.count > 1 ? stamps[1] : nil
+        return (first, latest ?? first, stamps.count > 2 ? stamps[2] : nil)
     }
 }

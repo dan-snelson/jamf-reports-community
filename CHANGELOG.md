@@ -122,6 +122,13 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- Connecting Jamf Protect or Jamf School no longer changes jamf-cli's default profile: jamf-cli's
+  setup makes the new profile the default, and the app now puts the previous one back. (#284)
+- Connecting Jamf Protect or Jamf School now tries the credentials with one read before the
+  connection is saved, so a wrong client secret or API key shows at setup instead of at the
+  first collect. (#284)
+- A Platform API profile that also has Jamf Security Cloud set up on it (`security setup` run on
+  the same profile) is a Jamf Pro workspace again instead of being hidden. (#284)
 - VoiceOver can reach the Retry and action buttons on empty and error screens, and more controls
   have names. (#284)
 - A webhook that answers with an error now shows in the log as an error with the HTTP status,

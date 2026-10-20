@@ -660,6 +660,7 @@ final class OnboardingFlow {
         }
 
         let isNew = await isNewProfile(name)
+        let previousDefault = ProductSetupChecks.defaultProfile()
         do {
             let result = try await Self.runWithPTY(
                 executable: binary,
@@ -680,10 +681,25 @@ final class OnboardingFlow {
             return
         }
 
+        let defaultNote = await ProductSetupChecks.restoreDefault(
+            previous: previousDefault, setUp: name, binary: binary)
+        let checkNote: String?
+        switch await ProductSetupChecks.checkCredentials(
+            .protect, profile: name, runner: ConnectionCheck.runner(binary: binary)) {
+        case .failed(let message):
+            protectConnectionError = ProductSetupChecks.joined(message, defaultNote)
+            return
+        case .note(let note): checkNote = note
+        case .accepted: checkNote = nil
+        }
+
         do {
             try recordProtectConnection(profileSlug: profileName.trimmed, protectProfileName: name)
+            protectConfigNote = ProductSetupChecks.joined(protectConfigNote, checkNote, defaultNote)
         } catch {
-            protectConnectionError = "Connected, but config update failed: \(error.localizedDescription)"
+            protectConnectionError = ProductSetupChecks.joined(
+                "Connected, but config update failed: \(error.localizedDescription)",
+                checkNote, defaultNote)
         }
     }
 
@@ -737,6 +753,7 @@ final class OnboardingFlow {
         }
 
         let isNew = await isNewProfile(name)
+        let previousDefault = ProductSetupChecks.defaultProfile()
         do {
             let result = try await Self.runWithPTY(
                 executable: binary,
@@ -757,16 +774,31 @@ final class OnboardingFlow {
             return
         }
 
+        // The checks read the saved profile, so the secrets go now rather than after them.
+        stdinData.resetBytes(in: 0..<stdinData.count)
+        clearSchoolSecrets()
+        let defaultNote = await ProductSetupChecks.restoreDefault(
+            previous: previousDefault, setUp: name, binary: binary)
+        let checkNote: String?
+        switch await ProductSetupChecks.checkCredentials(
+            .school, profile: name, runner: ConnectionCheck.runner(binary: binary)) {
+        case .failed(let message):
+            schoolConnectionError = ProductSetupChecks.joined(message, defaultNote)
+            return
+        case .note(let note): checkNote = note
+        case .accepted: checkNote = nil
+        }
+
         do {
             try recordSchoolConnection(profileSlug: profileName.trimmed, schoolProfileName: name)
+            schoolConfigNote = ProductSetupChecks.joined(schoolConfigNote, checkNote, defaultNote)
         } catch {
-            schoolConnectionError = "Connected, but config update failed: \(error.localizedDescription)"
+            schoolConnectionError = ProductSetupChecks.joined(
+                "Connected, but config update failed: \(error.localizedDescription)",
+                checkNote, defaultNote)
         }
         // A rejected answer keeps the profile: the School API key works without the gateway.
         if sendsPlatform {
-            // The check reads the saved profile, so the secrets go now rather than after it.
-            stdinData.resetBytes(in: 0..<stdinData.count)
-            clearSchoolSecrets()
             schoolPlatformCheck = await SchoolPlatformCheck.run(
                 profile: name, runner: ConnectionCheck.runner(binary: binary))
         }

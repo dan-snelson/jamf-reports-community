@@ -33,6 +33,9 @@ final class ProfileProductTests: XCTestCase {
             product("protect", auth: "oauth2", url: "https://a.jamfcloud.com"), .protect)
         XCTAssertEqual(product("school", auth: "oauth2"), .school)
         XCTAssertEqual(product("security", auth: "oauth2"), .securityCloud)
+        XCTAssertEqual(product("security", auth: "security"), .securityCloud)
+        // `security setup` run on a Platform API profile: still a Jamf Pro login.
+        XCTAssertEqual(product("security", auth: "platform"), .pro)
         XCTAssertEqual(product("pro", auth: "apikey", url: "https://x.jamfschool.com"), .pro)
         XCTAssertEqual(product(" Protect "), .protect, "trimmed and case-insensitive")
     }

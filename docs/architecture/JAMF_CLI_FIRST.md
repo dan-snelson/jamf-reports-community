@@ -29,8 +29,8 @@ same binary also ships a `jamf-reports` command-line interface (see
 +--------+      +-------------------+      +------------+      +-----------+
                        |   |   ^                  |
                        |   |   |                  v
-                       |   |   |          OAuth token in
-                       |   |   |          jamf-cli keychain
+                       |   |   |          OAuth token cached
+                       |   |   |          by jamf-cli
                        |   |   |
                        |   |   +-- read cached JSON for rendering
                        |   |
@@ -74,7 +74,7 @@ tab streaming, artifact reveal) replaced by per-run log files.
 
 | Surface              | Owner       | Notes                                                |
 |----------------------|-------------|------------------------------------------------------|
-| Auth tokens          | jamf-cli    | macOS keychain, never read by the app                |
+| Credentials, tokens  | jamf-cli    | Keychain, `env:` or `file:` ref; app never reads them |
 | Tenant URL + client  | jamf-cli    | Stored in the jamf-cli profile                       |
 | Cached JSON          | App         | `~/Jamf-Reports/<profile>/jamf-cli-data/`            |
 | Column mappings      | App         | `config.yaml`                                        |

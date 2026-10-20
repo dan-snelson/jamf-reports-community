@@ -60,6 +60,12 @@ struct TickState: Codable, Sendable {
         }
     }
 
+    /// Record a wake, keeping the later one: a wake the lock turned away still shows the Mac
+    /// was on, so a long GUI collect does not read as the Mac being off.
+    mutating func noteWake(at date: Date) {
+        lastTick = max(lastTick ?? date, date)
+    }
+
     /// Stamp a success at the run's START, so it compares against the fire
     /// the same way `lastStarted` does. Ends the retry sequence for that fire.
     mutating func noteSucceeded(_ label: String, startedAt: Date) {
@@ -534,21 +540,26 @@ struct TickLock: Sendable {
         return now.timeIntervalSince(modified) > Self.staleAfter
     }
 
-    /// Record that a wake was turned away, once — the FIRST refusal is the one
-    /// the non-catch-up window should be measured from, so an existing stamp is
-    /// never overwritten by a later blocked wake.
+    /// Record that a wake was turned away. The text keeps the FIRST refusal, which the
+    /// non-catch-up window is measured from, and is never overwritten by a later blocked wake;
+    /// the file's modification date is the latest, a wake all the same (`TickState.noteWake`).
     static func noteBlocked(url: URL = defaultBlockedURL, now: Date = Date()) {
-        guard !FileManager.default.fileExists(atPath: url.path) else { return }
-        let text = ISO8601DateFormatter().string(from: now)
-        try? Data(text.utf8).write(to: url, options: .atomic)
+        if !FileManager.default.fileExists(atPath: url.path) {
+            let text = ISO8601DateFormatter().string(from: now)
+            try? Data(text.utf8).write(to: url, options: .atomic)
+        }
+        try? FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: url.path)
     }
 
-    /// Read and clear the stamp; nil when no wake was blocked since the last
-    /// successful tick.
-    static func takeBlockedSince(url: URL = defaultBlockedURL) -> Date? {
+    /// Read and clear the stamp: the first and the latest refused wake, nil when no wake was
+    /// blocked since the last successful tick.
+    static func takeBlockedSince(url: URL = defaultBlockedURL) -> (first: Date, latest: Date)? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[
+            .modificationDate] as? Date
         try? FileManager.default.removeItem(at: url)
-        return ISO8601DateFormatter()
-            .date(from: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let first = ISO8601DateFormatter()
+            .date(from: text.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+        return (first, max(first, modified ?? first))
     }
 }

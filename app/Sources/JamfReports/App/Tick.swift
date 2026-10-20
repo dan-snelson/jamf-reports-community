@@ -40,7 +40,7 @@ func runTick(
         return 1
     }
     defer { hold.release() }
-    let blockedSince = TickLock.takeBlockedSince()
+    let blocked = TickLock.takeBlockedSince()
 
     // Listed before the schedules load: Run now only queues a label whose schedule
     // already exists, so the load below sees every schedule a listed marker names.
@@ -60,9 +60,10 @@ func runTick(
     }
 
     var state = TickState.load()
+    if let blocked { state.noteWake(at: blocked.latest) }
     let due = TickScheduler.due(
         schedules: schedules, state: state, runNowLabels: runNowLabels, now: now,
-        nonCatchUpAnchor: blockedSince,
+        nonCatchUpAnchor: blocked?.first,
         summaryMissingToday: { summaryMissing(for: $0, profiles: profiles, now: now) })
     // After the decision, which reads the previous wake. Best-effort: without it a daily
     // schedule just waits for its fire.

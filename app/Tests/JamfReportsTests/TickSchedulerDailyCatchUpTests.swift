@@ -146,6 +146,27 @@ final class TickSchedulerDailyCatchUpTests: XCTestCase {
                               date(2026, 9, 8, 8, 0)).isEmpty)
     }
 
+    /// A GUI collect held the lock 00:00-00:40 on an always-on Mac: the wakes it turned away
+    /// were wakes, so 00:40 is no first wake after the Mac was off.
+    func testWakesTheLockTurnedAwayAreNotAnOffGap() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tick-blocked-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        for minute in [0, 5, 35] {
+            TickLock.noteBlocked(url: url, now: date(2026, 9, 8, 0, minute))
+        }
+        let blocked = try XCTUnwrap(TickLock.takeBlockedSince(url: url))
+        XCTAssertEqual(blocked.first, date(2026, 9, 8, 0, 0))
+        XCTAssertEqual(blocked.latest, date(2026, 9, 8, 0, 35))
+        XCTAssertNil(TickLock.takeBlockedSince(url: url), "taking the stamp clears it")
+
+        var on = state(started: date(2026, 9, 7, 18, 0), lastTick: date(2026, 9, 7, 23, 55))
+        on.noteWake(at: blocked.latest)
+        XCTAssertTrue(reasons(schedule("Daily 18:00"), on, date(2026, 9, 8, 0, 40)).isEmpty)
+        on.noteWake(at: date(2026, 9, 7, 12, 0))
+        XCTAssertEqual(on.lastTick, date(2026, 9, 8, 0, 35), "an older wake never moves it back")
+    }
+
     func testNoRecordedWakeMeansNoEarlyRun() {
         let s = schedule("Daily 18:00")
         let unknown = state(started: date(2026, 9, 7, 18, 1), lastTick: nil)

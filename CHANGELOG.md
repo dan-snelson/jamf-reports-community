@@ -97,6 +97,8 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- A backup of a workspace whose config.yaml does not decode now says Jamf Protect was not backed
+  up, with the reason, instead of leaving Protect out silently. (#284)
 - A Jamf Protect backup that exits cleanly but exported nothing now reads as Partial, not as
   backed up with 0 objects. (#284)
 - A Mac that is on only part of the day now gets its daily summary. A daily collect runs at

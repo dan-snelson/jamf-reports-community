@@ -425,7 +425,9 @@ protect backup --output <staging>/protect` (`ProtectBackup.arguments`; the file 
 jamf-cli's default), so one backup folder holds both products. It has its own limit
 (`ProtectBackup.timeout`, equal to `backupTimeout`; `backup(protectTimeout:)`), run through the
 same timed `run`. `ProtectBackup.plan` decides first: not connected (no Protect, or a School
-workspace) changes nothing, not even the manifest, and evaluates neither check below; with
+workspace) changes nothing, not even the manifest, and evaluates neither check below; a config.yaml
+that exists but does not decode skips Protect with one `[warn]` line naming the decode error (the scheduled
+backup adds none of its own) and a skipped manifest result; with
 Protect connected it skips with one `[warn] Jamf Protect not backed up: <reason>` line when
 `SharedConfigPin.protectAllowed` is false (`protect.profile` drifted), when `protect.profile` is
 blank or unusable, when it resolves to a known product other than Jamf Protect (`ProfileAuthMethod.protectRefusal`), or when the workspace is on shared storage (`BackupMaintenance.

@@ -232,7 +232,24 @@ extension CLIBridge {
         sharedStorage: () -> String?,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> BackupProductResult? {
-        let config = try? ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        let configURL = workspace.appendingPathComponent("config.yaml")
+        let config: ReportConfig?
+        if FileManager.default.fileExists(atPath: configURL.path) {
+            do {
+                config = try ConfigLoader.load(from: configURL)
+            } catch {
+                // Whether Protect is connected cannot be told, so say so instead of leaving it out.
+                let reason = LogRedactor.redact(
+                    "config.yaml does not decode, so Protect cannot be told from it: "
+                        + error.localizedDescription)
+                onLine(.init(timestamp: Date(), level: .warn,
+                             text: "[warn] Jamf Protect not backed up: \(reason). "
+                                 + "The Jamf Pro backup is unaffected."))
+                return BackupProductResult(state: .skipped, reason: reason)
+            }
+        } else {
+            config = nil
+        }
         let named = config?.protect?.resolvedProfile ?? ""
         let refusal = config?.protect?.isEnabled == true && !named.isEmpty
             ? await ProfileAuthMethod.protectRefusal(profile: named) : nil

@@ -228,6 +228,24 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertFalse(lines.texts.contains { $0.hasPrefix("[partial]") })
     }
 
+    func test_backup_skipsProtectWithOneWarningWhenConfigDoesNotDecode() async throws {
+        let ctx = try makeContext(config: "thresholds: not-a-mapping\n", protect: .ok)
+        let lines = Lines()
+        let exit = try await CLIBridge().backup(
+            profile: ctx.profile, label: "scheduled-t", _testExecutable: ctx.stub
+        ) { lines.append($0) }
+
+        XCTAssertEqual(exit, 0, "the Jamf Pro backup stands")
+        XCTAssertEqual(try ctx.calls().count, 1, "protect backup must not run")
+        let warns = lines.texts.filter { $0.contains("config.yaml does not decode") }
+        XCTAssertEqual(warns.count, 1, "\(lines.texts)")
+        XCTAssertTrue(warns[0].hasPrefix("[warn] Jamf Protect not backed up"), warns[0])
+        let result = try XCTUnwrap(BackupProductResult.protect(inBackup: try ctx.onlyBackup()))
+        XCTAssertEqual(result.state, .skipped)
+        XCTAssertTrue(try XCTUnwrap(result.reason).contains("config.yaml does not decode"))
+        XCTAssertFalse(lines.texts.contains { $0.hasPrefix("[partial]") })
+    }
+
     func test_backup_skipsProtectOnSharedStorage() async throws {
         let ctx = try makeContext(
             config: "shared_workspace:\n  enabled: true\n" + connectedConfig + "\n", protect: .ok)

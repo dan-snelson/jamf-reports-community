@@ -310,11 +310,8 @@ private func scheduledRunSingleBody(
     }
 
     // A backup needs only the profile, so it runs; a collect cannot be routed without the file.
-    if mode == .backup, let configError {
-        onLine(.init(timestamp: Date(), level: .warn, text: LogRedactor.redact(
-            "[warn] '\(profile)': config.yaml does not decode, so the backup runs as Jamf Pro: "
-                + configError.localizedDescription)))
-    } else if mode != .jamfCLIOnly, let configError {
+    // A backup that reaches Protect warns about the file itself (`backupProtect`).
+    if mode != .jamfCLIOnly, mode != .backup, let configError {
         let message = LogRedactor.redact(
             "[error] '\(profile)': config.yaml does not decode, so the product cannot be told "
                 + "and nothing ran: \(configError.localizedDescription)")

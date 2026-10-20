@@ -104,10 +104,13 @@ struct FleetOverviewView: View {
                 HStack {
                     SectionHeader(title: "Summary Details")
                     Spacer()
+                    let index = row.summary?.stabilityIndex
                     Pill(
-                        text: row.summary == nil ? "No Data" : stabilityLabel(row.summary?.stabilityIndex),
-                        tone: stabilityTone(row.summary?.stabilityIndex)
+                        text: row.summary == nil ? "No Data" : stabilityPillText(index),
+                        tone: stabilityTone(index)
                     )
+                    .accessibilityLabel(
+                        stabilityAccessibilityLabel(index, hasSummary: row.summary != nil))
                 }
 
                 if let summary = row.summary {
@@ -339,6 +342,26 @@ private struct StabilityTrendPoint: Identifiable, Sendable {
     let date: Date
     let value: Double
     var id: Date { date }
+}
+
+/// The word the tone encodes, on the tone's own thresholds.
+func stabilityWord(_ value: Double?) -> String? {
+    guard let value else { return nil }
+    if value >= 85 { return "Healthy" }
+    if value >= 70 { return "Watch" }
+    return "Low"
+}
+
+func stabilityPillText(_ value: Double?) -> String {
+    guard let word = stabilityWord(value) else { return stabilityLabel(value) }
+    return "\(word) · \(stabilityLabel(value))"
+}
+
+func stabilityAccessibilityLabel(_ value: Double?, hasSummary: Bool) -> String {
+    guard hasSummary, let value, let word = stabilityWord(value) else {
+        return hasSummary ? "Stability unknown" : "Stability: no data"
+    }
+    return "Stability \(word), \(String(format: "%.1f", value)) percent"
 }
 
 private func stabilityLabel(_ value: Double?) -> String {

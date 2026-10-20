@@ -169,11 +169,30 @@ final class ScheduledRunUndecodableConfigTests: XCTestCase {
         try writeConfig("school_cli:\n  enabled: true\nthresholds: not-a-mapping\n")
         XCTAssertThrowsError(try ConfigLoader.load(from: try XCTUnwrap(
             ProfileService.workspaceURL(for: profile)).appendingPathComponent("config.yaml")))
-        for mode in [Schedule.RunMode.jamfCLIFull, .snapshotOnly, .backup] {
+        for mode in [Schedule.RunMode.jamfCLIFull, .snapshotOnly] {
             let outcome = await runSchedule(schedule(mode), verbose: false)
             XCTAssertEqual(outcome.exitCode, 1, "\(mode)")
             XCTAssertFalse(outcome.endsRetries, "\(mode): the tick must retry it")
         }
+    }
+
+    /// A backup needs only the profile: it runs, with a warning, and a profile of another
+    /// product is refused as it is with no config.yaml.
+    func testABackupStillRunsWithAWarning() async throws {
+        try writeConfig("thresholds: not-a-mapping\n")
+        _ = await runSchedule(schedule(.backup), verbose: false)
+        let logs = try WorkspacePaths.runHistoryDir(for: profile)
+        let log = try XCTUnwrap(FileManager.default.contentsOfDirectory(atPath: logs.path)
+            .first { $0.hasSuffix(".log") })
+        let text = try String(contentsOf: logs.appendingPathComponent(log), encoding: .utf8)
+        XCTAssertTrue(text.contains("[warn] '\(profile)': config.yaml does not decode"), text)
+        XCTAssertFalse(text.contains("nothing ran"), text)
+        XCTAssertTrue(text.contains("backup"), text)
+
+        try ProductGuardSeed.seed(profile: profile, product: "protect", in: root)
+        let refused = await runSchedule(schedule(.backup), verbose: false)
+        XCTAssertEqual(refused.exitCode, 0)
+        XCTAssertTrue(refused.endsRetries)
     }
 
     func testTheFailureIsInRunHistoryWithTheDecodeError() async throws {

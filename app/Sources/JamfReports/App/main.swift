@@ -263,7 +263,8 @@ private func scheduledRunSingleBody(
     // creates anything in the workspace; like a School backup, it ends the run as a success
     // so the tick does not retry it and no failure webhook is posted. jamf-cli-only reads the
     // cache and sends no command.
-    if mode != .jamfCLIOnly, configError == nil, let refusal = CollectRouter.proRunRefusal(
+    if mode != .jamfCLIOnly, configError == nil || mode == .backup,
+       let refusal = CollectRouter.proRunRefusal(
         profile: profile, operation: "Scheduled \(mode.rawValue) run", config: routingConfig
     ) {
         let message = "[skip] scheduled \(mode.rawValue) run skipped for '\(profile)': "
@@ -308,7 +309,12 @@ private func scheduledRunSingleBody(
             + "ran as jamf-cli-full"))
     }
 
-    if mode != .jamfCLIOnly, let configError {
+    // A backup needs only the profile, so it runs; a collect cannot be routed without the file.
+    if mode == .backup, let configError {
+        onLine(.init(timestamp: Date(), level: .warn, text: LogRedactor.redact(
+            "[warn] '\(profile)': config.yaml does not decode, so the backup runs as Jamf Pro: "
+                + configError.localizedDescription)))
+    } else if mode != .jamfCLIOnly, let configError {
         let message = LogRedactor.redact(
             "[error] '\(profile)': config.yaml does not decode, so the product cannot be told "
                 + "and nothing ran: \(configError.localizedDescription)")

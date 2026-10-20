@@ -204,6 +204,9 @@ versions in this repository map to git tags.
 - A Jamf School or Jamf Protect collect whose `state` folder is a link or otherwise refused now
   logs one warning naming the folder, instead of not recording per-source results in silence.
   (#284)
+- If the mobile device list from jamf-cli cannot be read well enough to remove the lost-mode
+  phone number, location and message, it is no longer saved with them in it. The previous
+  snapshot stays in use and the run logs a warning. (#284)
 
 ### Removed
 

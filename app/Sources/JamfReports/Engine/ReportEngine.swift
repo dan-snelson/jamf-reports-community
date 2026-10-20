@@ -2826,8 +2826,18 @@ struct ReportEngine: Sendable {
                 text: "[info] \(kind): dropped \(data.count - payload.count) byte(s) "
                     + note))
         }
-        let saved = kind == MobileFleetService.deviceKind
-            ? Self.droppingLostModeText(payload) : payload
+        var saved = payload
+        if kind == MobileFleetService.deviceKind {
+            guard let stripped = Self.droppingLostModeText(payload) else {
+                onLine(.init(timestamp: Date(), level: .warn,
+                    text: "[warn] \(kind): lost-mode text could not be removed from the payload "
+                        + "— snapshot not saved"))
+                stateStore?.record(
+                    .failed(exitCode: outcome.exitCode), report: kind, at: collectStart)
+                return KindCollectResult(outcome: outcome, saved: false)
+            }
+            saved = stripped
+        }
         do {
             try saveSnapshot(
                 data: saved, kind: kind, dataDir: dataDir,
@@ -3977,10 +3987,11 @@ struct ReportEngine: Sendable {
     ]
 
     /// The payload with every `lostModeTextKeys` key removed at any depth. Returned unchanged
-    /// when it holds none of them or does not parse.
-    static func droppingLostModeText(_ data: Data) -> Data {
+    /// when it holds none of them. Nil, so the caller saves nothing, when it does not parse or
+    /// cannot be written back after removal: the text must not reach disk on a guess.
+    static func droppingLostModeText(_ data: Data) -> Data? {
         guard let object = try? JSONSerialization.jsonObject(with: data, options: []) else {
-            return data
+            return nil
         }
         var removed = false
         func strip(_ value: Any) -> Any {
@@ -3996,10 +4007,8 @@ struct ReportEngine: Sendable {
             return value
         }
         let stripped = strip(object)
-        guard removed,
-              let out = try? JSONSerialization.data(withJSONObject: stripped, options: [])
-        else { return data }
-        return out
+        guard removed else { return data }
+        return try? JSONSerialization.data(withJSONObject: stripped, options: [])
     }
 
     static func jsonPayload(from data: Data) -> Data? {

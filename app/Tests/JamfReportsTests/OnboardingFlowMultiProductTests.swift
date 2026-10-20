@@ -137,35 +137,21 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         XCTAssertEqual(s, "myid\nmysecret\n", "stdin must be clientID\\nclientSecret\\n")
     }
 
-    /// jamf-cli 1.29 verifies a new profile's pair before writing it; the app opts
-    /// out so Save stays a local write and Validate stays the check. The flag is
-    /// unknown on older binaries, so it must be absent unless asked for.
-    func test_addProfileArguments_sendNoVerifyOnlyWhenAsked() {
-        let oauth = OnboardingFlow.proOAuth2Arguments(
-            profile: "p", url: "https://x.jamfcloud.com")
-        XCTAssertFalse(oauth.contains("--no-verify"), "default must fit a pre-1.29 binary")
-        let oauthGated = OnboardingFlow.proOAuth2Arguments(
-            profile: "p", url: "https://x.jamfcloud.com", noVerify: true)
-        XCTAssertTrue(oauthGated.contains("--no-verify"))
-        XCTAssertEqual(oauthGated.filter { $0 != "--no-verify" }, oauth,
-                       "the flag is the only difference")
-
-        let platform = OnboardingFlow.platformGatewayArguments(
+    /// jamf-cli verifies a new profile's pair before writing it; the app opts out so Save
+    /// stays a local write and Validate stays the check.
+    func test_addProfileArguments_alwaysSendNoVerify() {
+        XCTAssertTrue(OnboardingFlow.proOAuth2Arguments(
+            profile: "p", url: "https://x.jamfcloud.com").contains("--no-verify"))
+        XCTAssertTrue(OnboardingFlow.platformGatewayArguments(
             profile: "p", gatewayURL: "https://us.api.jamfcloud.com",
-            scope: .environment, scopeID: "e")
-        XCTAssertFalse(platform.contains("--no-verify"))
-        let platformGated = OnboardingFlow.platformGatewayArguments(
-            profile: "p", gatewayURL: "https://us.api.jamfcloud.com",
-            scope: .environment, scopeID: "e", noVerify: true)
-        XCTAssertTrue(platformGated.contains("--no-verify"))
-        XCTAssertEqual(platformGated.filter { $0 != "--no-verify" }, platform)
+            scope: .environment, scopeID: "e").contains("--no-verify"))
     }
 
     /// jamf-cli reads `add-profile -lead` as flags ("unknown shorthand flag: 'l'", checked
     /// against 1.31.1), so the name goes last, after `--`, where any name is a name.
     func test_addProfileArguments_putTheNameAfterDoubleDash() {
         let oauth = OnboardingFlow.proOAuth2Arguments(
-            profile: "-lead", url: "https://x.jamfcloud.com", noVerify: true)
+            profile: "-lead", url: "https://x.jamfcloud.com")
         XCTAssertEqual(Array(oauth.suffix(2)), ["--", "-lead"])
         XCTAssertEqual(oauth.filter { $0 == "-lead" }.count, 1)
         let platform = OnboardingFlow.platformGatewayArguments(
@@ -214,16 +200,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
             let hasTenant = args.contains("--tenant-id")
             XCTAssertFalse(hasEnv && hasTenant, "must never send both scope flags (\(scope))")
         }
-    }
-
-    func test_platformScope_defaultFollowsJamfCLIVersion() {
-        typealias Scope = OnboardingFlow.PlatformScope
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "1.24.0"), .tenant)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "1.27.9"), .tenant)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "1.28.0"), .environment)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "1.30.1"), .environment)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: nil), .environment)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "garbage"), .environment)
     }
 
     /// Organization level reaches no data the app collects (every scoped call answers 400

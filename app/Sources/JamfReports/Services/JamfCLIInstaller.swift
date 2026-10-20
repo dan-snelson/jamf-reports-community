@@ -176,36 +176,6 @@ final class JamfCLIInstaller {
             + "brew upgrade jamf-cli."
     }
 
-    /// First release whose `config add-profile --auth-method platform` accepts
-    /// `--environment-id` (GA scope). Older binaries only know `--tenant-id`.
-    nonisolated static let environmentScopeVersion: String = "1.28.0"
-
-    /// True unless `installedVersion` parses and is below 1.28.0 — an unknown
-    /// version fails toward the GA default rather than the legacy flag. A parsed
-    /// pre-release of 1.28.0 (`1.28.0-rc1`) counts as below it, so it takes the legacy flag.
-    nonisolated static func supportsEnvironmentScope(_ installedVersion: String?) -> Bool {
-        guard let installedVersion,
-              !versionParts(installedVersion).isEmpty else { return true }
-        return compareVersions(installedVersion, environmentScopeVersion) != .orderedAscending
-    }
-
-    /// First release whose `pro` resource names come from the OpenAPI spec
-    /// (`device-enrollments`, `declarative-device-management`, …) and whose
-    /// `config add-profile` verifies credentials unless `--no-verify` is passed.
-    /// Older binaries reject both the new names and the flag (exit 2).
-    nonisolated static let specDerivedNamesVersion: String = "1.29.0"
-
-    /// True only when `installedVersion` parses and is at least 1.29.0. An
-    /// unknown version fails toward the old spelling — never send a name or a
-    /// flag an older binary refuses (the `supportsQuietFlags` direction). A
-    /// pre-release of 1.29.0 (`1.29.0-rc1`) counts as below it, so it also gets
-    /// the older behaviour.
-    nonisolated static func supportsSpecDerivedNames(_ installedVersion: String?) -> Bool {
-        guard let installedVersion,
-              !versionParts(installedVersion).isEmpty else { return false }
-        return compareVersions(installedVersion, specDerivedNamesVersion) != .orderedAscending
-    }
-
     /// First release with the top-level `dashboard` command: one self-contained
     /// HTML page of fleet aggregates. Older binaries have no such command.
     nonisolated static let dashboardVersion: String = "1.31.0"

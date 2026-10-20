@@ -199,14 +199,13 @@ final class ConnectionCheckTests: XCTestCase {
 
     func testRunAsksTheSecondQuestionOnlyAfterABare404() async {
         let twoStep = RecordingRunner(version: bare404, probe: success("[]"))
-        let verdict = await ConnectionCheck.run(profile: "p", specNames: true,
-                                                runner: twoStep.runner)
+        let verdict = await ConnectionCheck.run(profile: "p", runner: twoStep.runner)
         XCTAssertEqual(verdict, .noJamfPro)
         XCTAssertEqual(twoStep.calls.count, 2)
         XCTAssertTrue(twoStep.calls.last?.contains("platform-devices") ?? false)
 
         let oneStep = RecordingRunner(version: success(#"{"version":"11.25.0"}"#), probe: nil)
-        _ = await ConnectionCheck.run(profile: "p", specNames: true, runner: oneStep.runner)
+        _ = await ConnectionCheck.run(profile: "p", runner: oneStep.runner)
         XCTAssertEqual(oneStep.calls.count, 1)
     }
 
@@ -251,18 +250,15 @@ final class ConnectionCheckTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
 
         let verdict = await ConnectionCheck.run(
-            profile: "p", specNames: true,
-            runner: ConnectionCheck.runner(binary: stub, timeout: 0.5)
+            profile: "p", runner: ConnectionCheck.runner(binary: stub, timeout: 0.5)
         )
 
         XCTAssertEqual(verdict, .undecided(exitCode: CLIBridge.exitCodeTimedOut))
     }
 
-    func testArgumentsFollowTheInstalledJamfCLI() {
-        XCTAssertEqual(ConnectionCheck.versionArguments(profile: "p", specNames: true),
+    func testArguments() {
+        XCTAssertEqual(ConnectionCheck.versionArguments(profile: "p"),
                        ["-p", "p", "pro", "jamf-pro-version", "list", "--output", "json"])
-        XCTAssertEqual(ConnectionCheck.versionArguments(profile: "p", specNames: false)[3],
-                       "jamf-pro-versions")
         XCTAssertTrue(ConnectionCheck.probeArguments(profile: "p")
             .contains(#"serialNumber=="jrc-connection-check""#),
             "the filter is one argv element; no shell ever parses it")

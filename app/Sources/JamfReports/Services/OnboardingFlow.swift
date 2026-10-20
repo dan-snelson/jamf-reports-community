@@ -156,7 +156,7 @@ final class OnboardingFlow {
 
         /// Shown under the scope picker in onboarding and Update credentials.
         static let caption = "Environment is the level to use: it reaches Jamf Pro, Blueprints, "
-            + "Compliance Benchmarks and DDM (needs jamf-cli 1.28 or later). Tenant is legacy: "
+            + "Compliance Benchmarks and DDM. Tenant is legacy: "
             + "direct Jamf Pro endpoints only, with no Compliance Benchmarks or Blueprints."
 
         var idFieldLabel: String {
@@ -165,19 +165,11 @@ final class OnboardingFlow {
             case .tenant: "Tenant ID"
             }
         }
-
-        /// GA default is environment; a detected pre-1.28 jamf-cli would reject
-        /// `--environment-id` (exit 2), so it starts on the legacy flag instead.
-        static func defaultScope(forCLIVersion version: String?) -> PlatformScope {
-            JamfCLIInstaller.supportsEnvironmentScope(version) ? .environment : .tenant
-        }
     }
 
     // Platform Gateway additional fields
     var gatewayURL = "https://us.api.jamfcloud.com"
     var platformScope: PlatformScope = .environment
-    /// True once the user picked a scope, so a probe that finishes later keeps their choice.
-    private(set) var platformScopeChosen = false
     var platformScopeID = ""
     var platformClientID = ""
     var platformClientSecret = ""
@@ -403,8 +395,7 @@ final class OnboardingFlow {
         installer.brewInstallCommand()
     }
 
-    /// Looks for jamf-cli off the main actor, then publishes the answer and, unless the user
-    /// already picked one, the Platform API scope that version defaults to.
+    /// Looks for jamf-cli off the main actor, then publishes the answer.
     func refreshJamfCLIStatus() async {
         jamfCLIStatus = .checking
         let probe = installationProbe
@@ -414,14 +405,6 @@ final class OnboardingFlow {
         } else {
             jamfCLIStatus = .missing
         }
-        if !platformScopeChosen {
-            platformScope = PlatformScope.defaultScope(forCLIVersion: installation?.version)
-        }
-    }
-
-    func choosePlatformScope(_ scope: PlatformScope) {
-        platformScope = scope
-        platformScopeChosen = true
     }
 
     func nextStep() {
@@ -558,13 +541,11 @@ final class OnboardingFlow {
             clearClientSecret()
         }
 
-        let noVerify = await noVerifyFlag(binary: binary)
         let isNew = await isNewProfile(profileName.trimmed)
         let result = try await Self.runWithPTY(
             executable: binary,
             arguments: Self.proOAuth2Arguments(
-                profile: profileName.trimmed, url: url.absoluteString, noVerify: noVerify
-            ),
+                profile: profileName.trimmed, url: url.absoluteString),
             stdin: stdinData
         )
 
@@ -595,7 +576,6 @@ final class OnboardingFlow {
 
         defer { clearPlatformSecrets() }
 
-        let noVerify = await noVerifyFlag(binary: binary)
         let isNew = await isNewProfile(profileName.trimmed)
         try await Self.registerPlatformProfile(
             binary: binary,
@@ -604,8 +584,7 @@ final class OnboardingFlow {
             scope: platformScope,
             scopeID: platformScopeID.trimmed,
             clientID: platformClientID.trimmed,
-            clientSecret: platformClientSecret,
-            noVerify: noVerify
+            clientSecret: platformClientSecret
         )
 
         if isNew { noteCreatedProfile(profileName.trimmed) }
@@ -836,36 +815,16 @@ final class OnboardingFlow {
         await registerSchoolProfile()
     }
 
-    /// jamf-cli 1.29 checks a new profile's credentials against the server before
-    /// writing it. `--no-verify` keeps Save a local write on every version, so the
-    /// Validate step stays the connection check and a placeholder pair still
-    /// registers. The flag is unknown before 1.29 (exit 2), hence the gate.
-    private func noVerifyFlag(binary: URL) async -> Bool {
-        JamfCLIInstaller.supportsSpecDerivedNames(await installedCLIVersion(binary: binary))
-    }
-
-    /// The probe's version when it has one. Otherwise a fresh read, off the main actor, because
-    /// a registration can start before the probe returns or after it found no version.
-    private func installedCLIVersion(binary: URL) async -> String? {
-        if let jamfCLIVersion { return jamfCLIVersion }
-        return await Task.detached(priority: .userInitiated) {
-            JamfCLIInstaller.installedVersion(at: binary)
-        }.value
-    }
-
     // MARK: - Pure argument builders (testable without PTY)
 
     /// Arguments for `jamf-cli config add-profile` using OAuth2 auth. The name goes last,
-    /// after `--`, so one starting with `-` is not read as a flag.
-    static func proOAuth2Arguments(
-        profile: String, url: String, noVerify: Bool = false
-    ) -> [String] {
-        var args = ["config", "add-profile",
-                    "--url", url,
-                    "--auth-method", "oauth2",
-                    "--no-color"]
-        if noVerify { args.append("--no-verify") }
-        return args + ["--", profile]
+    /// after `--`, so one starting with `-` is not read as a flag. `--no-verify` keeps Save a
+    /// local write, so the Validate step stays the connection check.
+    static func proOAuth2Arguments(profile: String, url: String) -> [String] {
+        ["config", "add-profile",
+         "--url", url,
+         "--auth-method", "oauth2",
+         "--no-color", "--no-verify", "--", profile]
     }
 
     /// stdin bytes for OAuth2 profile registration (clientID\nclientSecret\n).
@@ -887,10 +846,9 @@ final class OnboardingFlow {
 
     /// Arguments for `jamf-cli config add-profile` using Platform Gateway auth. Sends exactly one
     /// scope flag (`--environment-id` / `--tenant-id`); the flags are mutually exclusive. The
-    /// name goes last, after `--`, as for OAuth2.
+    /// name goes last, after `--`, and `--no-verify` is passed, as for OAuth2.
     static func platformGatewayArguments(
-        profile: String, gatewayURL: String, scope: PlatformScope, scopeID: String,
-        noVerify: Bool = false
+        profile: String, gatewayURL: String, scope: PlatformScope, scopeID: String
     ) -> [String] {
         var args = ["config", "add-profile",
                      "--auth-method", "platform"]
@@ -898,9 +856,7 @@ final class OnboardingFlow {
         case .environment: args += ["--environment-id", scopeID]
         case .tenant: args += ["--tenant-id", scopeID]
         }
-        args += ["--url", gatewayURL, "--no-color"]
-        if noVerify { args.append("--no-verify") }
-        return args + ["--", profile]
+        return args + ["--url", gatewayURL, "--no-color", "--no-verify", "--", profile]
     }
 
     /// stdin bytes for Platform Gateway profile registration (clientID\nclientSecret\n).
@@ -1011,14 +967,8 @@ final class OnboardingFlow {
     }
 
     private func runConnectionCheck(profile: String) async -> ConnectionCheck.Verdict {
-        guard let binary = ExecutableLocator.locate("jamf-cli"),
-              let runner = ConnectionCheck.liveRunner() else {
-            return .undecided(exitCode: nil)
-        }
-        let specNames = JamfCLIInstaller.supportsSpecDerivedNames(
-            await installedCLIVersion(binary: binary)
-        )
-        return await ConnectionCheck.run(profile: profile, specNames: specNames, runner: runner)
+        guard let runner = ConnectionCheck.liveRunner() else { return .undecided(exitCode: nil) }
+        return await ConnectionCheck.run(profile: profile, runner: runner)
     }
 
     /// Only an answering Jamf Pro validates. A rejected ID stays unvalidated, an unconfirmed one

@@ -530,7 +530,7 @@ struct OnboardingView: View {
                         SegmentedControl(
                             selection: Binding(
                                 get: { flow.platformScope },
-                                set: { flow.choosePlatformScope($0) }
+                                set: { flow.platformScope = $0 }
                             ),
                             options: OnboardingFlow.PlatformScope.allCases.map {
                                 ($0, $0.label, nil)

@@ -9,7 +9,7 @@ extension OnboardingFlow {
     /// of the same name.
     static func registerPlatformProfile(
         binary: URL, profile: String, gatewayURL: String, scope: PlatformScope, scopeID: String,
-        clientID: String, clientSecret: String, noVerify: Bool
+        clientID: String, clientSecret: String
     ) async throws {
         var stdinData = platformGatewayStdin(clientID: clientID, clientSecret: clientSecret)
         defer { stdinData.resetBytes(in: 0..<stdinData.count) }
@@ -17,8 +17,7 @@ extension OnboardingFlow {
         let result = try await runWithPTY(
             executable: binary,
             arguments: platformGatewayArguments(
-                profile: profile, gatewayURL: gatewayURL, scope: scope, scopeID: scopeID,
-                noVerify: noVerify),
+                profile: profile, gatewayURL: gatewayURL, scope: scope, scopeID: scopeID),
             stdin: stdinData
         )
         guard result.exitCode == 0 else {

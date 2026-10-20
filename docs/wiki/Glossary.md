@@ -322,8 +322,10 @@ Open source at github.com/Jamf-Concepts/jamf-cli. The native engine that
 JamfReports composes for every API call.
 
 ### jamf-cli profile
-A saved set of tenant credentials (URL, client ID, OAuth2 token) keyed by
-slug. Lives in jamf-cli's own keychain entry. JamfReports' "profile" maps
+A saved set of tenant connection settings (URL, client ID, and a reference to
+the secret) keyed by slug. Lives in jamf-cli's own configuration file; the
+secret itself is in the keychain, an environment variable or a file, as the
+reference says. JamfReports' "profile" maps
 1:1 to a jamf-cli profile. *see also: Profile slug.*
 
 ### Namespaces

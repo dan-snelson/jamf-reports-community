@@ -609,7 +609,7 @@ device secrets are kept off the command line and out of `-vvv`/`--dry-run` outpu
 downloads refuse server file names that escape the target directory; `--computer`/
 `--mobile-device` scope flags now resolve to an ID before being sent. No code change: the app
 never uses `--set` on device records (read-only data collection), never embeds credentials in
-jamf-cli arguments (PTY stdin only; persistent secrets in the system keychain), and the
+jamf-cli arguments (PTY stdin only; setup writes keychain references through jamf-cli), and the
 per-device scan addresses computers by the numeric `id` field from the inventory snapshot —
 ID-based addressing is unaffected by name-resolution changes. The MCP catalog additions
 (`list_commands`, `run_command`) are not used by the app.
@@ -1304,8 +1304,10 @@ file (legacy import or live run) populates that field.
   profile as `-p` (`CLIBridge.checkBackupConfigProfile` refuses a case variant and ignores
   another name with a `[warn]`).
 - **No persisted credentials in app:** During onboarding the secret is passed to `jamf-cli`
-  via `stdin`, redacted from failure output, and cleared immediately. Persistent secrets live
-  in the system keychain through `jamf-cli`.
+  via `stdin`, redacted from failure output, and cleared immediately. Setup has `jamf-cli`
+  write `keychain:` references; jamf-cli's config may also use `file:` or `env:` references, and
+  `env:` credentials and `JAMF_*` variables do not reach jamf-cli, which the app starts with a
+  cleaned environment (`PATH`, `HOME`, `LANG`, `TMPDIR`, proxy variables).
 - **One background item, no user-agent writes (2.8.0):** the app ships a single
   `SMAppService` agent inside its own signed bundle
   (`Contents/Library/LaunchAgents/com.github.tonyyo11.jamf-reports-community.tick.plist`);

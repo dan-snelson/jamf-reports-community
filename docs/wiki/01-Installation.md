@@ -55,7 +55,7 @@ jamf-cli platform setup --profile-name <your profile>
 Create the integration in Jamf Account first, at the **environment** level (tenant level is
 the legacy choice; an organization-level integration reaches only Jamf Account and cannot
 report). The setup creates a Platform Gateway profile that enables both the Pro and Platform
-API command sets. Credentials are stored in the macOS keychain, not in shell history.
+API command sets. Setup stores the credentials in the macOS keychain through `jamf-cli`, not in shell history.
 
 For an on-premises or GovCloud server, or when you have no Jamf Account integration, use a
 direct Jamf Pro profile:

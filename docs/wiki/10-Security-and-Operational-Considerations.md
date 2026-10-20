@@ -98,7 +98,8 @@ Protect is skipped with it and the run log says so. On a Jamf School workspace
 **Every Mac must reach Jamf the same way under the same profile name.** The
 workspace's `config.yaml` names the jamf-cli profile collects use
 (`jamf_cli.profile`), but each Mac looks that name up in its own jamf-cli
-configuration and keychain, which never sync. Give every Mac a jamf-cli
+configuration and credential store (the keychain, or the files its profile points to),
+which never sync. Give every Mac a jamf-cli
 profile of that name that reaches the same Jamf Pro instance the same way:
 all direct, or all through the Jamf Platform API with the same environment
 ID. If one Mac's profile points elsewhere, its collects either write another
@@ -417,8 +418,8 @@ two apart.
   [Permissions & Access](https://github.com/tonyyo11/jamf-reports-community/wiki/13-Permissions-and-Access)).
   Separate credentials keep Jamf's own audit trail attributable and let you
   revoke one without breaking the rest. The jamf-cli configuration
-  (`~/.config/jamf-cli/`) and its keychain items stay on each Mac; never
-  sync or copy them.
+  (`~/.config/jamf-cli/`), its keychain items and any credential files it
+  points to stay on each Mac; never sync or copy them.
 - **Share data deliberately.** Keep one workspace per person or role (for
   example `prod-ops` and `prod-audit`), or pool several Macs into one
   history with a
@@ -438,6 +439,34 @@ more than one of them. Create each JamfReports integration for the single
 environment its profile reports on, with read permissions only. An
 integration spanning every environment, or carrying write permissions, turns
 a secret leaked from one Mac into access to all of them.
+
+### Where jamf-cli keeps credentials
+
+jamf-cli's configuration file (`~/.config/jamf-cli/config.yaml`) holds a
+reference for each secret, not the secret. A reference is one of:
+
+- `keychain:<ref>`: the macOS system keychain.
+- `env:<VAR>`: an environment variable.
+- `file:/path`: a file on disk, in plain text.
+
+jamf-cli 1.33.0 rejects a bare secret in the configuration file. Its
+environment variables (`JAMF_CLIENT_ID`, `JAMF_CLIENT_SECRET`, `JAMF_TENANT_ID`
+and the `JAMFSCHOOL_*` set) can also supply credentials directly. See the
+[jamf-cli Setup Guide](https://github.com/Jamf-Concepts/jamf-cli/wiki/Setup-Guide).
+
+- **Jamf Reports' own setup uses the keychain.** Onboarding and Update
+  credentials have jamf-cli write `keychain:` references, passing the secret
+  over a pseudo-terminal. The app stores no secret itself.
+- **Environment-variable credentials do not reach jamf-cli from Jamf
+  Reports.** It starts jamf-cli with a cleaned environment that keeps only
+  `PATH`, `HOME`, `LANG`, `TMPDIR` and the proxy variables (`HTTP_PROXY`,
+  `HTTPS_PROXY`, `NO_PROXY`, in either case). A credential supplied by a
+  variable, or by an `env:` reference in jamf-cli's configuration, is not seen
+  by the app, the included command-line tool or scheduled runs (the background
+  item starts from launchd, which loads no shell profile). Use `keychain:` or
+  `file:` references for a profile Jamf Reports runs.
+- **Keep a `file:` credential readable by you alone.** The secret sits in plain
+  text on disk, so set its mode to 0600 (`chmod 600 <file>`).
 
 ## External Network Calls
 

@@ -90,11 +90,15 @@ final class TickSchedulerMissingSummaryTests: XCTestCase {
         XCTAssertFalse(SummaryJSONParser.hasSummary(profile: "alpha", on: date(8, 9, 0)))
     }
 
-    func testSchoolWorkspacesNeverCountAsMissingASummary() throws {
+    /// A School collect writes a daily summary too: a School workspace without one is missing it.
+    func testSchoolWorkspacesCountAsMissingASummaryUntilTheyHaveOne() throws {
         let workspace = root.appendingPathComponent("Jamf-Reports/alpha")
-        XCTAssertTrue(summaryMissing(for: schedule, profiles: [], now: date(7, 9, 0)))
         try Data("school_cli:\n  enabled: true\n".utf8)
             .write(to: workspace.appendingPathComponent("config.yaml"))
+        XCTAssertTrue(summaryMissing(for: schedule, profiles: [], now: date(7, 9, 0)))
+        let dir = try WorkspacePaths.summariesDir(for: "alpha")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: dir.appendingPathComponent("summary_2026-09-07.json"))
         XCTAssertFalse(summaryMissing(for: schedule, profiles: [], now: date(7, 9, 0)))
     }
 }

@@ -106,17 +106,14 @@ func runTick(
     return result
 }
 
-/// True when a run of `schedule` is meant to write today's summary for a Jamf Pro workspace
-/// that has none. Jamf School collects write no summary, so they never count.
+/// True when a run of `schedule` is meant to write today's summary for a workspace that has
+/// none. Jamf Pro and Jamf School collects both write one.
 func summaryMissing(for schedule: Schedule, profiles: [JamfCLIProfile], now: Date) -> Bool {
     let names = schedule.isMulti
         ? ProfileService.runnableProfiles(
             profiles, excluding: Set(schedule.excludedProfiles ?? [])).map(\.name)
         : [schedule.profile]
-    return names.contains { name in
-        ProfileProductType.detect(from: collectRoutingConfig(profile: name), profile: name)
-            .type == .jamfPro && !SummaryJSONParser.hasSummary(profile: name, on: now)
-    }
+    return names.contains { !SummaryJSONParser.hasSummary(profile: $0, on: now) }
 }
 
 /// The heartbeat gave the lock up after `TickLock.heartbeatLimit`, so a call that never

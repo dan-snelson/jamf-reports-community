@@ -700,9 +700,17 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let detected = ProfileProductType.detect(from: config, profile: profile)
         XCTAssertEqual(detected.type, .jamfSchool,
                        "school_cli.enabled written by writeSchoolConfig must route detection to Jamf School")
-        XCTAssertFalse(detected.runsProtect, "a School profile never runs Protect")
+        XCTAssertFalse(detected.runsProtect, "no protect block, no Protect")
         XCTAssertEqual(config.schoolCli?.resolvedProfile, profile,
                        "school_cli.profile must be the workspace profile on the School-only path")
+
+        // Data Sources' Connect Jamf Protect writes into the School workspace (2.11).
+        try flow.writeProtectConfig(profileSlug: profile, protectProfileName: "campus-protect")
+        let withProtect = try ConfigLoader.load(from: configURL)
+        let both = ProfileProductType.detect(from: withProtect, profile: profile)
+        XCTAssertEqual(both.type, .jamfSchool)
+        XCTAssertTrue(both.runsProtect)
+        XCTAssertEqual(ConnectedProducts.read(profile: profile).protectProfile, "campus-protect")
     }
 
     // MARK: - Part 1: SecureSecretField onTextChange callback

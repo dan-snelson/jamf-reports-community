@@ -174,9 +174,12 @@ struct ContentView: View {
                 tab = newTab
             }
         }
-        // Switching to a Jamf School workspace removes the Jamf Pro tabs; do not leave the
-        // detail pane on one.
+        // Switching to a Jamf School workspace removes the Jamf Pro tabs, and disconnecting
+        // Protect there removes the Protect tab; do not leave the detail pane on one.
         .onChange(of: workspace.isSchoolWorkspace) { _, _ in
+            if !workspace.tabVisibility(hiddenRaw: hiddenTabsRaw).isVisible(tab) { tab = .overview }
+        }
+        .onChange(of: workspace.protectConnected) { _, _ in
             if !workspace.tabVisibility(hiddenRaw: hiddenTabsRaw).isVisible(tab) { tab = .overview }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToPreviousTab)) { _ in

@@ -37,7 +37,8 @@ switcher** at the bottom of the sidebar and choose **Add workspace or product…
 
 - **New workspace**: Jamf Pro (OAuth2), Platform API or Jamf School. **Connect new** starts
   that product's onboarding.
-- **Add to** the current workspace: Jamf Protect, on a Jamf Pro workspace.
+- **Add to** the current workspace: Jamf Protect, on a Jamf Pro or (experimental) Jamf School
+  workspace.
 - **Profiles jamf-cli already has**: the sheet reads jamf-cli's profiles when it opens and on
   **Re-check**, and lists the ones no workspace uses, including profiles made in Terminal since
   the app started. **Set up workspace** creates the workspace and runs its first collection; a
@@ -190,7 +191,10 @@ The Connect School step registers a
 `jamf-cli school` profile (School URL + Network ID + API key, passed over stdin and cleared)
 and wires `school_cli.enabled`/`profile` into the workspace config, so the first report and
 every later collect route to the Jamf School engine. jamf-cli must still be installed to get
-past the Install CLI step, but no Jamf Pro credentials are entered. Please
+past the Install CLI step, but no Jamf Pro credentials are entered. An optional, experimental
+switch on the same step, **Do you also have Platform API configured for Jamf School?**, adds
+the Platform API region, tenant ID, client ID and secret to the same School profile (never a
+profile of its own) and checks them by listing blueprints once. Please
 [open an issue or pull request](https://github.com/tonyyo11/jamf-reports-community/issues) if
 something looks off. See
 [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School) for the

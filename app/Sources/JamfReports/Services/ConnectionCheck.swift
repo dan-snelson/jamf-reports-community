@@ -137,8 +137,8 @@ extension ConnectionCheck.Verdict {
         + "Jamf Pro tenant. If it is Jamf School, set it up as a Jamf School workspace (Settings › "
         + "Add connection, then Jamf School). If it is Jamf Protect or Jamf "
         + "Security Cloud, Jamf Reports cannot report from it on its own: Jamf Protect is added "
-        + "to a Jamf Pro workspace (Data Sources › Add Jamf Protect), and Jamf Security Cloud is "
-        + "not supported yet."
+        + "to a Jamf Pro or Jamf School workspace (Data Sources › Add Jamf Protect), and Jamf "
+        + "Security Cloud is not supported yet."
 
     /// What the verdict says without its advice on continuing, for a list of results.
     static func missingPermissionText(names: [String]) -> String {

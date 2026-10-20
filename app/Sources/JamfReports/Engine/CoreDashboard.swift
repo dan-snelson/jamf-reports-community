@@ -65,7 +65,7 @@ struct CoreDashboard: Sendable {
     /// range comment (e.g., "sheets 28–32"), and add a corresponding test in
     /// `SheetOrderTests.swift`.
     var sheetPlan: [(name: String, write: () throws -> Void)] {
-        [
+        let leading: [(name: String, write: () throws -> Void)] = [
             // --- Framing / exec-priority (sheets 1–8) ---
             ("Executive Summary", writeExecutiveSummary),
             ("Cover", writeCoverSheet),
@@ -107,13 +107,8 @@ struct CoreDashboard: Sendable {
             ("Blueprint Status", writeBlueprintStatus),
             ("DDM Device Status", writeDDMDeviceStatus),
             ("MDM Command Health", writeMDMCommandHealth),
-            // --- Protect (sheets 35–40, optional) ---
-            ("Protect Overview", gatedOnProtect(writeProtectOverview)),
-            ("Protect Alerts", gatedOnProtect(writeProtectAlerts)),
-            ("Protect Computers", gatedOnProtect(writeProtectComputers)),
-            ("Protect Insights", gatedOnProtect(writeProtectInsights)),
-            ("Protect Plans", gatedOnProtect(writeProtectPlans)),
-            ("Protect Threat Overview", gatedOnProtect(writeProtectThreatOverview)),
+        ]
+        let trailing: [(name: String, write: () throws -> Void)] = [
             // --- Parity / detail sheets (sheets 41–44) ---
             ("Patch Summary Dashboard", writePatchSummaryDashboard),
             ("Patch Velocity", writePatchVelocity),
@@ -124,6 +119,25 @@ struct CoreDashboard: Sendable {
             // --- mSCP / STIG compliance (sheets 46–47) ---
             ("mSCP Compliance", writeMSCPCompliance),
             ("Compliance Trend", writeComplianceTrend),
+        ]
+        // --- Protect (sheets 35–40, optional) ---
+        return leading + protectSheetPlan + trailing
+    }
+
+    /// The Protect tabs, also written into the Jamf School workbook (`SchoolDashboard`, 2.11).
+    static let protectSheetNames = [
+        "Protect Overview", "Protect Alerts", "Protect Computers", "Protect Insights",
+        "Protect Plans", "Protect Threat Overview",
+    ]
+
+    var protectSheetPlan: [(name: String, write: () throws -> Void)] {
+        [
+            ("Protect Overview", gatedOnProtect(writeProtectOverview)),
+            ("Protect Alerts", gatedOnProtect(writeProtectAlerts)),
+            ("Protect Computers", gatedOnProtect(writeProtectComputers)),
+            ("Protect Insights", gatedOnProtect(writeProtectInsights)),
+            ("Protect Plans", gatedOnProtect(writeProtectPlans)),
+            ("Protect Threat Overview", gatedOnProtect(writeProtectThreatOverview)),
         ]
     }
 

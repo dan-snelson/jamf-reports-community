@@ -15,6 +15,15 @@ enum GatewayRegion: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The number `school setup`'s "Choose [1-4]" region prompt takes for this region.
+    var setupChoice: String {
+        switch self {
+        case .us: "1"
+        case .eu: "2"
+        case .apac: "3"
+        }
+    }
+
     var host: String { "\(rawValue).api.jamfcloud.com" }
     var url: String { "https://\(host)" }
 

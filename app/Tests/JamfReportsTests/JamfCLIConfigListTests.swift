@@ -60,4 +60,15 @@ final class JamfCLIConfigListTests: XCTestCase {
         XCTAssertNil(JamfCLIConfigList.scopeLevel(data: json, profile: "cap"), "as jamf-cli reads it")
         XCTAssertEqual(JamfCLIConfigList.isTenantLevel(data: json, profile: "ten"), true)
     }
+
+    func testHasTenantIDIgnoresTheEnvironmentID() {
+        let json = Data("""
+        [{"name": "both", "auth-method": "apikey", "tenant-id": "t", "environment-id": "e"},
+         {"name": "none", "auth-method": "apikey"}]
+        """.utf8)
+        XCTAssertEqual(JamfCLIConfigList.hasTenantID(data: json, profile: "both"), true)
+        XCTAssertEqual(JamfCLIConfigList.isTenantLevel(data: json, profile: "both"), false)
+        XCTAssertEqual(JamfCLIConfigList.hasTenantID(data: json, profile: "none"), false)
+        XCTAssertNil(JamfCLIConfigList.hasTenantID(data: json, profile: "absent"))
+    }
 }

@@ -9,6 +9,15 @@ versions in this repository map to git tags.
 
 ### Added
 
+- Jamf Protect now works with a Jamf School workspace (experimental): connect it from Data
+  Sources and Protect is collected after each School collect, gets its own Jamf Protect screen,
+  matches Protect computers to Jamf School Macs, and adds its tabs to the School workbook. It is
+  not backed up, as a Jamf School workspace has no backups. (#284)
+- Jamf School setup can also save Platform API access for blueprints (experimental): turn on
+  "Do you also have Platform API configured for Jamf School?" and enter the region, tenant ID,
+  client ID and secret, or add them later from Data Sources. The app checks them once and says
+  if the tenant ID or a permission is wrong. Updating a School profile's credentials no longer
+  removes Platform API access it already has. (#284)
 - Warnings you have to act on no longer stay in the run log only: a webhook that rejected a card,
   a Jamf Protect backup that was skipped or incomplete, a Jamf School collect with no devices, an
   unreadable Extension Attribute snapshot, a large Fleet Drift change and a mobile device list
@@ -47,6 +56,13 @@ versions in this repository map to git tags.
   model, OS, managed, supervised and last check-in, with counts by platform, filters for
   managed, unmanaged and stale devices, and a search. Devices waiting in Automated Device
   Enrollment are listed below them.
+- A Jamf School workspace now builds Trends history: each collect that reads its devices saves
+  a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
+  The first collect after the upgrade also fills in earlier days from the Jamf School device
+  snapshots already on disk, so Trends starts at the workspace's first collect. (#284)
+- Experimental: a Jamf School workspace whose profile also has Platform API fields collects its
+  blueprints and writes a Blueprints tab (name, state, last deployed, created, updated). Without
+  those fields Data Sources shows the source as skipped and says how to add them.
 - A Jamf School workspace now builds Trends history: each collect that reads its devices saves
   a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
 

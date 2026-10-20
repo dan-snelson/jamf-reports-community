@@ -209,6 +209,16 @@ final class OnboardingFlow {
     var schoolConnectionError: String?
     /// What recording the connection in config.yaml did not keep (a backup was made).
     var schoolConfigNote: String?
+    /// Platform API fields `school setup` writes onto the School profile itself: Jamf School's
+    /// Platform API is never a profile of its own.
+    var schoolPlatformEnabled = false
+    var schoolPlatformRegion: GatewayRegion = .us
+    var schoolPlatformTenantID = ""
+    var schoolPlatformClientID = ""
+    var schoolPlatformClientSecret = ""
+    var schoolPlatformSecretFieldHasText = false
+    /// The blueprints check after a setup that sent Platform fields; nil otherwise.
+    var schoolPlatformCheck: SchoolPlatformCheck.Verdict?
 
     // MARK: - State flags
 
@@ -347,7 +357,15 @@ final class OnboardingFlow {
         isSchoolURLValid
             && !schoolNetworkID.trimmed.isEmpty
             && (!schoolAPIKey.isEmpty || schoolAPIKeyFieldHasText)
+            && (!schoolPlatformEnabled || isSchoolPlatformComplete)
             && !isConnectingSchool
+    }
+
+    /// The Platform API fields are all filled in, with a tenant ID jamf-cli can take.
+    var isSchoolPlatformComplete: Bool {
+        ConnectionEnvironments.isUsableID(schoolPlatformTenantID.trimmed)
+            && !schoolPlatformClientID.trimmed.isEmpty
+            && (!schoolPlatformClientSecret.isEmpty || schoolPlatformSecretFieldHasText)
     }
 
     var isProfileNameValid: Bool {
@@ -426,7 +444,7 @@ final class OnboardingFlow {
             clearProductSecrets()
         }
         if currentStep == .schoolConnect {
-            clearSchoolAPIKey()
+            clearSchoolSecrets()
             // The workspace step can change the profile, so the connection is made again.
             schoolConnected = false
             schoolConnectionError = nil
@@ -682,6 +700,7 @@ final class OnboardingFlow {
         schoolConnected = false
         schoolConnectionError = nil
         schoolConfigNote = nil
+        schoolPlatformCheck = nil
 
         let name = schoolProfileName.trimmed
         guard ProfileService.isValid(name) else {
@@ -710,12 +729,11 @@ final class OnboardingFlow {
         isConnectingSchool = true
         defer { isConnectingSchool = false }
 
-        var stdinData = Self.schoolStdin(
-            networkID: schoolNetworkID.trimmed, apiKey: schoolAPIKey
-        )
+        let sendsPlatform = schoolPlatformEnabled
+        var stdinData = schoolSetupStdin()
         defer {
             stdinData.resetBytes(in: 0..<stdinData.count)
-            clearSchoolAPIKey()
+            clearSchoolSecrets()
         }
 
         let isNew = await isNewProfile(name)
@@ -744,6 +762,24 @@ final class OnboardingFlow {
         } catch {
             schoolConnectionError = "Connected, but config update failed: \(error.localizedDescription)"
         }
+        // A rejected answer keeps the profile: the School API key works without the gateway.
+        if sendsPlatform {
+            // The check reads the saved profile, so the secrets go now rather than after it.
+            stdinData.resetBytes(in: 0..<stdinData.count)
+            clearSchoolSecrets()
+            schoolPlatformCheck = await SchoolPlatformCheck.run(
+                profile: name, runner: ConnectionCheck.runner(binary: binary))
+        }
+    }
+
+    /// `schoolStdin` from the School fields: the Platform API answers only with the switch on.
+    func schoolSetupStdin() -> Data {
+        Self.schoolStdin(
+            networkID: schoolNetworkID.trimmed, apiKey: schoolAPIKey,
+            platform: schoolPlatformEnabled
+                ? (schoolPlatformRegion, schoolPlatformTenantID.trimmed,
+                   schoolPlatformClientID.trimmed, schoolPlatformClientSecret)
+                : nil)
     }
 
     /// Writes school_cli.enabled + school_cli.profile into the workspace config after setup
@@ -875,19 +911,30 @@ final class OnboardingFlow {
          "--no-color"]
     }
 
-    /// stdin bytes for School setup (networkID\napiKey\nn\n).
-    ///
-    /// The trailing `n\n` is a defensive answer to the optional
-    /// "Configure Platform API access?" prompt.
+    /// stdin bytes for School setup, in jamf-cli's prompt order: Network ID, API key, then
+    /// "Configure Platform API access for blueprints?" answered `n`, or `y` followed by the
+    /// region number, tenant ID, client ID and client secret.
     ///
     /// See `proOAuth2Stdin` for the COW residual-limitation note that applies equally here.
-    static func schoolStdin(networkID: String, apiKey: String) -> Data {
+    static func schoolStdin(
+        networkID: String, apiKey: String,
+        platform: (region: GatewayRegion, tenantID: String, clientID: String,
+                   clientSecret: String)? = nil
+    ) -> Data {
         var data = Data()
-        data.append(contentsOf: networkID.utf8)
-        data.append(0x0A)
-        data.append(contentsOf: apiKey.utf8)
-        data.append(0x0A)
-        data.append(contentsOf: "n\n".utf8)
+        for line in [networkID, apiKey] {
+            data.append(contentsOf: line.utf8)
+            data.append(0x0A)
+        }
+        guard let platform else {
+            data.append(contentsOf: "n\n".utf8)
+            return data
+        }
+        data.append(contentsOf: "y\n\(platform.region.setupChoice)\n".utf8)
+        for line in [platform.tenantID, platform.clientID, platform.clientSecret] {
+            data.append(contentsOf: line.utf8)
+            data.append(0x0A)
+        }
         return data
     }
 
@@ -1263,7 +1310,11 @@ final class OnboardingFlow {
         schoolAPIKey = String(data: data, encoding: .utf8) ?? ""
     }
 
-    private func clearSchoolAPIKey() {
+    func setSchoolPlatformClientSecret(_ data: Data) {
+        schoolPlatformClientSecret = String(data: data, encoding: .utf8) ?? ""
+    }
+
+    func clearSchoolSecrets() {
         let count = schoolAPIKey.count
         if count > 0 {
             schoolAPIKey = String(repeating: "\0", count: count)
@@ -1271,11 +1322,18 @@ final class OnboardingFlow {
         schoolAPIKey.removeAll(keepingCapacity: false)
         schoolAPIKey = ""
         schoolAPIKeyFieldHasText = false
+        let secretCount = schoolPlatformClientSecret.count
+        if secretCount > 0 {
+            schoolPlatformClientSecret = String(repeating: "\0", count: secretCount)
+        }
+        schoolPlatformClientSecret.removeAll(keepingCapacity: false)
+        schoolPlatformClientSecret = ""
+        schoolPlatformSecretFieldHasText = false
     }
 
     private func clearProductSecrets() {
         clearProtectSecret()
-        clearSchoolAPIKey()
+        clearSchoolSecrets()
     }
 
     /// Wipe every typed-but-unsubmitted secret. Credential sheets call this on
@@ -1347,13 +1405,14 @@ final class OnboardingFlow {
         return redacted
     }
 
-    private func schoolRedactedOutput(_ text: String) -> String {
+    func schoolRedactedOutput(_ text: String) -> String {
         var redacted = text
-        if !schoolAPIKey.isEmpty {
-            redacted = redacted.replacingOccurrences(of: schoolAPIKey, with: "[redacted]")
+        for secret in [schoolAPIKey, schoolPlatformClientSecret] where !secret.isEmpty {
+            redacted = redacted.replacingOccurrences(of: secret, with: "[redacted]")
         }
-        let id = schoolNetworkID.trimmed
-        if id.count >= 4 {
+        let ids = [(schoolNetworkID.trimmed, 4), (schoolPlatformTenantID.trimmed, 4),
+                   (schoolPlatformClientID.trimmed, 8)]
+        for (id, minimum) in ids where id.count >= minimum {
             redacted = redacted.replacingOccurrences(of: id, with: "[redacted]")
         }
         return redacted

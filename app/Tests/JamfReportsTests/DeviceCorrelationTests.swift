@@ -93,4 +93,58 @@ final class DeviceCorrelationTests: XCTestCase {
         XCTAssertEqual(result.noIdentifier, 1)
         XCTAssertEqual(result.proWithoutProtect.map(\.jamfID), ["2", "3", "4"])
     }
+
+    // MARK: - Jamf School (2.11)
+
+    /// jamf-cli's flattened `school devices list` row, through the reader the screens use.
+    private func schoolDevice(
+        _ name: String, udid: String = "", serial: String = "", os: String = "macOS 26.6.2"
+    ) -> SchoolFleetService.Device {
+        SchoolFleetService.device(
+            from: ["name": name, "udid": udid, "serialNumber": serial, "os": os], index: 0)
+    }
+
+    func testProtectMatchesSchoolDevicesByUDIDThenSerialNeverByName() throws {
+        let rows = [
+            try protectRow(uuid: "aaaa-1111", serial: nil, host: "Lab-1"),
+            try protectRow(uuid: nil, serial: "C02X", host: "Lab-2"),
+            try protectRow(uuid: "ffff-9999", serial: nil, host: "Cart-iPad"),
+            try protectRow(uuid: nil, serial: "DUP"),
+        ]
+        let school = [
+            schoolDevice("Lab-1", udid: "AAAA-1111"),
+            schoolDevice("Lab-2", udid: "BBBB-2222", serial: "c02x"),
+            schoolDevice("Cart-iPad", udid: "CCCC", os: "iPadOS 26.1"),
+            schoolDevice("Lab-3", serial: "DUP"), schoolDevice("Lab-4", serial: "DUP"),
+            schoolDevice("Lab-5", udid: "EEEE"),
+        ]
+        let result = ProtectProCorrelation.build(protect: rows, school: school)
+        XCTAssertEqual(result.inventory, .jamfSchool)
+        XCTAssertEqual(result.matched, 2, "UDID ignoring case, then serial")
+        XCTAssertEqual(result.notInPro.map(\.hostName), ["Cart-iPad"], "a name never matches")
+        XCTAssertEqual(result.ambiguous, 1)
+        XCTAssertEqual(result.proWithoutProtect.map(\.name), ["Lab-3", "Lab-4", "Lab-5"],
+                       "only Macs count as School devices without Protect")
+    }
+
+    func testTheSchoolMatchReadsTheSchoolDevicesSnapshot() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-match-\(UUID().uuidString)", isDirectory: true)
+        setenv("JRC_TEST_WORKSPACES_ROOT", root.path, 1)
+        addTeardownBlock {
+            unsetenv("JRC_TEST_WORKSPACES_ROOT")
+            try? FileManager.default.removeItem(at: root)
+        }
+        let devices = root.appendingPathComponent("campus/jamf-cli-data/school-devices",
+                                                  isDirectory: true)
+        try FileManager.default.createDirectory(at: devices, withIntermediateDirectories: true)
+        let rows = [try protectRow(uuid: "aaaa", serial: nil)]
+        XCTAssertNil(ProtectProCorrelation.load(
+            protect: rows, profile: "campus", demoMode: false, school: true))
+        try Data(#"[{"name":"Lab-1","udid":"AAAA","os":"macOS 26.6.2"}]"#.utf8).write(
+            to: devices.appendingPathComponent("school-devices_20261020T090000.json"))
+        let match = try XCTUnwrap(ProtectProCorrelation.load(
+            protect: rows, profile: "campus", demoMode: false, school: true))
+        XCTAssertEqual([match.matched, match.proWithoutProtect.count], [1, 0])
+    }
 }

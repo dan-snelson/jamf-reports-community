@@ -54,6 +54,7 @@ enum ConfigSchema {
         "charts.os_adoption.enabled": "2.9",
         "collect_cadence": "2.3.0",
         "columns": "2.11",
+        "exceptions.control_id": "2.11",
         "jamf_cli.allow_live_overview": "2.9",
         "jamf_cli.enabled": "2.9",
         "mobile_columns": "2.11",

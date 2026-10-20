@@ -718,6 +718,25 @@ final class ConfigDoctorServiceTests: XCTestCase {
         }
     }
 
+    /// `exceptions[].control_id` had no reader; 2.11 retired it, inside each list item.
+    func testExceptionControlIDReadsAsRetiredInsideTheList() throws {
+        let yaml = """
+        exceptions:
+          - id: "EXC-001"
+            description: "Lab Macs"
+            signed_off_by: "Security Officer"
+            signed_off_date: "2026-01-15"
+            control_id: "AC-2"
+        """
+        XCTAssertEqual(try makeConfig(yaml).exceptions?.first?.id, "EXC-001")
+        try withWorkspace(yaml) { profile, _ in
+            let rows = ConfigDoctorService.unknownKeyRows(profile: profile)
+            XCTAssertEqual(rows.map(\.title), ["exceptions[0].control_id"])
+            XCTAssertEqual(rows.map(\.detail), ["No longer read since 2.11."])
+            XCTAssertEqual(rows.map(\.hint), ["Delete the line from config.yaml."])
+        }
+    }
+
     /// A retired key in a block no app writer rewrites is the user's to delete.
     func testARetiredKeyNoSaveRemovesTellsTheUserToDeleteTheLine() {
         let rows = ConfigDoctorService.unknownKeyRows([

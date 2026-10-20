@@ -1120,8 +1120,6 @@ struct ConfigException: Decodable, Sendable, Equatable {
     let signedOffDate: String
     var expiresDate: String?
     var linkedFinding: String?
-    /// Optional NIST/STIG/CIS control identifier (e.g. `"AC-2"`, `"AC-2(1).a"`), kept as typed.
-    var controlID: String?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case id, description
@@ -1129,7 +1127,6 @@ struct ConfigException: Decodable, Sendable, Equatable {
         case signedOffDate = "signed_off_date"
         case expiresDate = "expires_date"
         case linkedFinding = "linked_finding"
-        case controlID = "control_id"
     }
 
     init(
@@ -1138,8 +1135,7 @@ struct ConfigException: Decodable, Sendable, Equatable {
         signedOffBy: String,
         signedOffDate: String,
         expiresDate: String? = nil,
-        linkedFinding: String? = nil,
-        controlID: String? = nil
+        linkedFinding: String? = nil
     ) {
         self.id = id
         self.description = description
@@ -1147,7 +1143,6 @@ struct ConfigException: Decodable, Sendable, Equatable {
         self.signedOffDate = signedOffDate
         self.expiresDate = expiresDate
         self.linkedFinding = linkedFinding
-        self.controlID = controlID
     }
 }
 

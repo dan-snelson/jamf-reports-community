@@ -9,6 +9,9 @@ versions in this repository map to git tags.
 
 ### Added
 
+- Experimental: a Jamf School workspace whose profile also has Platform API fields collects its
+  blueprints and writes a Blueprints tab (name, state, last deployed, created, updated). Without
+  those fields Data Sources shows the source as skipped and says how to add them.
 - Warnings you have to act on no longer stay in the run log only: a webhook that rejected a card,
   a Jamf Protect backup that was skipped or incomplete, a Jamf School collect with no devices, an
   unreadable Extension Attribute snapshot, a large Fleet Drift change and a mobile device list

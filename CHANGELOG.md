@@ -233,6 +233,14 @@ versions in this repository map to git tags.
 - Workbook compliance charts and the app use the same color for each compliance band, and
   the chart legend no longer cuts long labels short.
 - OS version chart colors for a macOS release without a set color no longer change between runs.
+- **Fleet Drift** still lists every Mac that joined or left when the change is large, and now
+  says so at the top of the sheet and in the run log, with the counts and the share of the fleet:
+  a planned mass enrollment or retirement is normal, but a collect that did not finish can make
+  Macs look departed. (#284)
+- **Fleet Drift** no longer lists a Mac as both a new enrollment and departed when its serial
+  number is on two Jamf Pro records and it has no Jamf ID; such Macs are counted in a note
+  instead. An inventory collected without check-in dates no longer lists every Mac as newly
+  stale: the stale sections say they were not compared. (#284)
 
 ### Removed
 

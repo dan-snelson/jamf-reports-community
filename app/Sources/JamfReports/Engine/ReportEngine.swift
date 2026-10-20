@@ -82,7 +82,7 @@ struct ReportEngine: Sendable {
         // template order rather than plan order. Unknown SheetID values are skipped
         // with a warning — they are engine-team follow-ups, not fatal errors.
         let core = CoreDashboard(config: config, dataDir: dataDir, workbook: workbook,
-                                 provenance: prov, aiNarrative: aiNarrative)
+                                 provenance: prov, aiNarrative: aiNarrative, onLine: onLine)
         let registry = SheetRegistry(plan: core.sheetPlan)
         for sheetID in template.includedSheets {
             AppLogger.report.debug("sheet \(sheetID.rawValue, privacy: .public)")

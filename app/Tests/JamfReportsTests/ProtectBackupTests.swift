@@ -431,7 +431,7 @@ final class ProtectBackupTests: XCTestCase {
         }
     }
 
-    func test_pruneNeverRemovesOrCountsABackupWithAnIncompleteProtectPart() throws {
+    func test_pruneHoldsAnIncompleteProtectPartUntilANewerOneCompletes() throws {
         let ctx = try makeContext(config: connectedConfig, protect: .ok)
         let backups = ctx.workspace.appendingPathComponent("backups", isDirectory: true)
         func make(_ name: String, protect: BackupProductResult?) throws {
@@ -444,16 +444,18 @@ final class ProtectBackupTests: XCTestCase {
         }
         try make("20260501T010101", protect: nil)
         try make("20260502T010101", protect: BackupProductResult(state: .partial, exitCode: 7))
-        try make("20260503T010101", protect: BackupProductResult(state: .failed, exitCode: 3))
-        try make("20260504T010101", protect: BackupProductResult(state: .skipped, reason: "x"))
-        try make("20260505T010101", protect: BackupProductResult(state: .ok, exitCode: 0))
+        try make("20260503T010101", protect: BackupProductResult(state: .ok, exitCode: 0))
+        try make("20260504T010101", protect: BackupProductResult(state: .failed, exitCode: 3))
+        try make("20260505T010101", protect: BackupProductResult(state: .skipped, reason: "x"))
+        try make("20260506T010101", protect: BackupProductResult(state: .partial, exitCode: 7))
 
         let lines = Lines()
         BackupMaintenance.pruneScheduledBackups(profile: ctx.profile, keep: 1) { lines.append($0) }
 
         let left = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
-        XCTAssertEqual(left, ["20260502T010101", "20260503T010101", "20260505T010101"],
-                       "incomplete Protect parts stay; of the rest only the newest is kept")
+        XCTAssertEqual(left, ["20260504T010101", "20260505T010101", "20260506T010101"],
+                       "incomplete parts newer than the last complete one stay; the partial "
+                       + "older than it is counted and pruned; of the rest the newest is kept")
         XCTAssertTrue(lines.texts.contains { $0.contains("2 scheduled backup(s) whose Jamf Protect") },
                       "\(lines.texts)")
     }
@@ -473,17 +475,17 @@ final class ProtectBackupTests: XCTestCase {
                 .write(to: dir.appendingPathComponent("manifest.json"))
         }
         try make("20260501T010101", protect: empty)
-        try make("20260502T010101", protect: BackupProductResult(
-            state: .partial, exitCode: 0, reason: "no objects exported", hasFailuresFile: true))
+        try make("20260502T010101", protect: empty)
         try make("20260503T010101", protect: empty)
-        try make("20260504T010101", protect: empty)
+        try make("20260504T010101", protect: BackupProductResult(
+            state: .partial, exitCode: 0, reason: "no objects exported", hasFailuresFile: true))
 
         BackupMaintenance.pruneScheduledBackups(profile: ctx.profile, keep: 1)
 
         let left = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
-        XCTAssertEqual(left, ["20260502T010101", "20260504T010101"],
+        XCTAssertEqual(left, ["20260503T010101", "20260504T010101"],
                        "empty exports are counted and pruned; a real Protect failure stays")
-        XCTAssertFalse(empty.protectSummary.contains("never pruned"), empty.protectSummary)
+        XCTAssertFalse(empty.protectSummary.contains("is kept until"), empty.protectSummary)
     }
 
     func test_backup_failedProtectDiscardsItsFilesAndKeepsPro() async throws {
@@ -583,7 +585,7 @@ final class ProtectBackupTests: XCTestCase {
         let partial = BackupProductResult(
             state: .partial, exitCode: 7, objectCounts: ["plans": 1], hasFailuresFile: true)
         XCTAssertTrue(partial.protectSummary.contains("protect/_failures.yaml"))
-        XCTAssertTrue(partial.protectSummary.contains("never pruned"))
+        XCTAssertTrue(partial.protectSummary.contains("is kept until a later backup"))
         let failed = BackupProductResult(state: .failed, exitCode: 3)
         XCTAssertTrue(failed.protectSummary.contains("failed (exit 3)"))
         XCTAssertEqual(

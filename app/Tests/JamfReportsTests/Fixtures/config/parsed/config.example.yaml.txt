@@ -38,6 +38,7 @@ html.section_limits.protect_alerts = int 25
 html.section_limits.insights_drift_snapshots = int 2
 protect.enabled = bool false
 protect.profile = string ""
+protect.backup_on_synced_storage = bool false
 notify.enabled = bool false
 notify.provider = string "teams"
 notify.url = string ""

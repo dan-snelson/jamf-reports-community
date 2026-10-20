@@ -487,6 +487,11 @@ final class ConfigSchemaTests: XCTestCase {
         }
     }
 
+    func testProtectBackupOnSyncedStorageIsAKnownKey() {
+        XCTAssertTrue(
+            ConfigSchema.knownKeys(at: ["protect"])?.contains("backup_on_synced_storage") ?? false)
+    }
+
     // MARK: - The shipped example
 
     /// The example documents only keys the app reads, so it must report none.

@@ -129,13 +129,15 @@ enum ProtectBackup {
 
     /// Decides whether this backup includes Protect. The pin and storage checks are closures
     /// so a workspace without Protect never evaluates them (the pin check records a first
-    /// sight on a shared workspace).
+    /// sight on a shared workspace). `syncedStorageAllowed` is asked only on shared storage:
+    /// `protect.backup_on_synced_storage` as this Mac may use it.
     static func plan(
         config: ReportConfig?,
         workspaceProfile: String,
         pinAllows: () -> Bool,
         protectRefusal: (String) -> String? = { _ in nil },
-        sharedStorage: () -> String?
+        sharedStorage: () -> String?,
+        syncedStorageAllowed: () -> Bool = { false }
     ) -> Plan {
         let detected = ProfileProductType.detect(from: config, profile: workspaceProfile)
         guard detected.type == .jamfPro, detected.runsProtect else { return .notConnected }
@@ -151,11 +153,43 @@ enum ProtectBackup {
             return .skip(reason: "protect.profile is not a usable jamf-cli profile name")
         }
         if let refusal = protectRefusal(protectProfile) { return .skip(reason: refusal) }
-        if let place = sharedStorage() {
-            return .skip(reason: "this workspace is \(place), and Protect backup files can hold "
-                + "third-party credentials that would sync to every Mac that shares it")
+        if let place = sharedStorage(), !syncedStorageAllowed() {
+            return .skip(reason: syncedStorageReason(place: place))
         }
         return .run(profile: protectProfile)
+    }
+
+    /// The concern and how to allow it; the organization's storage policy decides, not the app.
+    static func syncedStorageReason(place: String) -> String {
+        "this workspace is \(place), and a Protect backup contains action configurations with "
+            + "request headers and data-forwarding settings. If your organization's storage "
+            + "policy allows it, turn on Protect backups for this folder in Backups "
+            + "(\(SharedConfigPin.Key.protectBackupOnSyncedStorage.rawValue))"
+    }
+
+    /// Where a Protect-connected workspace's backups sit on storage other Macs reach, and
+    /// whether this Mac backs Protect up there. Nil when Protect is not connected or the
+    /// storage is local. Probes the volume, so call it off the main actor.
+    struct SyncedStorageChoice: Sendable, Equatable {
+        let place: String
+        let allowed: Bool
+    }
+
+    static func syncedStorageChoice(
+        profile: String, config: ReportConfig?, appSupport: URL = AppSupport.directory()
+    ) -> SyncedStorageChoice? {
+        let detected = ProfileProductType.detect(from: config, profile: profile)
+        guard detected.type == .jamfPro, detected.runsProtect,
+              let workspace = ProfileService.workspaceURL(for: profile),
+              let place = BackupMaintenance.sharedStorageDescription(
+                workspace.appendingPathComponent("backups", isDirectory: true),
+                profile: profile, volumeIsLocal: CloudStorage.isOnLocalVolume)
+        else { return nil }
+        return SyncedStorageChoice(
+            place: place,
+            allowed: SharedConfigPin.protectBackupOnSyncedStorage(
+                config?.protect?.backsUpOnSyncedStorage ?? false,
+                profile: profile, appSupport: appSupport))
     }
 
     /// Classifies a finished `protect backup` from its exit code and what it left in
@@ -218,6 +252,41 @@ enum ProtectBackup {
     }
 }
 
+/// Scoped write of `protect.backup_on_synced_storage`, the Backups screen's switch. Like
+/// `NotifyConfigWriter` it rewrites only the `protect:` block (a dropped comment is copied out
+/// first) and confirms the value it wrote on this Mac, since the switch is the operator's own act.
+enum ProtectBackupConfigWriter {
+    enum WriteError: Error, LocalizedError {
+        case invalidProfile(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidProfile(let profile): "Invalid profile name: \(profile)"
+            }
+        }
+    }
+
+    static func apply(onSyncedStorage: Bool, to root: inout YAMLCodec.YAMLMapping) {
+        var protect = root.value(for: "protect")?.mapping ?? .init(entries: [])
+        protect.set("backup_on_synced_storage", value: .scalar(.bool(onSyncedStorage)))
+        root.set("protect", value: .mapping(protect))
+    }
+
+    @discardableResult
+    static func save(
+        onSyncedStorage: Bool, profile: String, appSupport: URL = AppSupport.directory()
+    ) throws -> ConfigSaveReport {
+        guard ProfileService.isValid(profile) else { throw WriteError.invalidProfile(profile) }
+        let report = try ConfigService.saveBlock(key: "protect", profile: profile) {
+            apply(onSyncedStorage: onSyncedStorage, to: &$0)
+        }.report
+        SharedConfigPin.confirmWritten(
+            String(onSyncedStorage), key: .protectBackupOnSyncedStorage,
+            profile: profile, appSupport: appSupport)
+        return report
+    }
+}
+
 extension CLIBridge {
     /// Backs up Protect into `<staging>/protect` when the workspace has it connected and the
     /// plan allows it. Nil means Protect is not part of this workspace. Never throws: a
@@ -257,7 +326,11 @@ extension CLIBridge {
             config: config, workspaceProfile: profile,
             pinAllows: { SharedConfigPin.protectAllowed(profile: profile) },
             protectRefusal: { _ in refusal },
-            sharedStorage: sharedStorage)
+            sharedStorage: sharedStorage,
+            syncedStorageAllowed: {
+                SharedConfigPin.protectBackupOnSyncedStorage(
+                    config?.protect?.backsUpOnSyncedStorage ?? false, profile: profile)
+            })
         let protectProfile: String
         switch plan {
         case .notConnected:

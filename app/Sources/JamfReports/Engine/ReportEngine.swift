@@ -2041,6 +2041,12 @@ struct ReportEngine: Sendable {
 
         // Resolved once per run; the dashboard and quiet-flag gates below key on it.
         let detectedVersion = JamfCLIInstaller.installedVersion(at: bin)
+        // Older binaries exit 2 on the 1.29 resource names, so every source would fail one by one.
+        if let detectedVersion, JamfCLIInstaller.isBelowMinimumSupported(detectedVersion) {
+            onLine(.init(timestamp: Date(), level: .fail,
+                         text: JamfCLIInstaller.floorLine(installed: detectedVersion, profile: profile)))
+            throw ReportEngineError.jamfCLITooOld(installed: detectedVersion)
+        }
         let dashboardSupported = JamfCLIInstaller.supportsDashboard(detectedVersion)
         let commands = Self.collectCommandMatrix(
             profile: profile,
@@ -4382,6 +4388,8 @@ enum ReportEngineError: Error, LocalizedError {
     /// link or otherwise refused.
     case reportFolderUnavailable(String)
     case jamfCLINotFound
+    /// The installed jamf-cli is older than `JamfCLIInstaller.minimumSupportedVersion`.
+    case jamfCLITooOld(installed: String)
     case invalidProfile(String)
     /// config.yaml's `jamf_cli.profile` names a profile other than the one the run is for.
     case profileMismatch(named: String, run: String)
@@ -4427,6 +4435,10 @@ enum ReportEngineError: Error, LocalizedError {
                 + "the workspace is missing or is a link. Nothing was written."
         case .jamfCLINotFound:
             return "jamf-cli not found on PATH. Install it via Homebrew or from GitHub."
+        case .jamfCLITooOld(let installed):
+            return "jamf-cli \(installed) is older than "
+                + "\(JamfCLIInstaller.minimumSupportedVersion), the oldest Jamf Reports can run. "
+                + "Update jamf-cli in Settings."
         case .invalidProfile(let p):
             return "Invalid profile name '\(p)'."
         case .profileMismatch(let named, let run):

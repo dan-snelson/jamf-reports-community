@@ -177,7 +177,10 @@ struct EASheetWriter: Sendable {
             let rawDate = entry.value.trimmingCharacters(in: .whitespaces)
             guard !rawDate.isEmpty else { continue }
             let parsedDate = dateParser.parse(rawDate)
-            let daysUntil = parsedDate.map { Int($0.timeIntervalSince(now) / 86400) }
+            // Floor, not truncation: a date that passed an hour ago is -1 days, not 0.
+            let daysUntil = parsedDate.map {
+                Int(($0.timeIntervalSince(now) / 86400).rounded(.down))
+            }
 
             let fmt: CellFormat
             let status: String
@@ -206,17 +209,46 @@ struct EASheets: Sendable {
     private let tabs: [(ea: CustomEAConfig, entries: [EAEntry])]
     private let warnings: [(ea: CustomEAConfig, reason: String)]
 
-    /// Nil when this source has nothing to say: no custom EAs, or no collected data.
+    /// Nil when this source has nothing to say: no custom EAs, or no collected data. A
+    /// snapshot that exists but cannot be read is not "no data": it is logged and every EA
+    /// without rows gets an EA Warnings row saying so.
     static func load(
-        config: ReportConfig, workbook: Workbook, dataDir: URL
+        config: ReportConfig, workbook: Workbook, dataDir: URL,
+        onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) -> EASheets? {
         guard let eas = config.customEas, !eas.isEmpty else { return nil }
-        let rows = snapshot("ea-results", in: dataDir)
-            .flatMap { EAResultRow.decodeSnapshot($0).rows } ?? []
-        let names = snapshot("computer-extension-attributes", in: dataDir)
-            .flatMap { try? JSONDecoder().decode([ExtensionAttribute].self, from: $0) }
-            .flatMap { $0.isEmpty ? nil : Set($0.map { key($0.name) }) }
-        guard !rows.isEmpty || names != nil else { return nil }
+        var resultsProblem: String?
+        var rows: [EAResultRow] = []
+        switch read("ea-results", in: dataDir) {
+        case .missing: break
+        case .unreadable(let why): resultsProblem = why
+        case .data(let data):
+            let decoded = EAResultRow.decodeSnapshot(data)
+            rows = decoded.rows ?? []
+            if decoded.rows == nil { resultsProblem = decoded.reason }
+        }
+        var definitionsProblem: String?
+        var names: Set<String>?
+        switch read("computer-extension-attributes", in: dataDir) {
+        case .missing: break
+        case .unreadable(let why): definitionsProblem = why
+        case .data(let data):
+            do {
+                let defined = try JSONDecoder().decode([ExtensionAttribute].self, from: data)
+                names = defined.isEmpty ? nil : Set(defined.map { key($0.name) })
+            } catch {
+                definitionsProblem = reason(error)
+            }
+        }
+        for (kind, problem) in [("ea-results", resultsProblem),
+                                ("computer-extension-attributes", definitionsProblem)] {
+            guard let problem else { continue }
+            let msg = "[warn] \(kind): snapshot unreadable — \(problem)"
+            AppLogger.report.warning("\(msg, privacy: .public)")
+            onLine?(.init(timestamp: Date(), level: .warn, text: msg))
+        }
+        guard !rows.isEmpty || names != nil || resultsProblem != nil || definitionsProblem != nil
+        else { return nil }
         // Only the date tab has a Serial column, and the rows carry no serial of their own.
         let serials = eas.contains { $0.type == .date }
             ? snapshot("computers", in: dataDir).map(serialsByName) ?? [:] : [:]
@@ -233,11 +265,14 @@ struct EASheets: Sendable {
                 return EAEntry(device: device, serial: serial, value: row.value?.stringValue ?? "")
             }
             if !entries.isEmpty { tabs.append((ea, entries)); continue }
-            let reason = column.isEmpty ? "No column configured"
-                : names == nil ? "No values collected"
+            let why = column.isEmpty ? "No column configured"
+                : resultsProblem.map { "snapshot unreadable: ea-results — \($0)" }
+                ?? definitionsProblem.map {
+                    "snapshot unreadable: computer-extension-attributes — \($0)" }
+                ?? (names == nil ? "No values collected"
                 : names?.contains(column) == true ? "Defined in Jamf Pro, no values collected"
-                : "Not defined in Jamf Pro"
-            warnings.append((ea, reason))
+                : "Not defined in Jamf Pro")
+            warnings.append((ea, why))
         }
         return EASheets(config: config, workbook: workbook,
                         tabs: tabs, warnings: warnings)
@@ -292,6 +327,35 @@ struct EASheets: Sendable {
 
     private static func snapshot(_ kind: String, in dataDir: URL) -> Data? {
         try? ReportEngine.loadLatestSnapshotData(kind: kind, dataDir: dataDir)
+    }
+
+    private enum SnapshotRead {
+        case missing
+        case unreadable(String)
+        case data(Data)
+    }
+
+    /// `missing` is a kind never collected; a file that exists but cannot be read is not.
+    private static func read(_ kind: String, in dataDir: URL) -> SnapshotRead {
+        do {
+            return .data(try ReportEngine.loadLatestSnapshotData(kind: kind, dataDir: dataDir))
+        } catch ReportEngineError.snapshotParseError {
+            return .missing
+        } catch {
+            return .unreadable(reason(error))
+        }
+    }
+
+    /// The decoder's own wording names the shape that was wrong, never a value from the file.
+    private static func reason(_ error: Error) -> String {
+        guard let decoding = error as? DecodingError else { return error.localizedDescription }
+        switch decoding {
+        case .typeMismatch(_, let context), .valueNotFound(_, let context),
+             .keyNotFound(_, let context), .dataCorrupted(let context):
+            return context.debugDescription
+        @unknown default:
+            return "not the expected shape"
+        }
     }
 
     /// Serial by computer name, only for a name one Mac has: two Macs can share a name, and a

@@ -44,8 +44,9 @@ extension ReportEngine {
             now: day, collectionSources: [SchoolFleetService.devicesKind: "live"],
             collectedByHost: collectingHostLabel(dataDir: dataDir))
         else {
-            onLine(.init(timestamp: Date(), level: .info,
-                         text: "[info] summary not written: Jamf School lists no devices"))
+            let msg = "[warn] Jamf School returned 0 devices — summary not written"
+            AppLogger.collect.warning("\(msg, privacy: .public)")
+            onLine(.init(timestamp: Date(), level: .warn, text: msg))
             return .nothingToSummarize
         }
         do {

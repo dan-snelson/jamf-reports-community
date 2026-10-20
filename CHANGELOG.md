@@ -199,6 +199,23 @@ versions in this repository map to git tags.
   connection** again; jamf-cli 1.33.0 reports its `apikey` sign-in method as invalid.
 - The health banner now reports Jamf Protect data that has gone stale or keeps failing in a
   workspace with Protect connected; before, only Jamf Pro data was checked.
+- A Jamf School collect where jamf-cli cannot be started for any source now fails, as the Jamf
+  Pro collect does, instead of finishing as Partial with a success exit. (#284)
+- A Jamf School or Jamf Protect collect whose `state` folder is a link or otherwise refused now
+  logs one warning naming the folder, instead of not recording per-source results in silence.
+  (#284)
+- If the mobile device list from jamf-cli cannot be read well enough to remove the lost-mode
+  phone number, location and message, it is no longer saved with them in it. The previous
+  snapshot stays in use and the run logs a warning. (#284)
+- A Jamf School collect that gets an empty device list now logs a warning ("Jamf School returned
+  0 devices") instead of an info line, so an empty tenant or a wrong login stands out in Run
+  History. (#284)
+- When an `ea-results` or Extension Attribute definitions snapshot exists but cannot be read, the
+  report now logs a warning and lists each custom EA on the EA Warnings tab as "snapshot
+  unreadable" with the reason, instead of leaving out the EA tabs and the warnings tab with no
+  message. (#284)
+- A custom EA date tab no longer shows "Expiring (0d)" for a date that passed less than a day ago.
+  It now reads Expired, with the day count rounded down. (#284)
 
 ### Removed
 

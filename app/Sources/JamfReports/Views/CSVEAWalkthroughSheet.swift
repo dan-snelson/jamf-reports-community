@@ -190,7 +190,7 @@ struct CSVEAWalkthroughSheet: View {
                         Text("Adopt as")
                             .font(.caption2)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
-                        Picker("", selection: targetBinding(ea)) {
+                        Picker("Adopt as", selection: targetBinding(ea)) {
                             Text("Custom EA").tag(AdoptTarget.customEA)
                             Text("Security Agent").tag(AdoptTarget.securityAgent)
                         }
@@ -204,7 +204,7 @@ struct CSVEAWalkthroughSheet: View {
                             Text("Type")
                                 .font(.caption2)
                                 .foregroundStyle(Theme.Text.tertiary(contrast))
-                            Picker("", selection: typeBinding(ea)) {
+                            Picker("Type", selection: typeBinding(ea)) {
                                 ForEach(CustomEAConfig.EAType.allCases) { type in
                                     Text(type.rawValue.capitalized).tag(type)
                                 }
@@ -227,6 +227,7 @@ struct CSVEAWalkthroughSheet: View {
                                 PNPTextField(
                                     value: connectedBinding(ea), placeholder: "e.g. Installed",
                                     mono: true)
+                                    .accessibilityLabel("Connected value")
                                     .frame(maxWidth: 220)
                                 Spacer()
                             }

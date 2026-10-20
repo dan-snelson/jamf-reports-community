@@ -212,4 +212,14 @@ final class AccessibilitySweepTests: XCTestCase {
                          "Accessibility label should include: \(component)")
         }
     }
+
+    /// EditableNumberStepper names its field from the label, else the prefix and suffix text.
+    func testEditableNumberStepperAccessibilityName() {
+        typealias Stepper = EditableNumberStepper
+        XCTAssertEqual(Stepper.accessibilityName(label: "Stale after days", prefix: "Stale", suffix: "d"),
+                       "Stale after days")
+        XCTAssertEqual(Stepper.accessibilityName(label: nil, prefix: "Stale", suffix: "d"), "Stale d")
+        XCTAssertEqual(Stepper.accessibilityName(label: nil, prefix: nil, suffix: "pts"), "pts")
+        XCTAssertEqual(Stepper.accessibilityName(label: "", prefix: nil, suffix: nil), "Value")
+    }
 }

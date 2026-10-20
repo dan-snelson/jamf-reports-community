@@ -351,6 +351,7 @@ struct DevicesView: View {
             range: AppConstants.staleDaysMin...AppConstants.staleDaysMax,
             prefix: "Stale",
             suffix: "d",
+            label: "Stale after days",
             help: "Computers with no \(staleRule.basisPhrase) for more than this many days are "
                 + "flagged stale."
         )

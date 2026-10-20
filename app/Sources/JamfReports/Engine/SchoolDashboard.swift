@@ -9,7 +9,7 @@ import Foundation
 /// Sheet plan mirrors Python's `SchoolDashboard.sheet_plan()`:
 ///   School Overview, Device Groups, Users, Classes, Apps, Profiles,
 ///   Locations, DEP Devices, iBeacons, Blueprints,
-///   Device Inventory, OS Versions, Device Status, Stale Devices.
+///   Device Inventory, OS Versions, Device Status, Stale Devices, then the Protect tabs.
 struct SchoolDashboard: Sendable {
 
     let config: ReportConfig
@@ -59,11 +59,12 @@ struct SchoolDashboard: Sendable {
         "School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles", "Locations",
         "DEP Devices", "iBeacons", "Blueprints", "Device Inventory", "OS Versions",
         "Device Status", "Stale Devices",
-    ]
+    ] + CoreDashboard.protectSheetNames
 
-    /// The School tabs in their default order.
+    /// The School tabs in their default order, then the Jamf Pro workbook's Protect tabs, which
+    /// are written while `protect.enabled` is on (2.11), under the same gate and names.
     var sheetPlan: [(name: String, write: () throws -> Void)] {
-        [
+        let school: [(name: String, write: () throws -> Void)] = [
             ("School Overview", writeSchoolOverview),
             ("Device Groups", writeSchoolDeviceGroups),
             ("Users", writeSchoolUsers),
@@ -79,6 +80,8 @@ struct SchoolDashboard: Sendable {
             ("Device Status", writeSchoolDeviceStatus),
             ("Stale Devices", writeSchoolStaleDevices),
         ]
+        return school
+            + CoreDashboard(config: config, dataDir: dataDir, workbook: workbook).protectSheetPlan
     }
 
     // MARK: - School Overview

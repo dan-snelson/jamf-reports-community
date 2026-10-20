@@ -559,6 +559,47 @@ final class SchoolBlueprintsSheetTests: XCTestCase {
                    "Device Status", "Stale Devices"]
         var expected = old
         expected.insert("Blueprints", at: old.firstIndex(of: "Device Inventory") ?? 0)
-        XCTAssertEqual(SchoolDashboard.sheetNames, expected)
+        XCTAssertEqual(SchoolDashboard.sheetNames, expected + CoreDashboard.protectSheetNames)
+    }
+}
+
+/// Protect works with Jamf School (2.11): the School workbook carries the Jamf Pro workbook's
+/// Protect tabs, under the same names and the same protect.enabled gate.
+final class SchoolDashboardProtectSheetTests: XCTestCase {
+    private func dataDir() throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-protect-\(UUID().uuidString)")
+        let kind = tmp.appendingPathComponent("protect-alerts", isDirectory: true)
+        try FileManager.default.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data(#"""
+        [{"computer":"lab-mac-01","created":"2026-10-01T08:00:00.000Z","eventType":"GPFSEvent",
+          "severity":"High","status":"New","uuid":"a1"}]
+        """#.utf8).write(to: kind.appendingPathComponent("protect-alerts_fixture.json"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: tmp) }
+        return tmp
+    }
+
+    func test_protectTabs_haveTheProWorkbookNames() {
+        let pro = CoreDashboard(config: ReportConfig(), dataDir: FileManager.default
+            .temporaryDirectory, workbook: Workbook()).sheetPlan.map(\.name)
+        XCTAssertEqual(pro.filter { $0.hasPrefix("Protect ") }, CoreDashboard.protectSheetNames)
+        XCTAssertEqual(Array(SchoolDashboard.sheetNames.suffix(6)), CoreDashboard.protectSheetNames)
+    }
+
+    func test_protectTabs_areWrittenOnlyWhileProtectIsEnabled() throws {
+        let dir = try dataDir()
+        let on = Workbook()
+        let config = try ConfigLoader.loadFromString(
+            "school_cli:\n  enabled: true\nprotect:\n  enabled: true\n  profile: p\n")
+        SchoolDashboard(config: config, dataDir: dir, workbook: on).writeAll()
+        XCTAssertNotNil(on.sheet(named: "Protect Alerts"))
+        XCTAssertNotNil(on.sheet(named: "Protect Threat Overview"))
+
+        let off = Workbook()
+        let schoolOnly = try ConfigLoader.loadFromString("school_cli:\n  enabled: true\n")
+        let (_, failures) = SchoolDashboard(config: schoolOnly, dataDir: dir, workbook: off)
+            .writeAll()
+        XCTAssertNil(off.sheet(named: "Protect Alerts"))
+        XCTAssertEqual(failures.map(\.sheet), [])
     }
 }

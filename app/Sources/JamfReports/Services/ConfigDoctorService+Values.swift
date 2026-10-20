@@ -369,22 +369,15 @@ extension ConfigDoctorService {
     }
 
     private static func productValueRows(_ config: ReportConfig, profile: String) -> [DoctorRow] {
-        guard let school = config.schoolCli, school.isEnabled else { return [] }
-        if school.isForeign(toWorkspace: profile) {
-            return [valueRow(
-                "school_cli.profile",
-                "school_cli.profile names \(shown(school.resolvedProfile)), not this workspace's "
-                    + "profile. The app collects Jamf Pro for this workspace and does not use that "
-                    + "Jamf School profile here. Jamf School needs its own workspace.",
-                "Set school_cli.enabled to false here, and add Jamf School as a separate "
-                    + "workspace.")]
-        }
-        guard config.protect?.isEnabled == true else { return [] }
+        guard let school = config.schoolCli, school.isEnabled,
+              school.isForeign(toWorkspace: profile) else { return [] }
         return [valueRow(
-            "school_cli.enabled",
-            "school_cli.enabled and protect.enabled are both true. The app collects Jamf School "
-                + "only and never runs Protect for this profile.",
-            "Set school_cli.enabled to false to collect Jamf Pro and Protect instead.")]
+            "school_cli.profile",
+            "school_cli.profile names \(shown(school.resolvedProfile)), not this workspace's "
+                + "profile. The app collects Jamf Pro for this workspace and does not use that "
+                + "Jamf School profile here. Jamf School needs its own workspace.",
+            "Set school_cli.enabled to false here, and add Jamf School as a separate "
+                + "workspace.")]
     }
 
     // MARK: - Row builders

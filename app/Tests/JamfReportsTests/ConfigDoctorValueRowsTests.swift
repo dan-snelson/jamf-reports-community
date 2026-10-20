@@ -467,14 +467,9 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         }
     }
 
-    func testSchoolAndProtectBothEnabledStateWhichOneTheCollectUses() throws {
-        let found = try rows("school_cli: {enabled: true}\nprotect: {enabled: true}\n")
-        XCTAssertEqual(titles(found), ["school_cli.enabled"])
-        XCTAssertEqual(found.first?.detail,
-                       "school_cli.enabled and protect.enabled are both true. The app collects "
-                       + "Jamf School only and never runs Protect for this profile.")
-        XCTAssertEqual(try rows("school_cli: {enabled: true}\nprotect: {enabled: false}\n"), [])
-        XCTAssertEqual(try rows("protect: {enabled: true}\n"), [])
+    /// Protect follows a Jamf School collect (2.11), so School with Protect is not a warning.
+    func testSchoolAndProtectBothEnabledIsQuiet() throws {
+        XCTAssertEqual(try rows("school_cli: {enabled: true}\nprotect: {enabled: true}\n"), [])
     }
 
     func testSchoolAndProtectRowIsQuietWhenSchoolIsAnotherProfile() throws {

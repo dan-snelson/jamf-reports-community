@@ -11,8 +11,9 @@ versions in this repository map to git tags.
 
 - Notifications can send a daily heartbeat: with `notify.heartbeat: true`, or the new "Send a
   daily heartbeat" switch under Notifications, the background item posts one short card a day
-  per workspace saying it ran, with the newest summary's date unless detail is minimal. Alert on
-  a day without a card to notice a Mac or background item that stopped. Off by default. (#284)
+  per workspace saying it ran, with the newest summary's date unless detail is minimal; Run now
+  sends none. Alert on a day without a card to notice a Mac or background item that stopped.
+  Off by default. (#284)
 - **Groups & Searches** now shows how many members each group has, its description, and flags
   empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
   Groups**), with a summary row that also counts policies with no scope. Saved mobile
@@ -44,9 +45,9 @@ versions in this repository map to git tags.
   be sent is tried again. (#284)
 - Setting up a workspace from the onboarding wizard now asks, on the last step, whether to run
   automatically (on by default, same choice as when adopting existing profiles) and offers an
-  optional Teams or Slack webhook. Finishing with the box ticked turns on the daily collection;
-  before, a new workspace had no background item until you opened Automation. An existing
-  automation setup is never switched off or changed.
+  optional Teams or Slack webhook, also when setup was started from demo mode. Finishing with
+  the box ticked turns on the daily collection; before, a new workspace had no background item
+  until you opened Automation. An existing automation setup is never switched off or changed.
 
 - **Settings › Add connection** and the workspace menu's **Add workspace or product…** now open
   one **Add** sheet, which replaces Add workspace, Add Jamf School workspace and the Jamf
@@ -94,18 +95,22 @@ versions in this repository map to git tags.
 
 ### Fixed
 
-- A Mac that is on only part of the day now gets its daily summary. A daily schedule whose
-  time the Mac misses runs on the first background check of the next day the Mac was off
-  overnight, instead of waiting for a time it will be off again; an always-on Mac still runs at
-  the scheduled time, and a day never runs twice. (#284)
+- A Mac that is on only part of the day now gets its daily summary. After a night off or
+  asleep, a daily schedule runs at the Mac's first background check of the day instead of
+  waiting for a scheduled time the Mac may be off again. That run counts as the day's run, so
+  the scheduled time does not repeat it, and if it fails it is retried that morning. A Mac that
+  is on at the scheduled time runs then, once a day, and Run now never moves or cancels it.
+  (#284)
 - A collect that has not produced today's summary after its three retries keeps retrying
   every hour until midnight, so a laptop that was off the VPN until the afternoon still gets its
-  day. A collect that stood down because another Mac collected recently is retried the same
-  way while today's summary is missing. (#284)
-- A scheduled run whose `config.yaml` exists but does not decode now fails with the decode error
-  in Run History, instead of a Jamf School profile being skipped as "not a Jamf Pro profile"
-  with no error. The failure card and the overdue digest can still be sent, because they read the
-  `notify:` block on its own. (#284)
+  day; Jamf School workspaces too. It stops after the three retries when every source failed in
+  a way another try repeats (a missing permission, a command the profile's API refuses), and the
+  weekly deep scan does not retry for the summary. A collect that stood down because another
+  Mac collected recently is retried the same way while today's summary is missing. (#284)
+- A scheduled collect whose `config.yaml` exists but does not decode now fails with the decode
+  error in Run History, instead of a Jamf School profile being skipped as "not a Jamf Pro
+  profile" with no error; a scheduled backup still runs, with a warning. The failure card and the
+  overdue digest can still be sent, because they read the `notify:` block on its own. (#284)
 - A scheduled run stopped by a jamf-cli below the supported minimum now posts a failure card, and
   a run skipped because the profile belongs to another Jamf product posts one a day. (#284)
 - A scheduled run that outlasts the six-hour lock limit now ends the background item, instead of

@@ -223,6 +223,13 @@ final class AutomationHealthModel {
 
     /// Set by the banner's button; Audit opens its Config Doctor segment and clears it.
     var openConfigDoctorRequested = false
+
+    /// The ACTIVE profile's open attention items (`AttentionLog`), newest first, less those
+    /// dismissed on this Mac.
+    var attentionItems: [AttentionItem] = []
+
+    /// Set by the banner's Open Run History: the log Run History selects, then clears.
+    var openRunLogRequested: String?
 }
 
 // MARK: - Managed automation wiring
@@ -410,6 +417,7 @@ extension WorkspaceStore {
             AutomationHealthModel.shared.freshnessIssues = []
             AutomationHealthModel.shared.sharedConfigKeys = []
             AutomationHealthModel.shared.automationFolderRefused = false
+            AutomationHealthModel.shared.attentionItems = []
             return
         }
         let profile = self.profile
@@ -418,6 +426,9 @@ extension WorkspaceStore {
         }.value
         let folderRefused = await Task.detached(priority: .utility) {
             ProfileService.workspaceURL(for: profile).map(AutomationStateFile.isRefused) ?? false
+        }.value
+        let attention = await Task.detached(priority: .utility) {
+            AttentionLog.openItems(profile: profile)
         }.value
         let jamfCLIVersion = self.jamfCLIVersion
         let resolveAuth = resolveAuthMethod
@@ -431,6 +442,14 @@ extension WorkspaceStore {
         AutomationHealthModel.shared.freshnessIssues = issues
         AutomationHealthModel.shared.sharedConfigKeys = sharedConfig
         AutomationHealthModel.shared.automationFolderRefused = folderRefused
+        AutomationHealthModel.shared.attentionItems = AttentionItem.ordered(
+            attention.filter { !AttentionDismissals.isDismissed($0) })
+    }
+
+    /// The banner's Dismiss: hides the open items on this Mac until each is seen again.
+    func dismissAttention() {
+        AttentionDismissals.dismiss(AutomationHealthModel.shared.attentionItems)
+        AutomationHealthModel.shared.attentionItems = []
     }
 
     /// Pure-ish freshness read: state dir → states → issues. `nonisolated` so

@@ -44,6 +44,10 @@ struct RunsView: View {
                 ? AIConfig() : AIConfigLoader.load(profile: workspace.profile)
             aiAvailability = ModelAvailability.current(for: aiConfig)
         }
+        .onChange(of: AutomationHealthModel.shared.openRunLogRequested) { _, requested in
+            // The health banner asks for the run that logged what needs attention.
+            if requested != nil { reload() }
+        }
         .alert("Export Failed", isPresented: $showExportError) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -388,7 +392,17 @@ struct RunsView: View {
             demoLogs = [:]
             runs = RunHistoryService.list(profile: workspace.profile)
         }
+        if selectRequestedRun() { return }
         if let first = runs.first { selectRun(first) } else { selectedRun = nil; logLines = [] }
+    }
+
+    /// Takes the health banner's request and selects that run when it is listed.
+    private func selectRequestedRun() -> Bool {
+        guard let wanted = AutomationHealthModel.shared.openRunLogRequested else { return false }
+        AutomationHealthModel.shared.openRunLogRequested = nil
+        guard let run = runs.first(where: { $0.id == wanted }) else { return false }
+        selectRun(run)
+        return true
     }
 
     private func selectRun(_ run: RunHistoryService.RunSummary) {

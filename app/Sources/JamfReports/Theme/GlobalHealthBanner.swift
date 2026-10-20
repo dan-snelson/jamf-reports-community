@@ -9,6 +9,7 @@ import SwiftUI
 /// days ago. This strip is the one surface that follows them.
 ///
 /// Ordering is worst-first: failing kinds (a known, reproducing error) above
+/// what needs attention (a warning a run logged that the admin has to fix), above
 /// stale kinds (a symptom), above schedule issues (which the existing Overview
 /// banner and Automation card already cover in more detail).
 struct GlobalHealthBanner: View {
@@ -26,6 +27,14 @@ struct GlobalHealthBanner: View {
     var onCollectNow: (() -> Void)?
     /// Opens Audit on its Config Doctor segment, where the Confirm button is.
     var onOpenConfigDoctor: (() -> Void)?
+    /// Open attention items for the active profile, newest first (`AttentionLog`).
+    var attentionItems: [AttentionItem] = []
+    /// Opens Backups, where a Protect backup is run and its result shown.
+    var onOpenBackups: (() -> Void)?
+    /// Opens Run History on the named log, or on the newest run for nil.
+    var onOpenRunHistory: ((String?) -> Void)?
+    /// Hides the open attention items on this Mac until each is seen again.
+    var onDismissAttention: (() -> Void)?
 
     var body: some View {
         if isRemediating {
@@ -38,14 +47,19 @@ struct GlobalHealthBanner: View {
             )
         } else if let headline = Self.headline(
             freshness: freshnessIssues, automation: automationIssues,
-            sharedConfig: sharedConfigKeys, automationFolderRefused: automationFolderRefused
+            sharedConfig: sharedConfigKeys, automationFolderRefused: automationFolderRefused,
+            attention: attentionItems
         ) {
             banner(
                 icon: headline.icon,
                 tone: headline.tone,
                 text: headline.text,
                 detail: headline.detail,
-                action: bannerAction()
+                action: bannerAction(),
+                onDismiss: Self.attentionLeads(
+                    freshness: freshnessIssues, sharedConfig: sharedConfigKeys,
+                    automationFolderRefused: automationFolderRefused, attention: attentionItems)
+                    ? onDismissAttention : nil
             )
         }
     }
@@ -55,8 +69,26 @@ struct GlobalHealthBanner: View {
     private func bannerAction() -> InlineBannerAction {
         switch Self.primaryAction(
             freshness: freshnessIssues, canCollect: onCollectNow != nil,
-            sharedConfig: sharedConfigKeys, automationFolderRefused: automationFolderRefused
+            sharedConfig: sharedConfigKeys, automationFolderRefused: automationFolderRefused,
+            attention: attentionItems
         ) {
+        case .openBackups:
+            return InlineBannerAction(
+                label: PrimaryAction.openBackups.label,
+                icon: "externaldrive",
+                help: "Run a backup and see what it kept",
+                handler: onOpenBackups ?? onOpenAutomation
+            )
+        case .openRunHistory:
+            let log = attentionItems.first?.runLog
+            return InlineBannerAction(
+                label: PrimaryAction.openRunHistory.label,
+                icon: "list.bullet.rectangle",
+                help: "Open the run that logged it",
+                handler: {
+                    if let onOpenRunHistory { onOpenRunHistory(log) } else { onOpenAutomation() }
+                }
+            )
         case .openConfigDoctor:
             return InlineBannerAction(
                 label: PrimaryAction.openConfigDoctor.label,
@@ -85,9 +117,10 @@ struct GlobalHealthBanner: View {
         tone: InlineBannerTone,
         text: String,
         detail: String?,
-        action: InlineBannerAction?
+        action: InlineBannerAction?,
+        onDismiss: (() -> Void)? = nil
     ) -> some View {
-        InlineBanner(icon: icon, tone: tone, action: action) {
+        InlineBanner(icon: icon, tone: tone, action: action, onDismiss: onDismiss) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(text)
                     .font(.callout)
@@ -111,12 +144,16 @@ struct GlobalHealthBanner: View {
         case collectNow
         case openAutomation
         case openConfigDoctor
+        case openBackups
+        case openRunHistory
 
         var label: String {
             switch self {
             case .openConfigDoctor: return "Review"
             case .collectNow: return "Collect now"
             case .openAutomation: return "Open Automation"
+            case .openBackups: return "Open Backups"
+            case .openRunHistory: return "Open Run History"
             }
         }
     }
@@ -131,14 +168,35 @@ struct GlobalHealthBanner: View {
         freshness: [DataFreshnessIssue],
         canCollect: Bool,
         sharedConfig: [String] = [],
-        automationFolderRefused: Bool = false
+        automationFolderRefused: Bool = false,
+        attention: [AttentionItem] = []
     ) -> PrimaryAction {
         // The Doctor-driven entries rank below failing kinds, so the button follows the headline.
         if !sharedConfig.isEmpty || automationFolderRefused,
            !freshness.contains(where: { $0.kind == .failing }) {
             return .openConfigDoctor
         }
+        if attentionLeads(
+            freshness: freshness, sharedConfig: sharedConfig,
+            automationFolderRefused: automationFolderRefused, attention: attention),
+           let top = attention.first {
+            switch top.code.destination {
+            case .automation: return .openAutomation
+            case .backups: return .openBackups
+            case .runHistory: return .openRunHistory
+            }
+        }
         return (canCollect && !freshness.isEmpty) ? .collectNow : .openAutomation
+    }
+
+    /// Whether the "Needs attention" entry is the headline: below failing collects and the
+    /// Doctor-driven entries, above stale data.
+    nonisolated static func attentionLeads(
+        freshness: [DataFreshnessIssue], sharedConfig: [String],
+        automationFolderRefused: Bool, attention: [AttentionItem]
+    ) -> Bool {
+        !attention.isEmpty && sharedConfig.isEmpty && !automationFolderRefused
+            && !freshness.contains { $0.kind == .failing }
     }
 
     // MARK: - Pure headline derivation
@@ -163,7 +221,8 @@ struct GlobalHealthBanner: View {
         freshness: [DataFreshnessIssue],
         automation: [AutomationHealthIssue],
         sharedConfig: [String] = [],
-        automationFolderRefused: Bool = false
+        automationFolderRefused: Bool = false,
+        attention: [AttentionItem] = []
     ) -> Headline? {
         let failing = freshness.filter { $0.kind == .failing }
         let stale = freshness.filter { $0.kind == .stale && !$0.neverCollected }
@@ -197,6 +256,19 @@ struct GlobalHealthBanner: View {
                 text: "The automation folder is a link",
                 detail: "Alert records are kept on this Mac; Run History is not written until "
                     + "the link is removed"
+            )
+        }
+        // A warning a run logged that the admin has to fix: below what stops runs, above
+        // stale data.
+        if !attention.isEmpty {
+            let named = attention.prefix(maxNamedKinds).map(\.message).joined(separator: "; ")
+            let extra = attention.count - min(attention.count, maxNamedKinds)
+            return Headline(
+                icon: "exclamationmark.bubble",
+                tone: .warn,
+                text: attention.count == 1
+                    ? "1 thing needs attention" : "\(attention.count) things need attention",
+                detail: named + (extra > 0 ? " +\(extra) more" : "")
             )
         }
         if !stale.isEmpty {

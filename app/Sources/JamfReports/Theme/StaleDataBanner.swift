@@ -43,6 +43,8 @@ struct InlineBanner<Content: View>: View {
     let icon: String
     let tone: Tone
     var action: Action?
+    /// A trailing close button, for an entry the user may hide until it happens again.
+    var onDismiss: (() -> Void)?
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -56,6 +58,17 @@ struct InlineBanner<Content: View>: View {
                 PNPButton(title: action.label, icon: action.icon, size: .sm, action: action.handler)
                     .disabled(action.isDisabled)
                     .help(action.help ?? "")
+            }
+            if let onDismiss {
+                if action == nil { Spacer(minLength: 8) }
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.Colors.fgMuted)
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss until this happens again")
+                .accessibilityLabel("Dismiss")
             }
         }
         .padding(.horizontal, 10)

@@ -17,6 +17,16 @@ final class BackupRecordTests: XCTestCase {
             fileCount: files, url: URL(fileURLWithPath: "/tmp/\(name)"))
     }
 
+    func testABackupWhoseJamfProPartFailedIsNotDiffedAndSaysSo() {
+        var failed = record("a", files: 3)
+        failed.proFailed = true
+        let good = record("b", files: 3)
+        XCTAssertFalse(BackupRecord.canDiff(failed, against: good))
+        XCTAssertFalse(BackupRecord.canDiff(good, against: failed))
+        XCTAssertTrue(BackupRecord.canDiff(good, against: record("c", files: 2)))
+        XCTAssertTrue(failed.accessibilityLabel.contains("Jamf Pro part failed"))
+    }
+
     func testTheDateInAFolderNameIsReadAsUTC() {
         XCTAssertEqual(BackupRecord.dateInName("20260601T214020"), utc(2026, 6, 1, 21, 40, 20))
         XCTAssertEqual(BackupRecord.dateInName("20260601T214020-2"), utc(2026, 6, 1, 21, 40, 20))

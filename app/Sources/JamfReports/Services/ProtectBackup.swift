@@ -117,9 +117,12 @@ struct BackupProductResult: Sendable, Hashable {
     /// The Jamf Pro result recorded in `backupDir`'s manifest, or nil (no Protect connected,
     /// or a backup from before 2.11, both of which hold a Jamf Pro backup).
     static func pro(inBackup backupDir: URL) -> BackupProductResult? {
-        manifest(inBackup: backupDir).flatMap {
-            BackupProductResult(manifestValue: ($0["products"] as? [String: Any])?["pro"])
-        }
+        manifest(inBackup: backupDir).flatMap(pro(inManifest:))
+    }
+
+    /// The Jamf Pro result in a decoded `manifest.json`, or nil.
+    static func pro(inManifest manifest: [String: Any]) -> BackupProductResult? {
+        BackupProductResult(manifestValue: (manifest["products"] as? [String: Any])?["pro"])
     }
 
     private static func manifest(inBackup backupDir: URL) -> [String: Any]? {

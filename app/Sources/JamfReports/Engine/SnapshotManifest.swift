@@ -24,6 +24,10 @@ enum SnapshotManifest {
     /// On-disk filename of a snapshot manifest.
     static let fileName = "manifest.json"
 
+    /// Largest manifest read: one entry (~110 bytes) per snapshot ever kept in the folder, so
+    /// years of hourly collects fit, and anything bigger is corrupt or planted.
+    static let maxManifestBytes = 16 * 1024 * 1024
+
     /// Outcome of `verify`. Inspect to surface UI state; ignore to keep
     /// the engine's existing no-abort behavior.
     enum VerificationResult: Equatable, Sendable {
@@ -50,7 +54,8 @@ enum SnapshotManifest {
     static func verify(snapshot: URL, data: Data) -> VerificationResult {
         let manifestURL = snapshot.deletingLastPathComponent()
             .appendingPathComponent(fileName)
-        guard let manifestData = try? Data(contentsOf: manifestURL) else {
+        guard let manifestData = try? BoundedFile.read(
+            manifestURL, limit: maxManifestBytes, followSymlinks: false) else {
             return .absent
         }
         guard let manifest = try? JSONDecoder().decode(Manifest.self, from: manifestData) else {
@@ -101,7 +106,8 @@ enum SnapshotManifest {
         let manifestURL = dir.appendingPathComponent(fileName)
 
         var files: [String: String] = [:]
-        if let existingData = try? Data(contentsOf: manifestURL) {
+        if let existingData = try? BoundedFile.read(
+            manifestURL, limit: maxManifestBytes, followSymlinks: false) {
             if let existing = try? JSONDecoder().decode(Manifest.self, from: existingData) {
                 files = existing.files
             } else {
@@ -194,7 +200,8 @@ enum SnapshotManifest {
             let isDir = (try? typeDir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             guard isDir else { continue }
             guard let newest = newestSnapshot(in: typeDir, fm: fm) else { continue }
-            guard let data = try? Data(contentsOf: newest) else { continue }
+            guard let data = try? BoundedFile.read(
+                newest, limit: BoundedFile.snapshotLimit, followSymlinks: false) else { continue }
             switch verify(snapshot: newest, data: data) {
             case .verified: summary.verified += 1
             case .absent:   summary.absent += 1
@@ -227,7 +234,8 @@ enum SnapshotManifest {
             && !$0.lastPathComponent.hasSuffix(fileName)
         }
         for snapshot in candidates {
-            guard let data = try? Data(contentsOf: snapshot) else { continue }
+            guard let data = try? BoundedFile.read(
+                snapshot, limit: BoundedFile.snapshotLimit, followSymlinks: false) else { continue }
             switch verify(snapshot: snapshot, data: data) {
             case .verified: summary.verified += 1
             case .absent:   summary.absent += 1
@@ -257,7 +265,7 @@ enum SnapshotManifest {
         ) else { return summary }
         let candidates = entries.filter { $0.pathExtension.lowercased() == "last" }
         for snapshot in candidates {
-            guard let data = try? Data(contentsOf: snapshot) else { continue }
+            guard let data = BoundedFile.stateData(snapshot) else { continue }
             switch verify(snapshot: snapshot, data: data) {
             case .verified: summary.verified += 1
             case .absent:   summary.absent += 1

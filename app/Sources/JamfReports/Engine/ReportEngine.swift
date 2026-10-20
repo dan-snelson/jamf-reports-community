@@ -3395,6 +3395,11 @@ struct ReportEngine: Sendable {
         let stateStore = WorkspacePaths
             .confinedFolderOrWarn(["state"], under: dataDir, onLine: onLine)
             .map(StateFileStore.init(directory:))
+        if stateStore != nil, let summariesDir = try? workspacePaths.summariesDir(for: profile) {
+            backfillSchoolHistoryOnce(
+                dataDir: dataDir, summariesDir: summariesDir,
+                staleDays: { schoolStaleDays(profile: profile, onLine: onLine) }, onLine: onLine)
+        }
         let plan = planSchoolCollect(profile: profile, tiers: tiers, force: force) {
             stateStore?.lastRun(report: $0)
         }
@@ -3484,13 +3489,11 @@ struct ReportEngine: Sendable {
         reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
     }
 
-    /// The School daily summary: Trends history for a workspace that writes no other. The stale
-    /// cut-off is `thresholds.stale_device_days`; a config.yaml that will not load is named in
-    /// a `[warn]` and the default 30 applies, since the summary should still advance.
-    private static func writeSchoolSummaryAfterCollect(
-        profile: String, dataDir: URL, workspacePaths: WorkspacePaths.Type,
-        landedKinds: Set<String>, onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
-    ) {
+    /// `thresholds.stale_device_days` for a School summary; 30 when config.yaml will not load,
+    /// with a `[warn]`, since the summary should still advance.
+    static func schoolStaleDays(
+        profile: String, onLine: @Sendable (CLIBridge.LogLine) -> Void
+    ) -> Int {
         var staleDays = 30
         if let workspace = ProfileService.workspaceURL(for: profile) {
             let configURL = workspace.appendingPathComponent("config.yaml")
@@ -3505,6 +3508,17 @@ struct ReportEngine: Sendable {
                 }
             }
         }
+        return staleDays
+    }
+
+    /// The School daily summary: Trends history for a workspace that writes no other. The stale
+    /// cut-off is `thresholds.stale_device_days`; a config.yaml that will not load is named in
+    /// a `[warn]` and the default 30 applies, since the summary should still advance.
+    private static func writeSchoolSummaryAfterCollect(
+        profile: String, dataDir: URL, workspacePaths: WorkspacePaths.Type,
+        landedKinds: Set<String>, onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
+    ) {
+        let staleDays = schoolStaleDays(profile: profile, onLine: onLine)
         guard let summariesDir = try? workspacePaths.summariesDir(for: profile) else {
             if landedKinds.contains(SchoolFleetService.devicesKind) {
                 onLine(.init(timestamp: Date(), level: .warn, text: "\(summaryNotWrittenMarker) "

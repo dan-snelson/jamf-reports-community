@@ -92,6 +92,8 @@ func runTick(
             await hold.keepingAlive(onGiveUp: { exitAfterLockGiveUp(profiles: profiles) }) {
                 await notifyOverdueSchedulesHeadless(
                     profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
+                await ScheduledRunSignals.notifyHeartbeats(
+                    profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
             }
         })
     // A long run must not read as a gap in the wakes.

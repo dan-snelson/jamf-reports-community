@@ -77,6 +77,22 @@ func alertFacts(
     return facts
 }
 
+/// Facts for the daily heartbeat card. `full` adds the newest daily summary's date, so the
+/// receiver can see data is current as well as the Mac alive; `minimal` is Profile and Status
+/// only. Never a device count or name.
+func heartbeatFacts(
+    detail: NotifyConfig.Detail, profile: String, newestSummaryDay: String?
+) -> [WebhookNotifier.Fact] {
+    var facts: [WebhookNotifier.Fact] = [
+        .init(label: "Profile", value: profile),
+        .init(label: "Status", value: "Background item ran"),
+    ]
+    if detail == .full {
+        facts.append(.init(label: "Newest summary", value: newestSummaryDay ?? "none"))
+    }
+    return facts
+}
+
 /// What a headless run prints to stdout for `line`, or nil when the line stays in the run
 /// log only (info lines unless `verbose`). Redacted like the log, since a scheduler may
 /// capture stdout somewhere less protected.
@@ -188,6 +204,43 @@ enum ScheduledRunSignals {
             .replacingOccurrences(of: "[0-9]+", with: "#", options: .regularExpression)
         return SHA256.hash(data: Data(flattened.utf8)).prefix(4)
             .map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Post the opt-in daily heartbeat card for each profile in `profiles` whose `notify:` is
+    /// usable with `heartbeat: true`, once per local day, after the tick's due schedules ran.
+    /// The receiver alerts on its absence, so a Mac or background item that stops is noticed.
+    /// The stamp lives in `stateRoot` (this Mac's Application Support), never in the workspace,
+    /// and is written only after a confirmed send. Tick-only: no GUI path calls this.
+    /// Best-effort — never throws.
+    static func notifyHeartbeats(
+        profiles: [String],
+        excluding excluded: Set<String> = [],
+        stateRoot: URL = AppSupport.directory()
+            .appendingPathComponent("heartbeats", isDirectory: true),
+        now: Date = Date()
+    ) async {
+        let day = SummaryJSONParser.dateFormatter.string(from: now)
+        let targets = notifyTargets(in: profiles.filter { !excluded.contains($0) }) { _ in false }
+        let marker = DayMarker(name: "heartbeat")
+        for target in targets where target.notify.sendsHeartbeat {
+            let folder = stateRoot.appendingPathComponent(
+                ProfileName.pathComponent(target.profile), isDirectory: true)
+            // Every wake gets here; skip before building anything once today's card is out.
+            guard !marker.isStamped(day, in: folder) else { continue }
+            let facts = heartbeatFacts(
+                detail: target.notify.resolvedDetail, profile: target.profile,
+                newestSummaryDay: SummaryJSONParser.newestSummaryDay(profile: target.profile))
+            let outcome = await marker.sendOnce(
+                day: day, in: [folder], now: now, onLine: { fputs($0 + "\n", stderr) }
+            ) {
+                await WebhookNotifier.send(
+                    config: target.notify, title: "Jamf Reports heartbeat — \(target.profile)",
+                    facts: facts)
+            }
+            if outcome == .failed {
+                fputs("[warn] heartbeat notification failed for '\(target.profile)'\n", stderr)
+            }
+        }
     }
 
     /// Record any config problem serious enough to make the data unreliable.

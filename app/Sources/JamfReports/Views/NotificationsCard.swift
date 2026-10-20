@@ -19,6 +19,7 @@ struct NotificationsCard: View {
     @State private var notifyProvider: NotifyConfig.Provider = .teams
     @State private var notifyURL = ""
     @State private var notifyDetail: NotifyConfig.Detail = .full
+    @State private var notifyHeartbeat = false
     @State private var notifySaveMessage: String?
     /// What a save did not keep (a backup was made), shown while its profile is live.
     @State private var notifySaveNote: ProfileSaveNote?
@@ -81,6 +82,14 @@ struct NotificationsCard: View {
                         + "schedule names.")
                         .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
 
+                    Toggle("Send a daily heartbeat", isOn: Binding(
+                        get: { notifyHeartbeat },
+                        set: { notifyHeartbeat = $0; saveNotifyConfig() }))
+                        .toggleStyle(.switch)
+                    Text("Posts one short card a day while the background item runs, so you can "
+                        + "alert on a day without one.")
+                        .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
+
                     HStack(spacing: 8) {
                         PNPButton(title: "Send test notification", icon: "paperplane", size: .sm) {
                             Task { await sendTestNotification() }
@@ -126,7 +135,8 @@ struct NotificationsCard: View {
             enabled: notifyEnabled,
             provider: notifyProvider.rawValue,
             url: notifyURL,
-            detail: notifyDetail.rawValue
+            detail: notifyDetail.rawValue,
+            heartbeat: notifyHeartbeat
         )
     }
 
@@ -136,6 +146,7 @@ struct NotificationsCard: View {
         notifyProvider = config.resolvedProvider
         notifyURL = config.resolvedURL
         notifyDetail = config.resolvedDetail
+        notifyHeartbeat = config.sendsHeartbeat
         notifySaveMessage = nil
         notifySaveNote = nil
         notifyTestResult = nil
@@ -145,7 +156,7 @@ struct NotificationsCard: View {
     private var currentEdit: PendingNotifySave {
         PendingNotifySave(
             profile: profile, enabled: notifyEnabled, provider: notifyProvider.rawValue,
-            url: notifyURL, detail: notifyDetail.rawValue)
+            url: notifyURL, detail: notifyDetail.rawValue, heartbeat: notifyHeartbeat)
     }
 
     private func saveNotifyConfig() {
@@ -159,6 +170,7 @@ struct NotificationsCard: View {
                 provider: edit.provider,
                 url: edit.url,
                 detail: edit.detail,
+                heartbeat: edit.heartbeat,
                 profile: edit.profile
             )
             notifySaveMessage = nil
@@ -222,4 +234,5 @@ private struct PendingNotifySave: Sendable {
     let provider: String
     let url: String
     let detail: String
+    let heartbeat: Bool
 }

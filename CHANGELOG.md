@@ -9,6 +9,10 @@ versions in this repository map to git tags.
 
 ### Added
 
+- Notifications can send a daily heartbeat: with `notify.heartbeat: true`, or the new "Send a
+  daily heartbeat" switch under Notifications, the background item posts one short card a day
+  per workspace saying it ran, with the newest summary's date unless detail is minimal. Alert on
+  a day without a card to notice a Mac or background item that stopped. Off by default. (#284)
 - **Groups & Searches** now shows how many members each group has, its description, and flags
   empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
   Groups**), with a summary row that also counts policies with no scope. Saved mobile

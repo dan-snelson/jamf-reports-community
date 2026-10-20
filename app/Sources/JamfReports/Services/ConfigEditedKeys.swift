@@ -16,7 +16,8 @@ enum ConfigEditedKeys {
         ChartsConfigWriter.apply(.defaults, to: &root)
         HTMLReportConfigWriter.apply(withWorkbook: true, to: &root)
         NotifyConfigWriter.apply(
-            enabled: false, provider: "teams", url: "", detail: "full", to: &root)
+            enabled: false, provider: "teams", url: "", detail: "full", heartbeat: true,
+            to: &root)
         AIConfigWriter.apply(AIConfig(), to: &root)
         root.set("security_policy", value: .mapping(securityPolicyProbe))
         var found: Set<[String]> = []

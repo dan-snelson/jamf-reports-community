@@ -65,6 +65,8 @@ versions in this repository map to git tags.
   those fields Data Sources shows the source as skipped and says how to add them.
 - A Jamf School workspace now builds Trends history: each collect that reads its devices saves
   a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
+- The workbook's Compliance Rules sheet has a Rule ID column at the end; the other columns are
+  unchanged. (#284)
 
 ### Changed
 
@@ -122,6 +124,12 @@ versions in this repository map to git tags.
   classes, apps and the rest). It used to show the Jamf Pro cards with nothing in them. Its
   Getting Started list ticks off the collect step after a School collect and no longer asks you
   to track Extension Attributes.
+- A Jamf Protect backup now runs even when the Jamf Pro backup fails, so Protect is still backed
+  up. That backup is marked on the Backups screen and is not offered for a diff; the run still
+  reads as failed. (#284)
+- A backup whose Jamf Protect part failed is kept only until a newer backup's Protect part
+  completes, so a Protect failure that repeats no longer stops old backups from being removed.
+  (#284)
 
 ### Fixed
 
@@ -303,6 +311,7 @@ versions in this repository map to git tags.
   from the collected extension attribute results, and `charts.archive_current_csv` has no effect.
 - `csv-inbox/` is no longer read by reports. Config Doctor suggests deleting the folder when it
   holds files.
+- `exceptions[].control_id` is no longer read; Config Doctor says it can be deleted. (#284)
 
 ### Security
 

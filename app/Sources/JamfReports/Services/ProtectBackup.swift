@@ -30,6 +30,9 @@ struct BackupProductResult: Sendable, Hashable {
     /// is not kept, or every scheduled backup of an empty tenant would stay forever.
     var keepsBackupFromPruning: Bool { isIncomplete && !isEmptyExport }
 
+    /// A Protect part that releases older incomplete ones for pruning.
+    var isComplete: Bool { state == .ok || isEmptyExport }
+
     var objectTotal: Int { objectCounts.values.reduce(0, +) }
 
     /// A count a manifest may hold: a whole number from 0 to `Int32.max`, as the Platform count
@@ -60,11 +63,11 @@ struct BackupProductResult: Sendable, Hashable {
                     : "")
                 + (isEmptyExport
                     ? "Jamf Protect exported no objects."
-                    : "It is never pruned automatically.")
+                    : "It is kept until a later backup's Jamf Protect part completes.")
         case .failed:
             let code = exitCode.map { " (exit \($0))" } ?? ""
             return "The latest backup has no Jamf Protect part: the Protect backup failed\(code). "
-                + "It is never pruned automatically."
+                + "It is kept until a later backup's Jamf Protect part completes."
         case .skipped:
             return "Jamf Protect was not backed up: \(reason ?? "skipped")."
         }
@@ -108,12 +111,26 @@ struct BackupProductResult: Sendable, Hashable {
 
     /// The Protect result recorded in `backupDir`'s manifest, or nil.
     static func protect(inBackup backupDir: URL) -> BackupProductResult? {
+        manifest(inBackup: backupDir).flatMap(protect(inManifest:))
+    }
+
+    /// The Jamf Pro result recorded in `backupDir`'s manifest, or nil (no Protect connected,
+    /// or a backup from before 2.11, both of which hold a Jamf Pro backup).
+    static func pro(inBackup backupDir: URL) -> BackupProductResult? {
+        manifest(inBackup: backupDir).flatMap(pro(inManifest:))
+    }
+
+    /// The Jamf Pro result in a decoded `manifest.json`, or nil.
+    static func pro(inManifest manifest: [String: Any]) -> BackupProductResult? {
+        BackupProductResult(manifestValue: (manifest["products"] as? [String: Any])?["pro"])
+    }
+
+    private static func manifest(inBackup backupDir: URL) -> [String: Any]? {
         guard let data = try? BoundedFile.read(
                 backupDir.appendingPathComponent("manifest.json"),
-                limit: BoundedFile.documentLimit, followSymlinks: false),
-              let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                limit: BoundedFile.documentLimit, followSymlinks: false)
         else { return nil }
-        return protect(inManifest: manifest)
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 }
 
@@ -300,9 +317,10 @@ enum ProtectBackupConfigWriter {
 
 extension CLIBridge {
     /// Backs up Protect into `<staging>/protect` when the workspace has it connected and the
-    /// plan allows it. Nil means Protect is not part of this workspace. Never throws: a
-    /// Protect failure leaves the Jamf Pro backup standing, and says so with a `[warn]` line
-    /// and a `[partial]` line, which Run History reads as Partial.
+    /// plan allows it, whether or not the Jamf Pro backup succeeded. Nil means Protect is not
+    /// part of this workspace. Never throws: a Protect failure leaves the Jamf Pro backup
+    /// standing, and says so with a `[warn]` line and a `[partial]` line, which Run History
+    /// reads as Partial.
     func backupProtect(
         profile: String,
         workspace: URL,

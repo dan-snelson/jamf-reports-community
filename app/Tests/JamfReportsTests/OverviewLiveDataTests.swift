@@ -103,6 +103,23 @@ final class OverviewLiveDataTests: XCTestCase {
         XCTAssertEqual(built.reportingMacs, 12, "the Macs the first benchmark evaluated")
     }
 
+    func testBenchmarkRulesShowTheTitleAndTheIDOnlyWithoutOne() {
+        typealias Rule = ComplianceBenchmarksService.Snapshot.Rule
+        let snapshot = ComplianceBenchmarksService.Snapshot(
+            rules: [
+                Rule(rule: "Audit logging", passed: 5, failed: 7, unknown: 0, devices: 12,
+                     passRate: "41%", ruleId: "audit_flags_lo", benchmark: "CIS"),
+                Rule(rule: "", passed: 9, failed: 3, unknown: 0, devices: 12,
+                     passRate: "75%", ruleId: "os_sip_enable", benchmark: "CIS"),
+            ],
+            devices: [], rulesSourceFile: nil, devicesSourceFile: nil, snapshotDate: nil
+        )
+
+        let built = OverviewLiveDataLoader.failingRules(benchmarks: snapshot)
+
+        XCTAssertEqual(built.rules.map(\.ruleID), ["Audit logging", "os_sip_enable"])
+    }
+
     // MARK: - Loading a workspace
 
     /// A workspace under a temporary root holding `config` and one ea-results snapshot.

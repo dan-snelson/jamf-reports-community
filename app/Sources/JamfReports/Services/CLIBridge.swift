@@ -1523,6 +1523,15 @@ final class CLIBridge {
         ) {
             throw CLIBridgeError.wrongProduct(refusal)
         }
+        // A backup whose Jamf Pro part failed holds only Protect objects, which `pro diff`
+        // cannot read.
+        for backup in [left, right]
+        where BackupProductResult.pro(inBackup: backup)?.state == .failed {
+            let error = CLIBridgeError.backupWithoutPro(backup.lastPathComponent)
+            onLine(.init(timestamp: Date(), level: .fail,
+                         text: "[error] \(error.localizedDescription)"))
+            throw error
+        }
         guard let bin = ExecutableLocator.locate("jamf-cli") else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] jamf-cli not found"))
             throw CLIBridgeError.executableNotFound
@@ -2040,20 +2049,22 @@ final class CLIBridge {
         // data was returned for the rest. Keeping that staging dir is the whole
         // point of the code — deleting it here would destroy the partial export.
         let isPartial = exit == Self.exitCodePartialFailure
-        guard exit == 0 || isPartial else {
-            if (try? fm.removeItem(at: validatedTemp)) == nil {
-                AppLogger.cli.warning(
-                    "backup: failed to remove temp dir after CLI error: \(validatedTemp.path, privacy: .private)"
-                )
-                onLine(.init(timestamp: Date(), level: .warn,
-                    text: "[warn] backup temp dir could not be removed — delete manually: \(validatedTemp.lastPathComponent)"))
-            }
+        let proFailed = exit != 0 && !isPartial
+        if proFailed {
             // Every other failure branch names its cause; this one used to return a
             // bare exit code with no log line at all.
             onLine(.init(timestamp: Date(), level: .fail,
                          text: "[error] " + Self.explainExit(exit, operation: "Backup")))
-            tightenOnSuccess(exit, profile: profile)
-            return exit
+            // The unfinished Jamf Pro files are never kept; an empty staging folder lets
+            // Protect still back up below.
+            let cleared = (try? fm.removeItem(at: validatedTemp)) != nil
+                && (try? fm.createDirectory(at: validatedTemp, withIntermediateDirectories: true,
+                                            attributes: [.posixPermissions: 0o700])) != nil
+            guard cleared else {
+                discardStaging(validatedTemp, onLine: onLine)
+                tightenOnSuccess(exit, profile: profile)
+                return exit
+            }
         }
 
         if isPartial {
@@ -2074,6 +2085,12 @@ final class CLIBridge {
                     backupsRoot, profile: profile, volumeIsLocal: CloudStorage.isOnLocalVolume)
             },
             onLine: onLine)
+        // With Jamf Pro failed, the folder is kept only for Protect objects to restore from.
+        if proFailed, (protectResult?.objectTotal ?? 0) == 0 {
+            discardStaging(validatedTemp, onLine: onLine)
+            tightenOnSuccess(exit, profile: profile)
+            return exit
+        }
 
         // Rename temp dir to a timestamped final name.
         let ts = ISO8601DateFormatter().string(from: Date())
@@ -2125,7 +2142,8 @@ final class CLIBridge {
         // manifest is as it always was, and older ones read the same.
         if let protectResult {
             manifest["products"] = [
-                "pro": ["exit_code": Int(exit), "state": isPartial ? "partial" : "ok"],
+                "pro": ["exit_code": Int(exit),
+                        "state": proFailed ? "failed" : isPartial ? "partial" : "ok"],
                 "protect": protectResult.manifestValue,
             ] as [String: Any]
         }
@@ -2145,6 +2163,16 @@ final class CLIBridge {
                          text: "[warn] backup manifest write failed — backup was created but BackupsView may show no label or stats"))
         }
 
+        if proFailed {
+            // Post-success housekeeping, which stamps a backup, does not run after a failure,
+            // and an unstamped backup on shared storage would never be pruned.
+            BackupMaintenance.stampOwnership(of: validatedFinal)
+            onLine(.init(timestamp: Date(), level: .fail,
+                         text: "[error] Jamf Pro backup failed; kept the Jamf Protect part in "
+                             + validatedFinal.lastPathComponent))
+            tightenOnSuccess(exit, profile: profile)
+            return exit
+        }
         let protectIncomplete = protectResult?.isIncomplete == true
         onLine(.init(
             timestamp: Date(),
@@ -2158,6 +2186,15 @@ final class CLIBridge {
         ))
         tightenOnSuccess(exit, profile: profile)
         return exit
+    }
+
+    private func discardStaging(_ staging: URL, onLine: @Sendable (LogLine) -> Void) {
+        guard (try? FileManager.default.removeItem(at: staging)) == nil else { return }
+        AppLogger.cli.warning(
+            "backup: failed to remove temp dir after CLI error: \(staging.path, privacy: .private)"
+        )
+        onLine(.init(timestamp: Date(), level: .warn,
+            text: "[warn] backup temp dir could not be removed — delete manually: \(staging.lastPathComponent)"))
     }
 
     /// The jamf-cli arguments for a backup of `profile` into `outputDirectory`.

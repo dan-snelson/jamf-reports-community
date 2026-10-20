@@ -1909,11 +1909,14 @@ struct CoreDashboard: Sendable {
         let ws = workbook.addSheet("Compliance Rules")
         let ts = ISO8601DateFormatter().string(from: Date())
         var row = ws.writeSheetHeader(title: t("Compliance Rules"),
-                                      subtitle: "Generated: \(ts)", ncols: 7)
+                                      subtitle: "Generated: \(ts)", ncols: 8)
         ws.setColumnWidth(0, 0, 24)
         ws.setColumnWidth(1, 1, 40)
         ws.setColumnWidth(2, 6, 12)
-        let hdrs = ["Benchmark", "Rule", "Passed", "Failed", "Unknown", "Devices", "Pass Rate"]
+        ws.setColumnWidth(7, 7, 28)
+        // Rule ID goes last so the columns Power BI already reads keep their positions and types.
+        let hdrs = ["Benchmark", "Rule", "Passed", "Failed", "Unknown", "Devices", "Pass Rate",
+                    "Rule ID"]
         for (col, h) in hdrs.enumerated() { ws.write(h, row: row, col: col, format: .header) }
         row += 1
         for item in items {
@@ -1925,6 +1928,7 @@ struct CoreDashboard: Sendable {
             ws.write(asInt(item["unknown"]), row: row, col: 4, format: .cell)
             ws.write(asInt(item["devices"]), row: row, col: 5, format: .cell)
             ws.write(pctStr, row: row, col: 6, format: colorForPctString(pctStr))
+            ws.write(item["ruleId"] as? String ?? "", row: row, col: 7, format: .cell)
             row += 1
         }
     }

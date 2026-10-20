@@ -184,8 +184,10 @@ Protect when `protect.profile` changed in the shared `config.yaml` and has not b
 on this Mac. Either way the run logs one `[warn]` line saying why and the Jamf Pro backup is
 unaffected. If Protect fails or comes back partial, the Jamf Pro
 backup stands, Run History shows the run as Partial, `protect/_failures.yaml` lists the
-resources that failed, and that backup is never pruned automatically. The app never runs
-`jamf-cli protect restore`.
+resources that failed, and that backup is kept from automatic pruning until a later backup's
+Protect part completes. Protect is backed up even when the Jamf Pro backup fails: the folder
+then holds only Protect, the run still reads as failed, and the Backups screen marks it and
+offers no diff for it. The app never runs `jamf-cli protect restore`.
 
 **Config copies.** Before a save or a scaffold drops text from config.yaml,
 the app copies it to `config.yaml.bak-<date-time>` beside it (the newest five

@@ -39,8 +39,10 @@ final class SharedConfigPinTests: XCTestCase {
         shared: Bool = true, outputDir: String = "", allowAbsolute: Bool = false,
         retentionMode: String = "archive", retentionArchiveDir: String = "",
         webhook: String = "https://hooks.example.com/a", detail: String = "full",
-        historicalDir: String = "snapshots", protectProfile: String = "protect-a"
+        historicalDir: String = "snapshots", protectProfile: String = "protect-a",
+        heartbeat: Bool? = nil
     ) throws {
+        let beat = heartbeat.map { "\n  heartbeat: \($0)" } ?? ""
         let body = """
         shared_workspace:
           enabled: \(shared)
@@ -55,7 +57,7 @@ final class SharedConfigPinTests: XCTestCase {
         notify:
           enabled: true
           url: "\(webhook)"
-          detail: \(detail)
+          detail: \(detail)\(beat)
         charts:
           historical_csv_dir: "\(historicalDir)"
         protect:
@@ -945,6 +947,42 @@ final class SharedConfigPinTests: XCTestCase {
             enabled: false, provider: "teams", url: "https://collector.example.org/a",
             detail: "minimal", profile: profile)
         XCTAssertEqual(check().drifts.map(\.key), [.notifyURL])
+    }
+
+    func testAPeerSwitchingTheHeartbeatDoesNotChangeWhatThisMacSends() throws {
+        try writeConfig()
+        _ = check()
+        try writeConfig(heartbeat: true)
+        XCTAssertEqual(check().drifts.map(\.key), [.notifyHeartbeat])
+        XCTAssertFalse(try XCTUnwrap(sendable()).sendsHeartbeat)
+        try confirmAll()
+        XCTAssertTrue(check().drifts.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(sendable()).sendsHeartbeat)
+        try writeConfig(heartbeat: false)
+        XCTAssertTrue(try XCTUnwrap(sendable()).sendsHeartbeat, "the pinned setting stands")
+    }
+
+    func testAPinWrittenBeforeTheHeartbeatKeyPinsItAtFirstSight() throws {
+        try writeConfig(heartbeat: true)
+        _ = check()
+        let url = SharedConfigPin.storeURL(profile: profile, appSupport: appSupport)
+        var pin = try XCTUnwrap(SharedConfigPin.load(profile: profile, appSupport: appSupport))
+        pin.notifyHeartbeat = false
+        pin.pinnedKeys.removeAll { $0 == SharedConfigPin.Key.notifyHeartbeat.rawValue }
+        try JSONEncoder().encode(pin).write(to: url)
+        XCTAssertTrue(check().drifts.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(sendable()).sendsHeartbeat)
+    }
+
+    func testASaveConfirmsTheHeartbeatOnlyWhenItChangedIt() {
+        XCTAssertEqual(SharedConfigPin.changedNotifyKeys(
+            previousURL: "", newURL: "", previousDetail: nil, newDetail: "full",
+            previousHeartbeat: false, newHeartbeat: true), [.notifyHeartbeat])
+        XCTAssertEqual(SharedConfigPin.changedNotifyKeys(
+            previousURL: "", newURL: "", previousDetail: nil, newDetail: "full",
+            previousHeartbeat: true, newHeartbeat: true), [])
+        XCTAssertEqual(SharedConfigPin.changedNotifyKeys(
+            previousURL: "", newURL: "", previousDetail: nil, newDetail: "full"), [])
     }
 
     func testASaveConfirmsAFolderOnlyWhenItChangedIt() {

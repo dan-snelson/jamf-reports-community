@@ -31,6 +31,8 @@ struct CollectSourcesPlan: Equatable, Sendable {
         var product: ProfileProductType
         var profile: String
         var protectProfile: String?
+        /// Why `protectProfile` is not collected (a login of another product), or nil.
+        var protectRefusal: String?
         var staleDays: Int = 30
         var installedVersion: String?
         var skipExpensive = false
@@ -113,7 +115,8 @@ struct CollectSourcesPlan: Equatable, Sendable {
     private static func protect(_ inputs: Inputs) -> [Source] {
         guard let profile = inputs.protectProfile else { return [] }
         return ReportEngine.protectCommandMatrix(profile: profile).map {
-            Source(product: .protect, kind: $0.kind, command: command($0.args), skipReason: nil)
+            Source(product: .protect, kind: $0.kind, command: command($0.args),
+                   skipReason: inputs.protectRefusal)
         }
     }
 

@@ -65,6 +65,17 @@ final class CollectSourcesPlanTests: XCTestCase {
         XCTAssertEqual(protect.first?.command, "protect overview")
     }
 
+    func testProtectIsSkippedWithTheReasonWhenTheProfileIsAnotherProduct() {
+        let reason = "'prod-protect' is a Jamf Pro profile, not a Jamf Protect profile"
+        let protect = Plan.build(.init(
+            product: .jamfPro, profile: "prod", protectProfile: "prod-protect",
+            protectRefusal: reason)).sources(for: .protect)
+        XCTAssertFalse(protect.isEmpty)
+        XCTAssertTrue(protect.allSatisfy { $0.skipReason == reason })
+        XCTAssertTrue(plan(protect: "prod-protect").sources(for: .protect)
+            .allSatisfy { $0.skipReason == nil })
+    }
+
     func testCollectSkipAndTheSettingsSwitchShowAsSkipped() {
         let skipped = plan(skip: ["sofa"]).sources.first { $0.kind == ReportEngine.sofaKind }
         XCTAssertEqual(skipped?.skipReason, "listed in jamf_cli.collect_skip")

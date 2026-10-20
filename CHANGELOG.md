@@ -9,6 +9,11 @@ versions in this repository map to git tags.
 
 ### Added
 
+- Notifications can send a daily heartbeat: with `notify.heartbeat: true`, or the new "Send a
+  daily heartbeat" switch under Notifications, the background item posts one short card a day
+  per workspace saying it ran, with the newest summary's date unless detail is minimal; Run now
+  sends none. Alert on a day without a card to notice a Mac or background item that stopped.
+  Off by default. (#284)
 - **Groups & Searches** now shows how many members each group has, its description, and flags
   empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
   Groups**), with a summary row that also counts policies with no scope. Saved mobile
@@ -30,8 +35,19 @@ versions in this repository map to git tags.
   model, OS, managed, supervised and last check-in, with counts by platform, filters for
   managed, unmanaged and stale devices, and a search. Devices waiting in Automated Device
   Enrollment are listed below them.
+- A Jamf School workspace now builds Trends history: each collect that reads its devices saves
+  a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
 
 ### Changed
+
+- A scheduled run that fails the same way again posts its failure card once a day per schedule and
+  profile, not on every hourly retry; a different failure still posts, and a card that could not
+  be sent is tried again. (#284)
+- Setting up a workspace from the onboarding wizard now asks, on the last step, whether to run
+  automatically (on by default, same choice as when adopting existing profiles) and offers an
+  optional Teams or Slack webhook, also when setup was started from demo mode. Finishing with
+  the box ticked turns on the daily collection; before, a new workspace had no background item
+  until you opened Automation. An existing automation setup is never switched off or changed.
 
 - **Settings › Add connection** and the workspace menu's **Add workspace or product…** now open
   one **Add** sheet, which replaces Add workspace, Add Jamf School workspace and the Jamf
@@ -75,12 +91,45 @@ versions in this repository map to git tags.
   platform, managed, supervised and stale devices, and each count Jamf School reports (users,
   classes, apps and the rest). It used to show the Jamf Pro cards with nothing in them. Its
   Getting Started list ticks off the collect step after a School collect and no longer asks you
-  to track Extension Attributes. School keeps no history yet, so Trends is still Jamf Pro only.
+  to track Extension Attributes.
 
 ### Fixed
 
+- A Mac that is on only part of the day now gets its daily summary. A daily collect runs at
+  its scheduled time, or, after the Mac was off or asleep, at its first background check after
+  waking, and that run is the day's run, so the scheduled time does not repeat it. A failed run
+  is retried that day, until midnight. Run now never moves or cancels the scheduled run. (#284)
+- A collect that has not produced today's summary after its three retries keeps retrying
+  every hour until midnight, so a laptop that was off the VPN until the afternoon still gets its
+  day; Jamf School workspaces too. It stops after the three retries when every source failed in
+  a way another try repeats (a missing permission, a command the profile's API refuses), and the
+  weekly deep scan does not retry for the summary. A collect that stood down because another
+  Mac collected recently is retried the same way while today's summary is missing. (#284)
+- A scheduled collect whose `config.yaml` exists but does not decode now fails with the decode
+  error in Run History, instead of a Jamf School profile being skipped as "not a Jamf Pro
+  profile" with no error; a scheduled backup still runs, with a warning. The failure card and the
+  overdue digest can still be sent, because they read the `notify:` block on its own. (#284)
+- A scheduled run stopped by a jamf-cli below the supported minimum now posts a failure card, and
+  a run skipped because the profile belongs to another Jamf product posts one a day. (#284)
+- A scheduled run that outlasts the six-hour lock limit now ends the background item, instead of
+  leaving a stuck jamf-cli call running beside the next run. (#284)
+- Jamf Pro commands no longer run against a Jamf School, Jamf Protect or Jamf Security Cloud
+  login, or an organization-level Platform API profile. Collect, scheduled runs, health audit,
+  group analysis, backup, backup diff and device lookup stop with one line naming the product,
+  instead of a failed jamf-cli call. Generate with Include Health Audit ticked skips the audit
+  for the School template. A scheduled run on such a profile is skipped rather than retried or
+  counted as a failed run, posts one failure card a day when notifications are on, shows as
+  failing in Automation with the reason instead of overdue, and `schedules add` refuses it.
 - A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
   in Run History instead of reading as a clean run.
+- A Jamf Pro collect that fails as a whole (dead credentials, every call failing) no longer
+  stops Jamf Protect from being collected; Protect runs and the run still reports the Jamf Pro
+  failure. (#284)
+- A blank `protect.profile`, or one that names a Jamf Pro, Jamf School or Jamf Security Cloud
+  login, now skips Jamf Protect with one warning line in collect, backup and the dashboard,
+  instead of a Protect failure on every run. Config Doctor warns about the second case, and Data
+  Sources lists the Protect commands as skipped. (#284)
+- The workbook no longer keeps Protect tabs from old data after Protect is turned off. (#284)
 - A schedule whose last success was recorded while the Mac's clock was set ahead is retried
   after a partial run, instead of waiting until that date. (#284)
 - Importing a CSV in the Adopt EAs walkthrough no longer freezes the window while a large file
@@ -125,21 +174,31 @@ versions in this repository map to git tags.
 - Dates are read the same way in every report. A date that cannot be read now shows as
   Unknown or a dash instead of 0 or -1 days, and a Jamf School device with an unreadable
   check-in is no longer listed as stale on the Stale Devices tab.
-- Jamf Reports no longer runs a Jamf Pro (`pro`) command against a Jamf School profile.
-  Generate with Include Health Audit ticked skips the audit for the School template, and the
-  health audit, group analysis, backup, backup diff and device lookup refuse a School profile
-  with one line saying why, instead of a failed jamf-cli call.
 - A Jamf School workspace no longer shows "Auth may be expired" in Generate or "Token: not
   authenticated" in Settings. School signs in with an API key, which has no token to check.
 - `jamf-reports generate` and scheduled report runs on a Jamf School workspace now write the
   School workbook. They used to write an empty Jamf Pro workbook. `jamf-reports html` now says a
   School workspace has no HTML report instead of writing an empty one.
+- In `jamf-reports`, `backup` and `device` on another product's profile now print
+  the reason once and exit 1, where `backup` printed it twice and `device` added "auth, or
+  device not found". `backup` on a Jamf School workspace says so instead of "jamf-cli not found",
+  and `schedules add --mode backup` refuses one, as the scheduled run skips it.
+  `jamf-reports school-check` now refuses a workspace that is not Jamf School instead of listing
+  ten missing sources and exiting 0. `schedules list` shows the mode a schedule runs, so an old
+  csv-assisted one reads `jamf-cli-full (was csv-assisted)`. The command help and the
+  command-line guide now cover Jamf School, Jamf Protect and these refusals.
 - A new Jamf School workspace's first report now collects before it writes the workbook. It
   used to write a workbook with no sheets.
 - On a Jamf School workspace the weekly scan schedule no longer collects School a second time,
   and a School collect skips sources it fetched in the last 12 hours unless you click Collect
   now, so a morning no longer leaves ten copies of each snapshot. jamf-cli's "hint:" lines no
   longer fill School run logs, and `jamf-reports school-check` lists all ten School sources.
+- One Jamf School profile on the Mac no longer makes **Test connection**, onboarding's
+  **Validate** and **Reauthenticate** fail for your other profiles. They now judge only the
+  config file and the profile being checked. A Jamf School profile also passes **Test
+  connection** again; jamf-cli 1.33.0 reports its `apikey` sign-in method as invalid.
+- The health banner now reports Jamf Protect data that has gone stale or keeps failing in a
+  workspace with Protect connected; before, only Jamf Pro data was checked.
 
 ### Removed
 

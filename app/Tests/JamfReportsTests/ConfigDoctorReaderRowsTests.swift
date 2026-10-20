@@ -41,6 +41,15 @@ final class ConfigDoctorReaderRowsTests: XCTestCase {
         }
     }
 
+    func testANonBooleanHeartbeatIsStated() throws {
+        let root = try ConfigLoader.rawMapping(fromYAML: "notify:\n  heartbeat: daily\n")
+        let rows = ConfigDoctorService.fileReadBooleanRows(root)
+        XCTAssertEqual(rows.map(\.id), ["config.value.notify.heartbeat"])
+        XCTAssertEqual(rows.first?.severity, .warn)
+        XCTAssertEqual(ConfigDoctorService.fileReadBooleanRows(
+            try ConfigLoader.rawMapping(fromYAML: "notify:\n  heartbeat: true\n")), [])
+    }
+
     /// yes, on and 1 opt in to absolute paths, as they always have; the row suggests true.
     func testAnOptInSpelledOtherThanTrueIsASuggestion() throws {
         for value in ["yes", "ON", "1"] {

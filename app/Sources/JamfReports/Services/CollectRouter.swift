@@ -111,6 +111,8 @@ enum CollectRouter {
     ///   - proCollect: Closure wrapping `ReportEngine.collect`. Defaults to the real static.
     ///   - schoolCollect: Closure wrapping `ReportEngine.schoolCollect`. Defaults to the real static.
     ///   - protectCollect: Closure wrapping `ReportEngine.protectCollect`. Defaults to the real static.
+    ///   - resolved: The profile's resolved auth method and product (`ProfileAuthMethod.resolve`).
+    ///     Nil means "could not ask" and runs the collect.
     ///   - onLine: Progress log callback.
     static func run(
         profile: String,
@@ -122,8 +124,21 @@ enum CollectRouter {
         proCollect: ProCollect = defaultProCollect,
         schoolCollect: SchoolCollect = defaultSchoolCollect,
         protectCollect: ProtectCollect = defaultProtectCollect,
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved? = {
+            ProfileAuthMethod.resolve(profile: $0)
+        },
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
+        // First, before anything touches the workspace: jamf-cli never checks a profile against
+        // the command's product, so a Protect, Security Cloud or organization-level profile
+        // would send Jamf Pro commands. A Jamf School workspace is routed to School collect
+        // below and is not a Pro run.
+        let detected = ProfileProductType.detect(from: config, profile: profile)
+        if detected.type == .jamfPro, let refusal = await CLIBridge.refusesProCommand(
+            profile: profile, operation: "Collect", onLine: onLine, resolved: resolved
+        ) {
+            throw CLIBridgeError.wrongProduct(refusal)
+        }
         // Every collect path passes through here; the GUI's also checks when it
         // binds the workspace, but the CLI and schedules load config directly.
         if let owner = config?.jamfCli?.resolvedProfile,
@@ -136,7 +151,6 @@ enum CollectRouter {
         // Shared workspace: say which pinned config.yaml keys changed on this Mac before any
         // collect reads them, for Jamf Pro, Protect and Jamf School alike.
         SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
-        let detected = ProfileProductType.detect(from: config, profile: profile)
         switch detected.type {
         case .jamfSchool:
             onLine(.init(timestamp: Date(), level: .info,
@@ -144,41 +158,117 @@ enum CollectRouter {
             try await schoolCollect(profile, workspacePaths, tiers, force, onLine)
 
         case .jamfPro:
-            let disposition = try await proCollect(
-                profile, workspacePaths, tiers, skipExpensive, force, onLine
-            )
-            guard detected.runsProtect else { return }
-            guard SharedConfigPin.protectAllowed(profile: profile) else {
-                onLine(.init(timestamp: Date(), level: .info,
-                             text: "[skip] protect: protect.profile changed in the shared "
-                                + "config.yaml and is not confirmed on this Mac — "
-                                + "Protect not collected"))
-                return
-            }
-            guard disposition == .collected else {
-                let reason = disposition == .stoodDown
-                    ? "the Jamf Pro collect stood down for another Mac"
-                    : "Jamf Pro already collected today"
-                onLine(.init(timestamp: Date(), level: .info,
-                             text: "[skip] protect: \(reason) — Protect not collected"))
-                return
-            }
-            // Protect augments Pro: a failure does not fail the run, but reads as Partial.
-            let protectProfile = config?.protect?.resolvedProfile ?? profile
-            guard let dataDir = try? workspacePaths.dataDir(for: profile) else {
-                onLine(.init(timestamp: Date(), level: .warn,
-                    text: "[warn] protect: could not resolve dataDir for \(profile) — skipping"))
-                return
-            }
-            onLine(.init(timestamp: Date(), level: .info,
-                         text: "[info] running protect collect for \(profile)"))
+            let disposition: ReportEngine.CollectDisposition
             do {
-                try await protectCollect(protectProfile, dataDir, onLine)
-            } catch {
-                onLine(.init(timestamp: Date(), level: .warn,
-                    text: "\(ReportEngine.protectCollectFailedMarker)\(error.localizedDescription)"))
+                disposition = try await proCollect(
+                    profile, workspacePaths, tiers, skipExpensive, force, onLine
+                )
+            } catch let verdict as ReportEngineError where verdict.isCollectVerdict {
+                // The Pro run reached Jamf and failed (dead credentials, a dead run): Protect has
+                // its own login and may still answer. The Pro error stays the run's result.
+                await collectProtect(
+                    detected: detected, config: config, profile: profile, disposition: .collected,
+                    workspacePaths: workspacePaths, protectCollect: protectCollect,
+                    resolved: resolved, onLine: onLine)
+                throw verdict
             }
+            await collectProtect(
+                detected: detected, config: config, profile: profile, disposition: disposition,
+                workspacePaths: workspacePaths, protectCollect: protectCollect,
+                resolved: resolved, onLine: onLine)
         }
+    }
+
+    /// The Protect half of a Jamf Pro run. Never throws: a Protect failure is a `[partial]`
+    /// line and the Pro run's result stands.
+    private static func collectProtect(
+        detected: DetectedProduct,
+        config: ReportConfig?,
+        profile: String,
+        disposition: ReportEngine.CollectDisposition,
+        workspacePaths: WorkspacePaths.Type,
+        protectCollect: ProtectCollect,
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved?,
+        onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
+    ) async {
+        guard detected.runsProtect else { return }
+        guard SharedConfigPin.protectAllowed(profile: profile) else {
+            onLine(.init(timestamp: Date(), level: .info,
+                         text: "[skip] protect: protect.profile changed in the shared "
+                            + "config.yaml and is not confirmed on this Mac — "
+                            + "Protect not collected"))
+            return
+        }
+        guard disposition == .collected else {
+            let reason = disposition == .stoodDown
+                ? "the Jamf Pro collect stood down for another Mac"
+                : "Jamf Pro already collected today"
+            onLine(.init(timestamp: Date(), level: .info,
+                         text: "[skip] protect: \(reason) — Protect not collected"))
+            return
+        }
+        // Protect augments Pro: a failure does not fail the run, but reads as Partial.
+        // A blank name is not a connection (`ConnectedProducts`); a login of another product
+        // would send Protect commands to the wrong API.
+        let protectProfile = config?.protect?.resolvedProfile ?? ""
+        let notCollected: String? = if protectProfile.isEmpty {
+            "protect.profile is blank"
+        } else {
+            await ProfileAuthMethod.protectRefusal(profile: protectProfile, resolved: resolved)
+        }
+        if let notCollected {
+            onLine(.init(timestamp: Date(), level: .warn,
+                         text: "[warn] Jamf Protect not collected: \(notCollected)"))
+            return
+        }
+        guard let dataDir = try? workspacePaths.dataDir(for: profile) else {
+            onLine(.init(timestamp: Date(), level: .warn,
+                text: "[warn] protect: could not resolve dataDir for \(profile) — skipping"))
+            return
+        }
+        onLine(.init(timestamp: Date(), level: .info,
+                     text: "[info] running protect collect for \(profile)"))
+        do {
+            try await protectCollect(protectProfile, dataDir, onLine)
+        } catch {
+            onLine(.init(timestamp: Date(), level: .warn,
+                text: "\(ReportEngine.protectCollectFailedMarker)\(error.localizedDescription)"))
+        }
+    }
+
+    /// Why a Jamf Pro run on `profile` must not start, or nil. For entry points that name a
+    /// profile themselves (a schedule, the CLI) and must refuse before they create anything in
+    /// its workspace. A Jamf School workspace (`school_cli`) is not a Pro run; `run` applies the
+    /// same rule. Can spawn `jamf-cli config list`.
+    static func proRunRefusal(profile: String, operation: String, config: ReportConfig?) -> String? {
+        guard ProfileProductType.detect(from: config, profile: profile).type == .jamfPro
+        else { return nil }
+        return ProfileAuthMethod.refusal(profile: profile, operation: operation)
+    }
+
+    /// Why `pro backup` has nothing to do for a Jamf School workspace; the scheduled skip, the
+    /// CLI `backup` and `schedules add --mode backup` all say this.
+    static func schoolBackupReason(profile: String) -> String {
+        "`pro backup` is a Jamf Pro command and '\(profile)' is configured for Jamf School "
+            + "(school_cli.enabled in config.yaml)"
+    }
+
+    /// Why a backup of `profile` must not run, or nil: a Jamf School workspace (decided from
+    /// config.yaml, so it holds without a readable jamf-cli) or any `proRunRefusal`.
+    static func backupRefusal(profile: String, config: ReportConfig?) -> String? {
+        if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
+            return schoolBackupReason(profile: profile)
+        }
+        return proRunRefusal(profile: profile, operation: "Backup", config: config)
+    }
+
+    /// `proRunRefusal` for a schedule, the rule `scheduledRunSingleBody` applies: a per-profile
+    /// schedule that sends commands. A multi schedule and `jamf-cli-only` are never refused here.
+    static func scheduleRunRefusal(_ schedule: Schedule) -> String? {
+        guard !schedule.isMulti, schedule.mode != .jamfCLIOnly else { return nil }
+        return proRunRefusal(
+            profile: schedule.profile, operation: "Scheduled \(schedule.mode.rawValue) run",
+            config: collectRoutingConfig(profile: schedule.profile))
     }
 
     // MARK: - Default closures (production)
@@ -213,5 +303,16 @@ enum CollectRouter {
             dataDir: dataDir,
             onLine: onLine
         )
+    }
+}
+
+extension ReportEngineError {
+    /// A collect that ran and failed as a whole (credentials dead, every call failed), as
+    /// opposed to a refusal before it started.
+    var isCollectVerdict: Bool {
+        switch self {
+        case .authExpired, .collectDead: true
+        default: false
+        }
     }
 }

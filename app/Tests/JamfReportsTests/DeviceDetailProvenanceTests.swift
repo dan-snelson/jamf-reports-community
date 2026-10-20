@@ -80,6 +80,29 @@ final class DeviceDetailProvenanceTests: XCTestCase {
         return dir
     }
 
+    // MARK: - Product guard
+
+    /// An organization-level profile is refused before the auth probe: the probe would find no
+    /// jamf-cli here and drop the lookup silently, so the one `[error]` line shows the order.
+    func testDeviceLookupOnAnotherProductIsRefusedBeforeTheAuthProbe() async throws {
+        ProfileAuthMethod.invalidateCache()
+        defer { ProfileAuthMethod.invalidateCache() }
+        try ProductGuardSeed.seed(profile: profile, authMethod: "platform", in: testRoot)
+
+        for mobile in [false, true] {
+            let lines = ProductGuardLines()
+            let bridge = CLIBridge()
+            let result = mobile
+                ? await bridge.mobileDeviceDetailWithProvenance(
+                    profile: profile, deviceID: "42", onLine: lines.add)
+                : await bridge.deviceDetailWithProvenance(
+                    profile: profile, deviceID: "42", onLine: lines.add)
+            XCTAssertNil(result)
+            XCTAssertEqual(lines.all.count, 1, "\(lines.all)")
+            XCTAssertTrue(lines.all[0].contains("is a Jamf Pro command; '\(profile)' is an organization-level"))
+        }
+    }
+
     // MARK: - Cache file mtime is readable
 
     /// Verifies the snapshot mtime the staleness banner depends on is readable

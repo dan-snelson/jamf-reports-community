@@ -261,6 +261,10 @@ notify:
   # no free text). Use minimal for headless/high-security deployments where
   # the webhook is a doorbell, not a data channel. Any other value sends minimal.
   detail: "full"      # full | minimal
+  # Post one short "background item ran" card a day (profile, and with detail:
+  # full the newest daily summary's date; no device data) from the background
+  # tick, so the receiver can alert on a day without one. Off by default.
+  # heartbeat: true
 
 # =============================================================================
 # METRIC ALERTS (opt-in threshold alerting)

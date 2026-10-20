@@ -432,7 +432,7 @@ struct ReportEngine: Sendable {
                 let upgradeMsg = "[info] summary_\(today).json rebuilt with fresher data"
                 AppLogger.collect.info("\(upgradeMsg, privacy: .public)")
                 onLine?(.init(timestamp: Date(), level: .info, text: upgradeMsg))
-                return writeSummaryFile(fresh, to: summaryFile, onLine: onLine)
+                return Self.writeSummaryFile(fresh, to: summaryFile, onLine: onLine)
                     ? .wrote : .writeFailed
             }
             let msg = "[info] summary_\(today).json already exists — "
@@ -455,7 +455,7 @@ struct ReportEngine: Sendable {
             return .nothingToSummarize
         }
 
-        return writeSummaryFile(summary, to: summaryFile, onLine: onLine)
+        return Self.writeSummaryFile(summary, to: summaryFile, onLine: onLine)
             ? .wrote : .writeFailed
     }
 
@@ -536,7 +536,7 @@ struct ReportEngine: Sendable {
     /// exactly the kind of quiet lie this release is closing. The return value
     /// is what lets the scheduled path stop claiming "Trends updated".
     @discardableResult
-    private func writeSummaryFile(
+    static func writeSummaryFile(
         _ summary: DailySummary,
         to url: URL,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
@@ -2062,13 +2062,6 @@ struct ReportEngine: Sendable {
 
         // Resolved once per run, not per kind — it spawns `config list`.
         let profileAuth = ProfileAuthMethod.resolve(profile: profile, binary: bin)
-        // One line instead of a failure per kind: no Jamf Pro command can work at this level.
-        if profileAuth?.isOrganizationLevel == true {
-            let refusal = ReportEngineError.organizationLevelProfile(profile)
-            onLine(.init(
-                timestamp: Date(), level: .fail, text: "[error] \(refusal.localizedDescription)"))
-            throw refusal
-        }
         let nonPlatformAuth = Self.nonPlatformAuthMethod(profileAuth?.authMethod)
         let tenantLevel = profileAuth?.isTenantLevel == true
         let collectSkip = Self.collectSkipKinds(loadedConfig?.jamfCli?.collectSkip)
@@ -2132,12 +2125,13 @@ struct ReportEngine: Sendable {
                     collectStart: collectStart, onLine: onLine
                 )
             } else if kind == Self.dashboardKind {
+                let dashboardProtect = await Self.dashboardProtect(
+                    SharedConfigPin.protectAllowed(profile: profile) ? loadedConfig?.protect : nil,
+                    bin: bin, onLine: onLine)
                 result = try await Self.collectDashboard(
                     profile: profile,
                     arguments: Self.dashboardArguments(
-                        base: args, profile: profile,
-                        protect: SharedConfigPin.protectAllowed(profile: profile)
-                            ? loadedConfig?.protect : nil),
+                        base: args, profile: profile, protect: dashboardProtect),
                     supportsQuietFlags: supportsQuietFlags, bin: bin, bridge: bridge,
                     dataDir: dataDir, recordManifest: recordManifest,
                     useCachedData: useCachedData, stateStore: stateStore,
@@ -3463,7 +3457,43 @@ struct ReportEngine: Sendable {
             onLine(.init(timestamp: Date(), level: .fail, text: msg))
             throw ReportEngineError.collectDead(profile: profile, failedCount: failedCount)
         }
+        writeSchoolSummaryAfterCollect(
+            profile: profile, dataDir: dataDir, workspacePaths: workspacePaths,
+            landedKinds: schoolSaved, onLine: onLine)
         reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
+    }
+
+    /// The School daily summary: Trends history for a workspace that writes no other. The stale
+    /// cut-off is `thresholds.stale_device_days`; a config.yaml that will not load is named in
+    /// a `[warn]` and the default 30 applies, since the summary should still advance.
+    private static func writeSchoolSummaryAfterCollect(
+        profile: String, dataDir: URL, workspacePaths: WorkspacePaths.Type,
+        landedKinds: Set<String>, onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
+    ) {
+        var staleDays = 30
+        if let workspace = ProfileService.workspaceURL(for: profile) {
+            let configURL = workspace.appendingPathComponent("config.yaml")
+            if FileManager.default.fileExists(atPath: configURL.path) {
+                do {
+                    staleDays = try ConfigLoader.load(from: configURL)
+                        .thresholds?.resolvedStaleDays ?? 30
+                } catch {
+                    onLine(.init(timestamp: Date(), level: .warn,
+                        text: "[warn] School summary: config.yaml did not load "
+                            + "(\(error.localizedDescription)); stale cut-off is 30 days"))
+                }
+            }
+        }
+        guard let summariesDir = try? workspacePaths.summariesDir(for: profile) else {
+            if landedKinds.contains(SchoolFleetService.devicesKind) {
+                onLine(.init(timestamp: Date(), level: .warn, text: "\(summaryNotWrittenMarker) "
+                    + "the summaries directory could not be resolved"))
+            }
+            return
+        }
+        writeSchoolSummary(
+            dataDir: dataDir, summariesDir: summariesDir, landedKinds: landedKinds,
+            staleDays: staleDays, onLine: onLine)
     }
 
     /// The `[partial]` line for sources a School or Protect collect did not land, so the run
@@ -4316,8 +4346,6 @@ enum ReportEngineError: Error, LocalizedError {
     case invalidProfile(String)
     /// config.yaml's `jamf_cli.profile` names a profile other than the one the run is for.
     case profileMismatch(named: String, run: String)
-    /// `profile` is an organization-level Platform integration, which reaches no report data.
-    case organizationLevelProfile(String)
     case snapshotParseError(String)
     /// Raised during collect when `use_cached_data=false` and a live call fails.
     case collectFailed(kind: String, exitCode: Int32)
@@ -4367,9 +4395,6 @@ enum ReportEngineError: Error, LocalizedError {
                 + "'\(ConfigSchema.displayText(named))' but this run is for "
                 + "'\(ConfigSchema.displayText(run))'; nothing was generated. Set "
                 + "jamf_cli.profile back to '\(ConfigSchema.displayText(run))'."
-        case .organizationLevelProfile(let profile):
-            return "Nothing was collected for profile '\(ConfigSchema.displayText(profile))'. "
-                + PlatformScopeLevel.organizationLevelReason
         case .snapshotParseError(let kind):
             return "No cached snapshot found for '\(kind)'. Run collect first."
         case .collectFailed(let kind, let code):

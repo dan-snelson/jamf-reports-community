@@ -53,14 +53,14 @@ final class OnboardingDemoExitTests: XCTestCase {
         try Data("[]".utf8).write(to: file)
     }
 
-    func testFinishingSetupFromDemoRunsTheDemoCleanup() throws {
+    func testFinishingSetupFromDemoRunsTheDemoCleanup() async throws {
         _ = try makeWorkspace("acme", withConfig: true)
         let leftover = try makeWorkspace(DemoData.org.profile, withConfig: false)
         let store = WorkspaceStore(demoMode: true, jamfCLIProfileNames: { [] })
         let flow = OnboardingFlow()
         flow.profileName = "acme"
 
-        flow.finishSetup(in: store)
+        await flow.finishSetup(in: store)
 
         XCTAssertFalse(UserDefaults.standard.bool(forKey: WorkspaceStore.forceDemoModeKey))
         XCTAssertFalse(
@@ -69,13 +69,13 @@ final class OnboardingDemoExitTests: XCTestCase {
         XCTAssertFalse(store.demoMode, "the new real profile must replace the demo")
     }
 
-    func testANewProfileNamedLikeTheDemoKeepsItsWorkspace() throws {
+    func testANewProfileNamedLikeTheDemoKeepsItsWorkspace() async throws {
         let workspace = try makeWorkspace(DemoData.org.profile, withConfig: true)
         let store = WorkspaceStore(demoMode: true, jamfCLIProfileNames: { [] })
         let flow = OnboardingFlow()
         flow.profileName = DemoData.org.profile
 
-        flow.finishSetup(in: store)
+        await flow.finishSetup(in: store)
 
         XCTAssertFalse(UserDefaults.standard.bool(forKey: WorkspaceStore.forceDemoModeKey))
         XCTAssertTrue(

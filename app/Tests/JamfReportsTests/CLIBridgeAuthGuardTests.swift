@@ -72,6 +72,33 @@ final class CLIBridgeAuthGuardTests: XCTestCase {
     }
 }
 
+extension CLIBridgeAuthGuardTests {
+    /// `pro auth token` is meaningless on a profile of another product: the guard passes it
+    /// without running the probe (a sleeping stub would time out and warn if it ran), while a
+    /// Jamf Pro profile is still probed.
+    func test_authGuard_skipsTheProbeForAnotherProductOnly() async throws {
+        let dir = try SleepingCLIStub.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir); ProfileAuthMethod.invalidateCache() }
+        let stub = try SleepingCLIStub.make(in: dir)
+        ProfileAuthMethod.invalidateCache()
+        try ProductGuardSeed.seed(profile: "guard-protect", product: "protect", in: dir)
+        try ProductGuardSeed.seed(profile: "guard-pro", product: "pro", in: dir)
+
+        let skipped = ProductGuardLines()
+        let passed = await CLIBridge().authGuard(
+            profile: "guard-protect", probeTimeout: 0.5, _testExecutable: stub, onLine: skipped.add)
+        XCTAssertTrue(passed)
+        XCTAssertTrue(skipped.all.isEmpty, "\(skipped.all)")
+        let status = await CLIBridge().tokenStatus(for: "guard-protect")
+        XCTAssertNil(status)
+
+        let probed = ProductGuardLines()
+        _ = await CLIBridge().authGuard(
+            profile: "guard-pro", probeTimeout: 0.5, _testExecutable: stub, onLine: probed.add)
+        XCTAssertEqual(probed.all.filter { $0.hasPrefix("[warn] auth check timed out") }.count, 1)
+    }
+}
+
 private final class GuardLineCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []

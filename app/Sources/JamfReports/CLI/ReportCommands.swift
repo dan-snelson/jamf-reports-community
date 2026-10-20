@@ -89,14 +89,26 @@ struct Generate: AsyncParsableCommand {
 }
 
 struct Collect: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Collect jamf-cli snapshots for a profile.")
+    static let configuration = CommandConfiguration(
+        abstract: "Collect jamf-cli snapshots for a profile. A Jamf School workspace collects "
+            + "School data and a Protect-enabled Jamf Pro one also collects Protect; a profile "
+            + "of another product is refused.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Comma-separated collection tiers (refresh,inventory,scan). Default: all.") var tiers: String?
-    @Flag(help: "Collect even if a snapshot was already taken today.") var force = false
+    @Flag(help: ArgumentHelp(
+        "Collect even if the profile was collected recently (Jamf Pro: today; Jamf School: "
+            + "within 12 hours).")) var force = false
+
+    static func refusal(profile: String, config: ReportConfig?) -> String? {
+        CollectRouter.proRunRefusal(profile: profile, operation: "Collect", config: config)
+    }
 
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
         let config = collectRoutingConfig(profile: profile)
+        // Before the run record, the signals and the tick lock: nothing is created for a
+        // profile that belongs to another product.
+        if let refusal = Self.refusal(profile: profile, config: config) { CLIRun.fail(refusal) }
         try await CLIRun.exclusively {
             // Trust signals — a CLI collect now records to Run History, evaluates
             // metric alerts, and posts the notify digest exactly like a snapshot-only
@@ -127,18 +139,24 @@ struct Collect: AsyncParsableCommand {
 
 struct Html: AsyncParsableCommand {
     static let configuration =
-        CommandConfiguration(abstract: "Generate the self-contained HTML report for a profile.")
+        CommandConfiguration(
+            abstract: "Generate the self-contained HTML report for a profile. Refuses a Jamf "
+                + "School workspace, which has no HTML report.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Output .html path (default: the workspace's Generated Reports dir).") var output: String?
+
+    static func refusal(config: ReportConfig, profile: String) -> String? {
+        guard ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool
+        else { return nil }
+        return "'\(profile)' is a Jamf School workspace, which has no HTML report; "
+            + "use `jamf-reports generate` for the School workbook"
+    }
 
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
         if let output { CLIRun.requireSafeOutput(output) }
         let (config, dataDir) = try CLIRun.loadProfile(profile)
-        if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
-            CLIRun.fail("'\(profile)' is a Jamf School workspace, which has no HTML report; "
-                + "use `jamf-reports generate` for the School workbook")
-        }
+        if let refusal = Self.refusal(config: config, profile: profile) { CLIRun.fail(refusal) }
         // Reuse the xlsx naming convention (timestamp + profile attribution),
         // swapping the extension — there's no HTML-specific path resolver.
         let defaultURL = try ReportEngine(config: config, dataDir: dataDir)

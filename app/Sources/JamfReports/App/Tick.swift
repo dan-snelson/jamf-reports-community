@@ -22,9 +22,8 @@ func runTick(
     case .acquired(let held):
         hold = held
     case .heldElsewhere:
-        // Stamp the refusal before returning: the non-catch-up window for the
-        // wake that eventually gets in is measured from here, not from that
-        // wake's own clock.
+        // Stamp the refusal before returning: the non-catch-up window and the off gap for the
+        // wake that eventually gets in are measured from here, not from that wake's own clock.
         TickLock.noteBlocked()
         fputs("[info] tick: another run holds the lock — queued markers run on the next wake\n",
               stderr)
@@ -40,7 +39,7 @@ func runTick(
         return 1
     }
     defer { hold.release() }
-    let blockedSince = TickLock.takeBlockedSince()
+    let blocked = TickLock.takeBlockedSince()
 
     // Listed before the schedules load: Run now only queues a label whose schedule
     // already exists, so the load below sees every schedule a listed marker names.
@@ -59,19 +58,26 @@ func runTick(
         TickRunner.clearRunNowMarker(label: label)
     }
 
-    let state = TickState.load()
+    var state = TickState.load()
     let due = TickScheduler.due(
         schedules: schedules, state: state, runNowLabels: runNowLabels, now: now,
-        nonCatchUpAnchor: blockedSince)
+        nonCatchUpAnchor: TickScheduler.nonCatchUpAnchor(refusals: blocked, now: now),
+        wasOff: TickScheduler.wasOff(lastTick: state.lastTick, refusals: blocked, now: now),
+        summaryMissingToday: { summaryMissing(for: $0, profiles: profiles, now: now) })
+    // After the decision, which reads the previous wake. Best-effort: without it a daily
+    // schedule just waits for its fire. A wake a long run turns away stamps `.tick.blocked`,
+    // so the run's own length never reads as the Mac being off.
+    state.lastTick = now
+    saveLastTick(state)
     let failures = TickFailureLog(profiles: profiles)
     defer { failures.finish() }
-    return await TickLoop.runDue(
-        due, state: state,
+    let result = await TickLoop.runDue(
+        due, state: state, runNowLabels: runNowLabels,
         save: { try $0.save() },
         clearRunNowMarker: { TickRunner.clearRunNowMarker(label: $0) },
         perform: { run in
             hold.touch()
-            return await hold.keepingAlive {
+            return await hold.keepingAlive(onGiveUp: { exitAfterLockGiveUp(profiles: profiles) }) {
                 // A same-day retry must not be answered by the once-a-day collect guard.
                 await ReportEngine.$isSameDayRetry.withValue(run.reason == .retry) {
                     await runSchedule(run.schedule, verbose: false)
@@ -84,11 +90,52 @@ func runTick(
         // reported overdue by the same process. Inside the heartbeat like the runs, so a slow
         // webhook send cannot let the lock read as stale.
         notifyOverdue: {
-            await hold.keepingAlive {
+            await hold.keepingAlive(onGiveUp: { exitAfterLockGiveUp(profiles: profiles) }) {
                 await notifyOverdueSchedulesHeadless(
+                    profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
+                // A Run now (the GUI, `schedules run`) is not the background item's own wake.
+                guard !arguments.contains("--now") else { return }
+                await ScheduledRunSignals.notifyHeartbeats(
                     profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
             }
         })
+    return result
+}
+
+/// True when a run of `schedule` is meant to write today's summary for a workspace that has
+/// none. Jamf Pro and Jamf School collects both write one; only a collect that reaches the
+/// refresh or inventory tier is meant to, not the weekly scan or a run from cache.
+func summaryMissing(for schedule: Schedule, profiles: [JamfCLIProfile], now: Date) -> Bool {
+    guard schedule.mode.runsAtLoad,
+          schedule.tiers.map({ !$0.isDisjoint(with: [.refresh, .inventory]) }) ?? true
+    else { return false }
+    let names = schedule.isMulti
+        ? ProfileService.runnableProfiles(
+            profiles, excluding: Set(schedule.excludedProfiles ?? [])).map(\.name)
+        : [schedule.profile]
+    return names.contains { !SummaryJSONParser.hasSummary(profile: $0, on: now) }
+}
+
+/// The heartbeat gave the lock up after `TickLock.heartbeatLimit`, so a call that never
+/// answered is still running with no lock. The next wake would start a second run beside it, so
+/// the process ends, which ends the call; the run's own record is left without a footer and
+/// reads as interrupted, and this adds the reason to every workspace's Run History.
+private func exitAfterLockGiveUp(profiles: [JamfCLIProfile]) {
+    let hours = TickLock.heartbeatLimit.components.seconds / 3600
+    let message = "a run passed the tick lock's \(hours)-hour limit and was stopped so it "
+        + "cannot run beside the next wake"
+    reportTickError(message)
+    let failures = TickFailureLog(profiles: profiles)
+    failures.recordInEveryWorkspace(message)
+    failures.finish()
+    exit(1)
+}
+
+private func saveLastTick(_ state: TickState) {
+    do { try state.save() } catch {
+        AppLogger.schedule.warning(
+            "tick: wake time not recorded: \(error.localizedDescription, privacy: .public)")
+    }
 }
 
 /// `runSchedule` for a process that is not the tick: `--scheduled-run` from an external
@@ -122,9 +169,15 @@ enum TickLoop {
     /// later save in this tick still records it, and at worst a same-day retry
     /// repeats it. Neither failure stops the schedules after it or the digest, and
     /// both go to `recordFailure` with their schedule for Run History.
+    ///
+    /// A Run now writes nothing to the state, but its start is still saved first so a marker is
+    /// never cleared on a state file that cannot be written. A marker is cleared whichever
+    /// reason its label runs under. `clock` is the start time each run is stamped with.
     static func runDue(
         _ due: [TickScheduler.DueRun],
         state initial: TickState,
+        runNowLabels: Set<String>,
+        clock: () -> Date = Date.init,
         save: (TickState) throws -> Void,
         clearRunNowMarker: (String) -> Void,
         perform: (TickScheduler.DueRun) async -> ScheduleRunOutcome,
@@ -146,7 +199,7 @@ enum TickLoop {
             // Stamped BEFORE the run so a crash mid-collect still counts as an
             // attempt and cannot re-run on every wake.
             let before = state
-            let startedAt = Date()
+            let startedAt = clock()
             state.noteStarted(label, at: startedAt, reason: run.reason)
             do {
                 try save(state)
@@ -161,9 +214,11 @@ enum TickLoop {
             }
             // The start is on disk, so the request is honoured. Cleared before the
             // run, never after: see `TickRunner.clearRunNowMarker`.
-            if run.reason == .runNow { clearRunNowMarker(label) }
+            if runNowLabels.contains(label) { clearRunNowMarker(label) }
             let outcome = await perform(run)
-            if outcome.endsRetries {
+            // A Run now pays no day and ends no retries.
+            let scheduled = run.reason != .runNow
+            if scheduled, outcome.endsRetries {
                 state.noteSucceeded(label, startedAt: startedAt)
                 do {
                     try save(state)
@@ -173,6 +228,12 @@ enum TickLoop {
                         + "could not write tick-state.json: \(error.localizedDescription)"
                     reportTickError(message)
                     recordFailure(run.schedule, message)
+                }
+            } else if scheduled, state.noteRetry(label, couldHelp: outcome.retryCouldHelp) {
+                // Best-effort: unrecorded, the hourly retries run as if a retry could help.
+                do { try save(state) } catch {
+                    AppLogger.schedule.warning(
+                        "tick: \(label, privacy: .public) retry verdict not recorded")
                 }
             }
             print(tickResultLine(

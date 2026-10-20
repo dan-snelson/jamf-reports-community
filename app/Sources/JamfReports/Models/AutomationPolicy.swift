@@ -131,6 +131,28 @@ struct AutomationPolicy: Codable, Sendable, Equatable {
     }
 }
 
+/// The "Run automatically" choice both setup flows offer: whether to turn managed automation
+/// on and the three schedule fields they expose. On by default.
+struct AutomationSetupChoice: Equatable, Sendable {
+    var enabled = true
+    var scanWeekday = AutomationPolicy().scanWeekday
+    var reportsCadence = AutomationPolicy().reportsCadence
+    var runTime = AutomationPolicy().runTime
+
+    /// `base` with managed automation on and these schedule fields; `base` unchanged when
+    /// the choice is off, so setup never switches automation off.
+    func applied(to base: AutomationPolicy) -> AutomationPolicy {
+        guard enabled else { return base }
+        var policy = base
+        policy.isManaged = true
+        policy.scanWeekday = scanWeekday
+        policy.reportsCadence = reportsCadence
+        policy.reportsWeekday = scanWeekday
+        policy.runTime = runTime
+        return policy
+    }
+}
+
 /// A named set of profiles that roll up into one consolidated fleet report.
 struct ReportGroup: Codable, Sendable, Equatable, Identifiable {
     var id: String { name }

@@ -340,6 +340,29 @@ final class ProfileProductTests: XCTestCase {
             discovered: { [self.profile("prot", .pro)] }, folderExists: { _ in true }).isEmpty)
     }
 
+    func testDoctorWarnsWhenProtectProfileIsAnotherProduct() throws {
+        let config = try decodeConfig("protect:\n  enabled: true\n  profile: prot\n")
+        func rows(_ product: JamfCLIProduct?) -> [DoctorRow] {
+            ConfigDoctorService.protectProfileProductRows(config: config) { _ in
+                product.map {
+                    .init(authMethod: "oauth2", isTenantLevel: false, isOrganizationLevel: false,
+                          product: $0)
+                }
+            }
+        }
+        let row = rows(.pro).first
+        XCTAssertEqual(row?.id, "protect.profile_product")
+        XCTAssertEqual(row?.severity, .warn)
+        XCTAssertTrue(row?.detail.contains("'prot', a Jamf Pro profile") == true, "\(row?.detail ?? "")")
+        XCTAssertEqual(rows(.school).count, 1)
+        for quiet in [JamfCLIProduct.protect, .unknown] { XCTAssertTrue(rows(quiet).isEmpty) }
+        XCTAssertTrue(rows(nil).isEmpty, "could not ask")
+
+        let off = try decodeConfig("protect:\n  enabled: false\n  profile: prot\n")
+        XCTAssertTrue(ConfigDoctorService.protectProfileProductRows(
+            config: off, resolved: { _ in XCTFail("asked"); return nil }).isEmpty)
+    }
+
     private func decodeConfig(_ yaml: String) throws -> ReportConfig {
         let url = root.appendingPathComponent("c-\(UUID().uuidString.prefix(6)).yaml")
         try Data(yaml.utf8).write(to: url)

@@ -275,6 +275,9 @@ enum LaunchAgentService {
         /// When the workspace this input is evaluated for came into existence —
         /// a fire before it cannot have been missed. nil when unknown.
         let activeSince: Date?
+        /// Why the product guard refuses this schedule's runs (`CollectRouter.scheduleRunRefusal`),
+        /// or nil. Such a schedule never runs and writes no status file.
+        let refusal: String?
 
         init(
             label: String,
@@ -286,7 +289,8 @@ enum LaunchAgentService {
             lastRunFinishedAt: Date?,
             lastRunSuccess: Bool?,
             lastRunExitCode: Int32? = nil,
-            activeSince: Date? = nil
+            activeSince: Date? = nil,
+            refusal: String? = nil
         ) {
             self.label = label
             self.displayName = displayName
@@ -298,15 +302,19 @@ enum LaunchAgentService {
             self.lastRunSuccess = lastRunSuccess
             self.lastRunExitCode = lastRunExitCode
             self.activeSince = activeSince
+            self.refusal = refusal
         }
     }
 
     /// Health inputs from the schedules the tick evaluates. `statusProfile`
     /// keeps the 2.6 rule: a multi schedule's status is read from THAT
     /// profile's own record, never a different profile's later success — and
-    /// that same profile's workspace is the one whose age bounds "overdue".
+    /// that same profile's workspace is the one whose age bounds "overdue". A schedule whose
+    /// profile the product guard refuses (`refusal`) carries the reason, so it reads as failing,
+    /// not overdue. Off the main actor: it can spawn `jamf-cli config list`.
     static func healthInputs(
-        schedules: [Schedule], statusProfile: String?, now: Date = Date()
+        schedules: [Schedule], statusProfile: String?, now: Date = Date(),
+        refusal: (Schedule) -> String? = CollectRouter.scheduleRunRefusal
     ) -> [ScheduleHealthInput] {
         schedules.compactMap { schedule in
             guard let label = schedule.launchAgentLabel else { return nil }
@@ -326,7 +334,8 @@ enum LaunchAgentService {
                 profile: schedule.profile, isMulti: schedule.isMulti, expectedFire: expected,
                 lastRunFinishedAt: status?.finishedAt, lastRunSuccess: status?.success,
                 lastRunExitCode: status?.exitCode,
-                activeSince: owner.flatMap(workspaceCreationDate(profile:)))
+                activeSince: owner.flatMap(workspaceCreationDate(profile:)),
+                refusal: refusal(schedule))
         }
     }
 

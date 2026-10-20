@@ -1005,6 +1005,8 @@ final class CLIBridge {
         if let refused = error as? CLIBridgeError, refused.isCollectRefusal {
             return refused.localizedDescription
         }
+        // Already a sentence naming the operation and the profile's product.
+        if case let CLIBridgeError.wrongProduct(refusal) = error { return refusal }
         if case let ReportEngineError.collectFailed(_, exitCode) = error {
             return explainExit(exitCode, operation: operation)
         }
@@ -1047,7 +1049,7 @@ final class CLIBridge {
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> Bool {
         AppLogger.auth.debug("auth probe profile=\(profile, privacy: .public)")
-        guard !Self.usesAPIKey(profile: profile) else { return true }
+        guard !ProfileAuthMethod.skipsProAuthProbe(profile: profile) else { return true }
         let probe = await probeToken(
             for: profile, executable: _testExecutable, timeout: probeTimeout
         )
@@ -1087,23 +1089,21 @@ final class CLIBridge {
         JamfCLIAuthMethod(raw: authMethod) == .apiKey
     }
 
-    /// Whether jamf-cli lists `profile` with API-key auth (`shouldSkipAuthProbe`).
-    nonisolated static func usesAPIKey(profile: String) -> Bool {
-        let authMethod = ProfileService.discoverLocal()
-            .first(where: { $0.name == profile })?
-            .auth?.rawValue ?? ""
-        return shouldSkipAuthProbe(for: authMethod)
-    }
-
-    /// The refusal, after one `[error]` line, when `profile` is a Jamf School (API-key)
-    /// profile: no `pro` command may run against it. Nil for any other profile. The lookup
-    /// runs `jamf-cli config list`, so it runs detached: most callers are on the main actor.
+    /// The refusal, after one `[error]` line, when `profile` is known to belong to another
+    /// product (Jamf School, Protect, Security Cloud) or is an organization-level integration:
+    /// no `pro` command may run against it. Nil for a Jamf Pro profile and for one that cannot
+    /// be resolved. The lookup can run `jamf-cli config list`, so it runs detached: most
+    /// callers are on the main actor. `resolved` is the test seam.
     nonisolated static func refusesProCommand(
         profile: String, operation: String, onLine: (@Sendable (LogLine) -> Void)?,
-        isSchoolProfile: @escaping @Sendable (String) -> Bool = { CLIBridge.usesAPIKey(profile: $0) }
+        resolved: @escaping @Sendable (String) -> ProfileAuthMethod.Resolved? = {
+            ProfileAuthMethod.resolve(profile: $0)
+        }
     ) async -> String? {
-        guard await Task.detached(operation: { isSchoolProfile(profile) }).value else { return nil }
-        let refusal = "\(operation) is a Jamf Pro command; '\(profile)' is a Jamf School profile"
+        let refusal = await Task.detached {
+            resolved(profile)?.proRefusal(profile: profile, operation: operation)
+        }.value
+        guard let refusal else { return nil }
         onLine?(.init(timestamp: Date(), level: .fail, text: "[error] \(refusal)"))
         return refusal
     }
@@ -1123,12 +1123,60 @@ final class CLIBridge {
         guard await authGuard(profile: profile, onLine: onLine) else {
             return Self.exitCodeUnauthorized
         }
-        return try await run(
+        // `config validate` ignores -p and checks every profile in jamf-cli's file, so the
+        // verdict is taken from the JSON rows that concern this profile. runAndCapture keeps
+        // stdout out of onLine; its stderr "Error: config validation failed" is dropped here
+        // because another profile may be the one that failed.
+        let (code, stdout) = try await runAndCapture(
             executable: bin,
-            arguments: ["-p", profile, "config", "validate"],
+            arguments: ["-p", profile, "config", "validate", "--output", "json"],
             environment: Self.environmentForJamfCLI(),
-            onLine: onLine
+            onLine: { line in
+                if line.text.contains("config validation failed") { return }
+                onLine(line)
+            }
         )
+        let verdict = Self.validationVerdict(stdout: stdout, exitCode: code, profile: profile)
+        for failure in verdict.failures {
+            onLine(.init(timestamp: Date(), level: .fail, text: "[error] \(failure)"))
+        }
+        return verdict.exit
+    }
+
+    private struct ValidateCheck: Decodable {
+        let scope: String
+        let name: String
+        let status: String
+        let message: String?
+    }
+
+    /// Reduces `jamf-cli config validate --output json` (an array of `{scope, name, status,
+    /// message}`) to the rows for `config` and `profile`; another profile's failing row does
+    /// not fail this one, nor does the apikey false positive below. Output that does not parse
+    /// keeps `exitCode`.
+    nonisolated static func validationVerdict(
+        stdout: Data, exitCode: Int32, profile: String
+    ) -> (exit: Int32, failures: [String]) {
+        guard let checks = try? JSONDecoder().decode([ValidateCheck].self, from: stdout) else {
+            return (exitCode, [])
+        }
+        let failures = checks
+            .filter { ($0.scope == "config" || $0.scope == profile) && $0.status == "fail" }
+            // jamf-cli's validAuthMethods (internal/commands/config.go, 1.33.0) lacks apikey, so it
+            // fails every Jamf School profile's auth-method row; the credentials are fine.
+            .filter { !($0.scope == profile && $0.name == "auth-method"
+                && $0.message == #"invalid "apikey""#) }
+            .map { check in
+                let message = check.message ?? ""
+                return "\(check.scope) \(check.name) failed" + (message.isEmpty ? "" : ": \(message)")
+            }
+        let failing = exitCode == 0 ? 1 : exitCode
+        guard failures.isEmpty else { return (failing, failures) }
+        // Every profile jamf-cli holds emits rows, so none means it does not have this one.
+        guard checks.contains(where: { $0.scope == profile }) else {
+            return (failing, ["\(profile) not found in jamf-cli's config"])
+        }
+        return (0, [])
     }
 
     /// What `probeToken` found: the token status, or no answer within the time limit.
@@ -1146,10 +1194,11 @@ final class CLIBridge {
     /// - JSON is missing or malformed
     /// - the probe did not answer within `tokenProbeTimeout`
     ///
-    /// Returns nil for an API-key profile (Jamf School), which has no bearer token: the
-    /// probe would fail and read as "not authenticated" for working credentials.
+    /// Returns nil for an API-key profile (Jamf School) or one known to be another product,
+    /// which has no `pro` bearer token: the probe would fail and read as "not authenticated"
+    /// for working credentials.
     nonisolated func tokenStatus(for profile: String) async -> TokenStatus? {
-        guard !Self.usesAPIKey(profile: profile) else { return nil }
+        guard !ProfileAuthMethod.skipsProAuthProbe(profile: profile) else { return nil }
         switch await probeToken(for: profile, executable: nil, timeout: Self.tokenProbeTimeout) {
         case .status(let status): return status
         case .timedOut: return TokenStatus.make(profile: profile, token: nil, expiresAt: nil)
@@ -1235,6 +1284,9 @@ final class CLIBridge {
         deviceID: String,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async -> DeviceDetailResult? {
+        if await Self.refusesProCommand(profile: profile, operation: "Device lookup", onLine: onLine) != nil {
+            return nil
+        }
         guard await authGuard(profile: profile, onLine: { line in
             AppLogger.auth.warning("deviceDetail auth: \(line.text, privacy: .private)")
         }) else { return nil }
@@ -1255,6 +1307,9 @@ final class CLIBridge {
         deviceID: String,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async -> DeviceDetailResult? {
+        if await Self.refusesProCommand(profile: profile, operation: "Mobile device lookup", onLine: onLine) != nil {
+            return nil
+        }
         guard await authGuard(profile: profile, onLine: { line in
             AppLogger.auth.warning("mobileDeviceDetail auth: \(line.text, privacy: .private)")
         }) else { return nil }
@@ -1459,7 +1514,7 @@ final class CLIBridge {
         if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Backup diff", onLine: onLine
         ) {
-            throw CLIBridgeError.invalidArgument(refusal)
+            throw CLIBridgeError.wrongProduct(refusal)
         }
         guard let bin = ExecutableLocator.locate("jamf-cli") else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] jamf-cli not found"))
@@ -1728,7 +1783,7 @@ final class CLIBridge {
         if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Health audit", onLine: onLine
         ) {
-            throw CLIBridgeError.invalidArgument(refusal)
+            throw CLIBridgeError.wrongProduct(refusal)
         }
         guard await authGuard(profile: profile, onLine: onLine) else {
             return Self.exitCodeUnauthorized
@@ -1767,7 +1822,7 @@ final class CLIBridge {
         if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Group analysis", onLine: onLine
         ) {
-            throw CLIBridgeError.invalidArgument(refusal)
+            throw CLIBridgeError.wrongProduct(refusal)
         }
         guard await authGuard(profile: profile, onLine: onLine) else {
             return Self.exitCodeUnauthorized
@@ -1876,7 +1931,7 @@ final class CLIBridge {
         if let refusal = await Self.refusesProCommand(
             profile: profile, operation: "Backup", onLine: onLine
         ) {
-            throw CLIBridgeError.invalidArgument(refusal)
+            throw CLIBridgeError.wrongProduct(refusal)
         }
         guard let bin = _testExecutable ?? ExecutableLocator.locate("jamf-cli") else {
             onLine(.init(timestamp: Date(), level: .fail, text: "[error] jamf-cli not found"))

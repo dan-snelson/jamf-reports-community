@@ -19,8 +19,6 @@ struct ExistingCLISetupView: View {
     @State private var pendingSharedRoot: URL?
     @State private var existingRootMessage: String?
 
-    private static let weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
     init(profiles: [JamfCLIProfile]) {
         _flow = State(initialValue: ExistingCLISetupFlow(profiles: profiles))
     }
@@ -181,44 +179,25 @@ struct ExistingCLISetupView: View {
         Card(padding: 22) {
             VStack(alignment: .leading, spacing: 10) {
                 stepTitle(number: 2, title: "Automated scans")
-                Toggle(isOn: $flow.enableAutomation) {
-                    Text("Keep data fresh automatically").font(.callout.weight(.semibold))
-                }
-                .toggleStyle(.switch)
-                .disabled(isLocked)
-                Text("A daily collect keeps dashboards and Trends current; a weekly deep scan "
-                    + "runs the two per-device queries. Adjust anytime from the Automation tab.")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Colors.fgMuted)
-                if flow.enableAutomation {
-                    Divider().background(Theme.Colors.hairline)
-                    Picker("Deep scan & report day", selection: $flow.scanWeekday) {
-                        ForEach(0..<7, id: \.self) { index in
-                            Text(Self.weekdays[index]).tag(index)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .frame(maxWidth: 260, alignment: .leading)
-                    .disabled(isLocked)
-                    Picker("Generate reports", selection: $flow.reportsCadence) {
-                        Text("Off").tag(AutomationPolicy.ReportsCadence.off)
-                        Text("Daily").tag(AutomationPolicy.ReportsCadence.daily)
-                        Text("Weekly").tag(AutomationPolicy.ReportsCadence.weekly)
-                        Text("Monthly").tag(AutomationPolicy.ReportsCadence.monthly)
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(isLocked)
-                    HStack {
-                        Text("Run automation at")
-                        TextField("06:00", text: $flow.runTime)
-                            .frame(width: 80)
-                            .textFieldStyle(.roundedBorder)
-                            .disabled(isLocked)
-                    }
-                    .font(.callout)
-                }
+                AutomationChoiceFields(choice: automationChoice, isLocked: isLocked)
             }
         }
+    }
+
+    private var automationChoice: Binding<AutomationSetupChoice> {
+        Binding(
+            get: {
+                AutomationSetupChoice(
+                    enabled: flow.enableAutomation, scanWeekday: flow.scanWeekday,
+                    reportsCadence: flow.reportsCadence, runTime: flow.runTime)
+            },
+            set: {
+                flow.enableAutomation = $0.enabled
+                flow.scanWeekday = $0.scanWeekday
+                flow.reportsCadence = $0.reportsCadence
+                flow.runTime = $0.runTime
+            }
+        )
     }
 
     // MARK: - Run
@@ -413,20 +392,8 @@ struct ExistingCLISetupView: View {
                 )
             }
             if flow.enableAutomation {
-                // The user just opted into automation — a ticker Login Items
-                // won't run must not be silently absorbed into "setup complete".
-                // Only the two states an operator can act on: `.unavailable` is
-                // a dev build with no bundled agent, which is not a problem the
-                // Login Items pane can fix.
                 await workspace.applyAutomationPolicy()
-                if workspace.tickerStatus == .requiresApproval
-                    || workspace.tickerStatus == .notRegistered {
-                    workspace.toast = Toast(
-                        message: "Setup finished — allow JamfReports under Login Items › "
-                            + "Allow in the Background to start automation",
-                        style: .warning
-                    )
-                }
+                workspace.warnIfTickerNeedsApproval()
             }
             workspace.reloadFromDisk()
             isFinishing = false

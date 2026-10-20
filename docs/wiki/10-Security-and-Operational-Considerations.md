@@ -246,7 +246,7 @@ pins what matters.** On a shared workspace (a sync-provider or `/Volumes` folder
 it decide where data goes or what runs: the report, archive, data and chart-history folders with
 `output.allow_absolute_paths`, the retention switch, `retention.mode` (archive or delete) and
 `retention.archive_dir`, the `protect.profile` this Mac collects from, the `notify.detail` level,
-and the `notify.url` webhook. Each Mac records the values it was set up with in its own
+the `notify.heartbeat` switch, and the `notify.url` webhook. Each Mac records the values it was set up with in its own
 Application Support folder (for the webhook only the host and port and a SHA-256 of the URL,
 never the URL) and compares them with `config.yaml` at the start of every collect and report.
 If a value changed, a scheduled run, the background item, an automatic collect in the app or the

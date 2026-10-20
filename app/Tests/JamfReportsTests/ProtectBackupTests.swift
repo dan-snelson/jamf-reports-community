@@ -76,6 +76,16 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertTrue(empty.contains("protect.profile is empty"), empty)
     }
 
+    func test_plan_skipsAProfileOfAnotherProduct() throws {
+        let config = try loadConfig(connectedConfig)
+        let plan = ProtectBackup.plan(
+            config: config, workspaceProfile: "ws", pinAllows: { true },
+            protectRefusal: { "'\($0)' is a Jamf Pro profile, not a Jamf Protect profile" },
+            sharedStorage: { nil })
+        XCTAssertEqual(plan, .skip(
+            reason: "'protect-login' is a Jamf Pro profile, not a Jamf Protect profile"))
+    }
+
     func test_result_classifiesExitCodesAgainstWhatWasWritten() throws {
         let dir = try makeTempDir()
         // Nothing written: any non-zero exit is a failure, timeout included.

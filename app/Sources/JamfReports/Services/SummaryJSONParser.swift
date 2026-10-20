@@ -416,6 +416,22 @@ struct SummaryJSONParser {
         return f
     }()
 
+    /// Whether `profile` has a summary file for `day` (local time).
+    static func hasSummary(profile: String, on day: Date) -> Bool {
+        guard let dir = try? WorkspacePaths.summariesDir(for: profile) else { return false }
+        let name = "summary_\(dateFormatter.string(from: day)).json"
+        return FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path)
+    }
+
+    /// The `yyyy-MM-dd` of the newest canonical `summary_*.json` for `profile`, nil when none.
+    static func newestSummaryDay(profile: String) -> String? {
+        guard let dir = try? WorkspacePaths.summariesDir(for: profile),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
+        else { return nil }
+        return names.filter(CloudStorage.isCanonicalSummaryFilename).max()
+            .map { String($0.dropFirst("summary_".count).prefix(10)) }
+    }
+
     /// Real summaries are a few KB; anything near this is corrupt or hostile.
     /// Bounds the whole-file read (T-26 — the workspace sits on synced storage
     /// other software can write to).

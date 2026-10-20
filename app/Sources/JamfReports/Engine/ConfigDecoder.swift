@@ -765,12 +765,38 @@ struct NotifyConfig: Decodable, Sendable {
     var provider: String?
     var url: String?
     var detail: String?
+    /// `heartbeat`: the background tick posts one short "still running" card a day. Absent or
+    /// anything but a boolean reads as off; Config Doctor names a value that is not one.
+    var heartbeat: Bool?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case enabled, provider, url, detail
+        case enabled, provider, url, detail, heartbeat
+    }
+
+    init(
+        enabled: Bool? = nil, provider: String? = nil, url: String? = nil, detail: String? = nil,
+        heartbeat: Bool? = nil
+    ) {
+        self.enabled = enabled
+        self.provider = provider
+        self.url = url
+        self.detail = detail
+        self.heartbeat = heartbeat
+    }
+
+    /// A mistyped `heartbeat` reads as off rather than failing the whole config.yaml decode:
+    /// it is a switch, and a scheduled run must not stop over it.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+        heartbeat = try? container.decodeIfPresent(Bool.self, forKey: .heartbeat)
     }
 
     var isEnabled: Bool { enabled ?? false }
+    var sendsHeartbeat: Bool { heartbeat ?? false }
     var resolvedProvider: Provider {
         Provider(rawValue: (provider ?? "teams").lowercased()) ?? .teams
     }

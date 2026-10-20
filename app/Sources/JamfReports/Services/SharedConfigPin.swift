@@ -44,6 +44,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     var htmlHistoryFile: String = ""
     /// `branding.logo_path` as typed, tilde expanded: a file the workbook embeds.
     var brandingLogoPath: String = ""
+    /// `notify.heartbeat`: whether the tick posts its daily card to the pinned webhook.
+    var notifyHeartbeat: Bool = false
 
     /// One pinned key, named as it is written in config.yaml.
     enum Key: String, CaseIterable, Sendable {
@@ -59,6 +61,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         case protectProfile = "protect.profile"
         case notifyDetail = "notify.detail"
         case notifyURL = "notify.url"
+        case notifyHeartbeat = "notify.heartbeat"
         case htmlHistoryFile = "html.history_file"
         case brandingLogoPath = "branding.logo_path"
 
@@ -92,6 +95,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             case .historicalDir: pin.historicalDir
             case .protectProfile: pin.protectProfile
             case .notifyDetail: pin.notifyDetail
+            case .notifyHeartbeat: String(pin.notifyHeartbeat)
             case .htmlHistoryFile: pin.htmlHistoryFile
             case .brandingLogoPath: pin.brandingLogoPath
             case .notifyURL:
@@ -114,6 +118,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             case .historicalDir: pin.historicalDir = source.historicalDir
             case .protectProfile: pin.protectProfile = source.protectProfile
             case .notifyDetail: pin.notifyDetail = source.notifyDetail
+            case .notifyHeartbeat: pin.notifyHeartbeat = source.notifyHeartbeat
             case .htmlHistoryFile: pin.htmlHistoryFile = source.htmlHistoryFile
             case .brandingLogoPath: pin.brandingLogoPath = source.brandingLogoPath
             case .notifyURL:
@@ -251,7 +256,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             notifyURLHost: webhookHost(typedURL),
             notifyURLHash: typedURL.isEmpty ? "" : SharedConfigPin.sha256Hex(typedURL),
             htmlHistoryFile: path("html", "history_file"),
-            brandingLogoPath: path("branding", "logo_path")
+            brandingLogoPath: path("branding", "logo_path"),
+            notifyHeartbeat: (raw("notify", "heartbeat") as? Bool) ?? false
         )
     }
 
@@ -498,7 +504,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
 
     /// The notification keys a save changed against what config.yaml held.
     static func changedNotifyKeys(
-        previousURL: String, newURL: String, previousDetail: String?, newDetail: String
+        previousURL: String, newURL: String, previousDetail: String?, newDetail: String,
+        previousHeartbeat: Bool = false, newHeartbeat: Bool? = nil
     ) -> Set<Key> {
         var keys: Set<Key> = []
         if previousURL.trimmingCharacters(in: .whitespaces)
@@ -508,6 +515,7 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
             return text.isEmpty ? "full" : text
         }
         if level(previousDetail) != level(newDetail) { keys.insert(.notifyDetail) }
+        if let newHeartbeat, newHeartbeat != previousHeartbeat { keys.insert(.notifyHeartbeat) }
         return keys
     }
 
@@ -589,7 +597,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     }
 
     /// `notify` as this Mac may use it: nil when the webhook host differs from the pinned one
-    /// (no send), and `minimal` detail when the detail level changed.
+    /// (no send), `minimal` detail when the detail level changed, and the pinned heartbeat
+    /// setting when that changed.
     static func effectiveNotify(
         _ notify: NotifyConfig?, profile: String, appSupport: URL = AppSupport.directory()
     ) -> NotifyConfig? {
@@ -597,6 +606,9 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         let result = check(profile: profile, appSupport: appSupport)
         if result.isDrifted(.notifyURL) { return nil }
         if result.isDrifted(.notifyDetail) { safe.detail = NotifyConfig.Detail.minimal.rawValue }
+        if result.isDrifted(.notifyHeartbeat) {
+            safe.heartbeat = result.pinned?.notifyHeartbeat ?? false
+        }
         return safe
     }
 
@@ -853,5 +865,6 @@ extension SharedConfigPin {
         notifyURLHash = try c.decodeIfPresent(String.self, forKey: .notifyURLHash) ?? ""
         htmlHistoryFile = try c.decodeIfPresent(String.self, forKey: .htmlHistoryFile) ?? ""
         brandingLogoPath = try c.decodeIfPresent(String.self, forKey: .brandingLogoPath) ?? ""
+        notifyHeartbeat = try c.decodeIfPresent(Bool.self, forKey: .notifyHeartbeat) ?? false
     }
 }

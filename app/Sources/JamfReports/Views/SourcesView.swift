@@ -722,9 +722,13 @@ struct SourcesView: View {
                 let detected = ProfileProductType.detect(from: config, profile: profile)
                 let auth = detected.type == .jamfPro
                     ? ProfileAuthMethod.resolve(profile: profile) : nil
+                let protectProfile = ConnectedProducts.read(profile: profile).protectProfile
                 let plan = CollectSourcesPlan.build(.init(
                     product: detected.type, profile: profile,
-                    protectProfile: ConnectedProducts.read(profile: profile).protectProfile,
+                    protectProfile: protectProfile,
+                    protectRefusal: protectProfile.flatMap { name in
+                        ProfileAuthMethod.resolve(profile: name)?.protectRefusal(profile: name)
+                    },
                     staleDays: config?.thresholds?.resolvedStaleDays ?? 30,
                     installedVersion: version, skipExpensive: skipExpensive,
                     authMethod: auth?.authMethod, tenantLevel: auth?.isTenantLevel == true,

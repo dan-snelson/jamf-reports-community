@@ -530,6 +530,15 @@ enum ProfileService {
     static func derivedProduct(
         configProduct: String?, authMethod: String?, url: String?, configFileRead: Bool
     ) -> JamfCLIProduct {
+        explicitProduct(configProduct: configProduct, authMethod: authMethod, url: url)
+            ?? (configFileRead ? .pro : .unknown)
+    }
+
+    /// The product an explicit signal names, or nil when nothing does and `derivedProduct`
+    /// falls back to its default: (a) to (c) above.
+    static func explicitProduct(
+        configProduct: String?, authMethod: String?, url: String?
+    ) -> JamfCLIProduct? {
         switch configProduct?.trimmingCharacters(in: .whitespaces).lowercased() ?? "" {
         case "": break
         case "pro": return .pro
@@ -548,7 +557,7 @@ enum ProfileService {
             if host.hasSuffix(".protect.jamfcloud.com") { return .protect }
             if host.hasSuffix(".jamfschool.com") { return .school }
         }
-        return configFileRead ? .pro : .unknown
+        return nil
     }
 
     /// `listed` (from `config list`) with each profile's `product:` key from the config file. A

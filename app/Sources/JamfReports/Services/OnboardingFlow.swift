@@ -233,6 +233,12 @@ final class OnboardingFlow {
     /// and before validation.
     var connectionCheck: ConnectionCheck.Verdict?
     var firstReportOutput: [CLIBridge.LogLine] = []
+    /// "Run automatically" on the last step; on by default, as in the adopt-existing flow.
+    var automation = AutomationSetupChoice()
+    /// Optional scheduled-run webhook for the new workspace; written at Finish only when the URL
+    /// is a usable https one. Never logged.
+    var webhookProvider: NotifyConfig.Provider = .teams
+    var webhookURL = ""
 
     private let installer = JamfCLIInstaller()
     /// Where a validated Platform API profile is recorded under its connection.
@@ -1056,14 +1062,14 @@ final class OnboardingFlow {
             lastError = error.localizedDescription
             return
         }
-        finishFirstReport(exit: exit, workspaceStore: workspaceStore)
+        await finishFirstReport(exit: exit, workspaceStore: workspaceStore)
     }
 
     /// Shared "generate finished" bookkeeping for both product paths.
-    private func finishFirstReport(exit: Int32, workspaceStore: WorkspaceStore) {
+    private func finishFirstReport(exit: Int32, workspaceStore: WorkspaceStore) async {
         firstReportExitCode = exit
         if exit == 0 {
-            finishSetup(in: workspaceStore)
+            await finishSetup(in: workspaceStore)
         } else {
             lastError = "Generate exited \(exit) — check the log above."
         }
@@ -1074,12 +1080,47 @@ final class OnboardingFlow {
     /// skipped the cleanup of what earlier builds wrote under the demo
     /// profile. The exception is a new profile named like the demo's, whose
     /// fresh workspace and schedules that cleanup would delete.
-    func finishSetup(in workspaceStore: WorkspaceStore) {
+    ///
+    /// Then applies the last step's choices: the webhook and the automation policy, also when
+    /// setup started in demo mode, unless the store is still in demo mode because no real
+    /// profile was found. Automation is only ever turned on here, never off.
+    func finishSetup(in workspaceStore: WorkspaceStore) async {
         if workspaceStore.demoMode && profileName.trimmed != DemoData.org.profile {
             workspaceStore.setDemoMode(false)
         } else {
             UserDefaults.standard.removeObject(forKey: WorkspaceStore.forceDemoModeKey)
             workspaceStore.reloadFromDisk()
+        }
+        guard !workspaceStore.demoMode else { return }
+        saveWebhook(in: workspaceStore)
+        let base = AutomationPolicy.current()
+        guard automation.enabled, !base.isManaged else { return }
+        UserDefaults.standard.set(
+            automation.applied(to: base).serialize(), forKey: AutomationPolicy.storageKey)
+        await workspaceStore.applyAutomationPolicy()
+        workspaceStore.warnIfTickerNeedsApproval()
+    }
+
+    /// Whether the typed webhook would be written: `NotifyConfig.isUsable`, the send gate.
+    var isWebhookUsable: Bool {
+        NotifyConfig(
+            enabled: true, provider: webhookProvider.rawValue, url: webhookURL, detail: nil
+        ).isUsable
+    }
+
+    private func saveWebhook(in workspaceStore: WorkspaceStore) {
+        guard isWebhookUsable else { return }
+        do {
+            try NotifyConfigWriter.save(
+                enabled: true, provider: webhookProvider.rawValue, url: webhookURL,
+                detail: NotifyConfig.Detail.full.rawValue, profile: profileName.trimmed)
+        } catch {
+            // The reason is left out: a config error can quote the file.
+            AppLogger.webhook.warning("onboarding: could not save the notify block")
+            workspaceStore.toast = Toast(
+                message: "Setup finished, but the webhook was not saved — add it under "
+                    + "Automation › Notifications",
+                style: .warning)
         }
     }
 

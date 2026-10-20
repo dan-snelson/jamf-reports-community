@@ -85,6 +85,7 @@ enum ConfigDoctorService {
         if let config, parseError == nil {
             rows += profileMismatchRows(profile: profile, config: config)
             rows += protectProfileFolderRows(profile: profile, config: config)
+            rows += protectProfileProductRows(config: config)
             rows += valueRows(profile: profile, config: config, workspaceRoot: workspaceRoot)
             rows += accuracyRows(config: config, profile: profile)
             rows += securityPolicyRows(profile: profile, config: config)
@@ -449,10 +450,10 @@ enum ConfigDoctorService {
         }
     }
 
-    /// true/false keys the decoder does not model, and `html.with_workbook`, which it reads
-    /// as off for any other value instead of failing the decode.
+    /// true/false keys the decoder does not model, and `html.with_workbook` and
+    /// `notify.heartbeat`, which it reads as off for any other value instead of failing the decode.
     /// `output.allow_absolute_paths` also takes yes, on and 1 (`WorkspacePaths.optIn`);
-    /// `html.track_history` and `html.with_workbook` take only true and false.
+    /// `html.track_history`, `html.with_workbook` and `notify.heartbeat` take only true and false.
     static func fileReadBooleanRows(_ root: [String: Any]) -> [DoctorRow] {
         var rows: [DoctorRow] = []
         if let value = typedNonBoolean(at: ["output", "allow_absolute_paths"], in: root) {
@@ -467,9 +468,12 @@ enum ConfigDoctorService {
             case nil: rows.append(readsAsFalseRow("output.allow_absolute_paths", value))
             }
         }
-        for key in ["track_history", "with_workbook"] {
-            if let value = typedNonBoolean(at: ["html", key], in: root) {
-                rows.append(readsAsFalseRow("html.\(key)", value))
+        let switches = [
+            ["html", "track_history"], ["html", "with_workbook"], ["notify", "heartbeat"],
+        ]
+        for path in switches {
+            if let value = typedNonBoolean(at: path, in: root) {
+                rows.append(readsAsFalseRow(path.joined(separator: "."), value))
             }
         }
         return rows

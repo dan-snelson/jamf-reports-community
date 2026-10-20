@@ -131,7 +131,38 @@ final class SnapshotFleetDriftTests: XCTestCase {
         XCTAssertTrue(try texts(dash).contains("1 Macs with no Jamf ID or serial left out"))
     }
 
+    func testASerialTwoRecordsHoldIsNeitherJoinedNorLeft() throws {
+        let (old, new) = (at(-1), at(0))
+        let dash = try dashboard(files: [
+            (old, [mac(nil, serial: "DUP", taken: old), mac(nil, serial: "DUP", taken: old),
+                   mac(1, serial: "A1", taken: old)]),
+            (new, [mac(nil, serial: "DUP", taken: new), mac(nil, serial: "DUP", taken: new),
+                   mac(1, serial: "A1", taken: new)]),
+        ])
+        try dash.writeFleetDrift()
+        XCTAssertEqual(try section("New Enrollments", in: dash), ["No changes"])
+        XCTAssertEqual(try section("Departed Devices", in: dash), ["No changes"])
+        XCTAssertTrue(try texts(dash).contains(
+            "4 Macs whose Jamf ID or serial more than one record holds left out"))
+    }
+
     // MARK: - Stale
+
+    func testASnapshotWithoutDatesIsNotComparedForStaleness() throws {
+        let (old, new) = (at(-1), at(0))
+        let undated: [[String: Any]] = (1...3).map {
+            ["id": String($0), "general": ["name": "Mac-\($0)-"],
+             "operatingSystem": ["version": "26.0"]]
+        }
+        let dash = try dashboard(files: [
+            (old, (1...3).map { mac($0, taken: old) }), (new, undated),
+        ])
+        try dash.writeFleetDrift()
+        XCTAssertEqual(try section("New Stale", in: dash), ["Not compared"])
+        XCTAssertEqual(try section("Recovered Stale", in: dash), ["Not compared"])
+        XCTAssertTrue(try texts(dash).contains(
+            "Not compared: a snapshot has no check-in or inventory dates"))
+    }
 
     func testStaleTransitionsUseTheCheckInAndInventoryBasis() throws {
         let (old, new) = (at(-1), at(0))

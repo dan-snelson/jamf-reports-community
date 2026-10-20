@@ -95,4 +95,18 @@ final class ComputerDatesTests: XCTestCase {
                        "the Jamf ID still finds its own")
         XCTAssertEqual(index.match(jamfID: nil, serial: "OWN")?.jamfID, "3")
     }
+
+    func testContainsCountsAnIdentifierTwoRecordsShare() {
+        let index = ComputerDateIndex([
+            ComputerDates(item: item(id: nil, serial: "SHARED")),
+            ComputerDates(item: item(id: nil, serial: "SHARED")),
+            ComputerDates(item: item(id: "7", serial: "OWN")),
+        ])
+        XCTAssertNil(index.match(jamfID: nil, serial: "SHARED"))
+        XCTAssertTrue(index.contains(jamfID: nil, serial: "shared"))
+        XCTAssertTrue(index.contains(jamfID: "7", serial: nil))
+        XCTAssertFalse(index.contains(jamfID: "8", serial: "OWN"),
+                       "a serial on a record with another Jamf ID is another Mac")
+        XCTAssertFalse(index.contains(jamfID: nil, serial: "ZZZ"))
+    }
 }

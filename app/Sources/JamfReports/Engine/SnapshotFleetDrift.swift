@@ -2,7 +2,9 @@ import Foundation
 
 /// What changed between two `computers` snapshots: Macs that joined or left, macOS versions
 /// that changed, and Macs that crossed the stale rule. Macs are joined by Jamf ID, then serial
-/// (`ComputerDateIndex`); a Mac with neither is counted in `unidentified`, never joined by name.
+/// (`ComputerDateIndex`); a Mac with neither is counted in `unidentified`, never joined by name,
+/// and one whose identifier more than one record of the other snapshot holds is counted in
+/// `ambiguous`, never listed as joined or left.
 struct SnapshotFleetDrift {
     struct StaleChange {
         let current: ComputerDates
@@ -16,6 +18,10 @@ struct SnapshotFleetDrift {
     let becameStale: [StaleChange]
     let noLongerStale: [StaleChange]
     let unidentified: Int
+    let ambiguous: Int
+    /// True when either snapshot carries no check-in or inventory date at all (collected
+    /// without `general`), so every Mac would read as never checked in.
+    let staleNotCompared: Bool
 
     /// Each snapshot is judged as of its own collection time, so a Mac that went quiet after the
     /// baseline was taken shows as newly stale.
@@ -34,10 +40,19 @@ struct SnapshotFleetDrift {
                 == .orderedAscending }
         }
         func isNew(_ mac: ComputerDates, in index: ComputerDateIndex) -> Bool {
-            index.match(jamfID: mac.jamfID, serial: mac.serial) == nil
+            !index.contains(jamfID: mac.jamfID, serial: mac.serial)
+        }
+        func isAmbiguous(_ mac: ComputerDates, in index: ComputerDateIndex) -> Bool {
+            index.match(jamfID: mac.jamfID, serial: mac.serial) == nil && !isNew(mac, in: index)
         }
         joined = sortedByName(now.filter { isNew($0, in: priorIndex) })
         left = sortedByName(before.filter { isNew($0, in: currentIndex) })
+        ambiguous = now.filter { isAmbiguous($0, in: priorIndex) }.count
+            + before.filter { isAmbiguous($0, in: currentIndex) }.count
+        func lacksDates(_ macs: [ComputerDates]) -> Bool {
+            !macs.isEmpty && !macs.contains { $0.checkIn != nil || $0.inventory != nil }
+        }
+        staleNotCompared = lacksDates(current) || lacksDates(prior)
 
         func age(_ mac: ComputerDates, at date: Date) -> StaleAge? {
             rule.age(of: StaleInputs(
@@ -53,6 +68,7 @@ struct SnapshotFleetDrift {
             let was = OSVersionName.normalized(old.osVersion ?? "")
             let isNow = OSVersionName.normalized(mac.osVersion ?? "")
             if !was.isEmpty, !isNow.isEmpty, was != isNow { osChanged.append((old, mac)) }
+            guard !staleNotCompared else { continue }
             let (oldAge, newAge) = (age(old, at: priorAt), age(mac, at: currentAt))
             let change = StaleChange(current: mac, priorAge: oldAge, currentAge: newAge)
             if !stale(oldAge) && stale(newAge) { becameStale.append(change) }
@@ -108,10 +124,12 @@ extension CoreDashboard {
         ws.setColumnWidth(1, 5, 22)
 
         func section(
-            _ title: String, note: String? = nil, _ headers: [String], _ cells: [[String]]
+            _ title: String, note: String? = nil, empty: String = "No changes",
+            _ headers: [String], _ cells: [[String]]
         ) {
             row = Self.writeSectionWithNote(
-                ws: ws, row: row, title: title, note: note, headers: headers, dataRows: cells)
+                ws: ws, row: row, title: title, note: note, headers: headers, dataRows: cells,
+                empty: empty)
         }
         func listing(_ mac: ComputerDates) -> [String] {
             [mac.name ?? "", mac.serial ?? "", mac.osVersion ?? "",
@@ -126,16 +144,27 @@ extension CoreDashboard {
         }
         let listHeaders = ["Name", "Serial", "OS", "Last Check-in"]
         let staleHeaders = ["Name", "Serial", "Prior Days Stale", "Current Days Stale"]
-        let note = drift.unidentified > 0
-            ? "\(drift.unidentified) Macs with no Jamf ID or serial left out" : nil
-        section("New Enrollments", note: note, listHeaders, drift.joined.map(listing))
+        let notes = [
+            drift.unidentified > 0
+                ? "\(drift.unidentified) Macs with no Jamf ID or serial left out" : nil,
+            drift.ambiguous > 0
+                ? "\(drift.ambiguous) Macs whose Jamf ID or serial more than one record holds "
+                    + "left out" : nil,
+        ].compactMap { $0 }
+        section("New Enrollments", note: notes.isEmpty ? nil : notes.joined(separator: "; "),
+                listHeaders, drift.joined.map(listing))
         section("Departed Devices", listHeaders, drift.left.map(listing))
-        section("New Stale", staleHeaders, drift.becameStale.map {
-            [$0.current.name ?? "", $0.current.serial ?? "", days($0.priorAge), days($0.currentAge)]
-        })
-        section("Recovered Stale", staleHeaders, drift.noLongerStale.map {
-            [$0.current.name ?? "", $0.current.serial ?? "", days($0.priorAge), days($0.currentAge)]
-        })
+        let staleNote = drift.staleNotCompared
+            ? "Not compared: a snapshot has no check-in or inventory dates" : nil
+        let staleEmpty = drift.staleNotCompared ? "Not compared" : "No changes"
+        func staleRow(_ change: SnapshotFleetDrift.StaleChange) -> [String] {
+            [change.current.name ?? "", change.current.serial ?? "",
+             days(change.priorAge), days(change.currentAge)]
+        }
+        section("New Stale", note: staleNote, empty: staleEmpty, staleHeaders,
+                drift.becameStale.map(staleRow))
+        section("Recovered Stale", note: staleNote, empty: staleEmpty, staleHeaders,
+                drift.noLongerStale.map(staleRow))
         section("OS Changed", ["Name", "Serial", "Prior OS", "Current OS"], drift.osChanged.map {
             [$0.current.name ?? "", $0.current.serial ?? "",
              $0.prior.osVersion ?? "", $0.current.osVersion ?? ""]
@@ -149,7 +178,8 @@ extension CoreDashboard {
         title: String,
         note: String?,
         headers: [String],
-        dataRows: [[String]]
+        dataRows: [[String]],
+        empty: String
     ) -> Int {
         var r = row
         ws.write(title, row: r, col: 0, format: .header)
@@ -160,7 +190,7 @@ extension CoreDashboard {
         }
         r += 1
         if dataRows.isEmpty {
-            ws.write("No changes", row: r, col: 0, format: .cell)
+            ws.write(empty, row: r, col: 0, format: .cell)
             r += 1
         } else {
             for cells in dataRows {

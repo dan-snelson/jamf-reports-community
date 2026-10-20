@@ -96,6 +96,10 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- **Fleet Drift** no longer lists a Mac as both a new enrollment and departed when its serial
+  number is on two Jamf Pro records and it has no Jamf ID; such Macs are counted in a note
+  instead. An inventory collected without check-in dates no longer lists every Mac as newly
+  stale: the stale sections say they were not compared. (#284)
 - A webhook that answers with an error now shows in the log as an error with the HTTP status,
   and the failure-card and heartbeat "notification failed" lines say why. (#284)
 - A backup of a workspace whose config.yaml does not decode now says Jamf Protect was not backed

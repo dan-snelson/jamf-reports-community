@@ -458,6 +458,34 @@ final class ProtectBackupTests: XCTestCase {
                       "\(lines.texts)")
     }
 
+    func test_pruneRemovesOldBackupsWhoseProtectPartExportedNothing() throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .ok)
+        let backups = ctx.workspace.appendingPathComponent("backups", isDirectory: true)
+        let empty = ProtectBackup.result(
+            exit: 0, directory: try makeTempDir().appendingPathComponent("none"))
+        XCTAssertEqual(empty.state, .partial, "still reported as partial")
+        func make(_ name: String, protect: BackupProductResult) throws {
+            let manifest: [String: Any] = [
+                "label": "scheduled-x", "products": ["protect": protect.manifestValue]]
+            let dir = backups.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: manifest)
+                .write(to: dir.appendingPathComponent("manifest.json"))
+        }
+        try make("20260501T010101", protect: empty)
+        try make("20260502T010101", protect: BackupProductResult(
+            state: .partial, exitCode: 0, reason: "no objects exported", hasFailuresFile: true))
+        try make("20260503T010101", protect: empty)
+        try make("20260504T010101", protect: empty)
+
+        BackupMaintenance.pruneScheduledBackups(profile: ctx.profile, keep: 1)
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
+        XCTAssertEqual(left, ["20260502T010101", "20260504T010101"],
+                       "empty exports are counted and pruned; a real Protect failure stays")
+        XCTAssertFalse(empty.protectSummary.contains("never pruned"), empty.protectSummary)
+    }
+
     func test_backup_failedProtectDiscardsItsFilesAndKeepsPro() async throws {
         let ctx = try makeContext(config: connectedConfig, protect: .failed)
         let lines = Lines()

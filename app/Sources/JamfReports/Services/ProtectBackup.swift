@@ -18,8 +18,17 @@ struct BackupProductResult: Sendable, Hashable {
     /// True when jamf-cli left a `_failures.yaml` naming the resources it could not export.
     var hasFailuresFile = false
 
-    /// A Protect part that did not come out whole; the backup is never auto-pruned.
+    /// A Protect part that did not come out whole.
     var isIncomplete: Bool { state == .partial || state == .failed }
+
+    /// Partial only because a clean run exported nothing (a tenant with nothing to export).
+    var isEmptyExport: Bool {
+        state == .partial && exitCode == 0 && !hasFailuresFile && objectCounts.isEmpty
+    }
+
+    /// Retention keeps this backup: its Protect part failed or lost resources. An empty export
+    /// is not kept, or every scheduled backup of an empty tenant would stay forever.
+    var keepsBackupFromPruning: Bool { isIncomplete && !isEmptyExport }
 
     var objectTotal: Int { objectCounts.values.reduce(0, +) }
 
@@ -49,7 +58,9 @@ struct BackupProductResult: Sendable, Hashable {
                         + "\(ProtectBackup.folderName)/\(ProtectBackup.failuresFileName) "
                         + "in the backup folder. "
                     : "")
-                + "It is never pruned automatically."
+                + (isEmptyExport
+                    ? "Jamf Protect exported no objects."
+                    : "It is never pruned automatically.")
         case .failed:
             let code = exitCode.map { " (exit \($0))" } ?? ""
             return "The latest backup has no Jamf Protect part: the Protect backup failed\(code). "

@@ -113,7 +113,8 @@ versions in this repository map to git tags.
 - A backup of a workspace whose config.yaml does not decode now says Jamf Protect was not backed
   up, with the reason, instead of leaving Protect out silently. (#284)
 - A Jamf Protect backup that exits cleanly but exported nothing now reads as Partial, not as
-  backed up with 0 objects. (#284)
+  backed up with 0 objects. Retention still prunes those backups, so a Protect tenant with
+  nothing to export does not keep every scheduled backup. (#284)
 - A Mac that is on only part of the day now gets its daily summary. A daily collect runs at
   its scheduled time, or, after the Mac was off or asleep, at its first background check after
   waking, and that run is the day's run, so the scheduled time does not repeat it. A failed run

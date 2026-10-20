@@ -134,7 +134,7 @@ enum BackupMaintenance {
         // A backup whose Protect part is partial or failed is evidence of what went wrong and
         // the only copy of what did land, so retention neither counts nor removes it.
         let incompleteProtect = candidates.filter {
-            BackupProductResult.protect(inBackup: $0)?.isIncomplete == true
+            BackupProductResult.protect(inBackup: $0)?.keepsBackupFromPruning == true
         }
         if !incompleteProtect.isEmpty {
             candidates.removeAll { incompleteProtect.contains($0) }

@@ -1056,14 +1056,30 @@ final class SharedConfigPinTests: XCTestCase {
         XCTAssertTrue(try protectOnSynced())
         try writeConfig(protectBackup: "false")
         XCTAssertFalse(try protectOnSynced(), "a change to false is honoured without a confirm")
+        XCTAssertTrue(check().drifts.isEmpty, "the safe value is pinned, not shown as drift")
+        XCTAssertEqual(
+            SharedConfigPin.load(profile: profile, appSupport: appSupport)?
+                .protectBackupOnSyncedStorage, false)
+        try writeConfig(protectBackup: "true")
+        XCTAssertFalse(try protectOnSynced(), "a peer's later true waits for a confirm")
+        XCTAssertEqual(check().drifts.map(\.key), [.protectBackupOnSyncedStorage])
+        try confirmAll()
+        XCTAssertTrue(try protectOnSynced())
         try writeConfig(protectBackup: "\"maybe\"")
         XCTAssertFalse(try protectOnSynced(), "a non-boolean reads as false")
+        XCTAssertTrue(check().drifts.isEmpty)
         try writeConfig(protectBackup: "true")
-        XCTAssertTrue(try protectOnSynced(), "true again matches the confirmed pin")
+        XCTAssertFalse(try protectOnSynced(), "true after a non-boolean waits for a confirm")
+    }
+
+    func testAnUnconfirmedOptInTurnedOffIsNoLongerWaiting() throws {
+        try writeConfig(protectBackup: "true")
+        XCTAssertEqual(check().drifts.map(\.key), [.protectBackupOnSyncedStorage])
         try writeConfig(protectBackup: "false")
-        try confirmAll()
+        XCTAssertTrue(check().drifts.isEmpty)
         try writeConfig(protectBackup: "true")
-        XCTAssertFalse(try protectOnSynced(), "a change to true waits for a confirm")
+        XCTAssertEqual(check().drifts.map(\.key), [.protectBackupOnSyncedStorage])
+        XCTAssertFalse(try protectOnSynced())
     }
 
     func testTurningTheSwitchOnOverAnUnconfirmedTrueConfirmsIt() throws {

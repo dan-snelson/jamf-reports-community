@@ -373,10 +373,12 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         case .pin(let stored):
             var notes: [String] = []
             var pinned = stored
-            if let upgraded = adoptingMissingKeys(stored, current: current, workspace: workspace) {
-                pinned = upgraded
+            let upgraded = adoptingMissingKeys(stored, current: current, workspace: workspace)
+            if let upgraded { pinned = upgraded }
+            let optedOut = repinningProtectOptOut(&pinned, current: current)
+            if upgraded != nil || optedOut {
                 do {
-                    if persist { try save(upgraded, profile: profile, appSupport: appSupport) }
+                    if persist { try save(pinned, profile: profile, appSupport: appSupport) }
                 } catch {
                     notes.append("[warn] shared config could not be pinned on this Mac: "
                         + error.localizedDescription)
@@ -387,6 +389,20 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
                          drifts: unconfirmedDrifts(pin: pinned, current: current, among: changed),
                          notes: notes)
         }
+    }
+
+    /// Re-pins `protect.backup_on_synced_storage` to false when config.yaml no longer says true:
+    /// moving to the safe value needs no Confirm, and a later true is then drift again.
+    private static func repinningProtectOptOut(
+        _ pin: inout SharedConfigPin, current: SharedConfigPin
+    ) -> Bool {
+        let key = Key.protectBackupOnSyncedStorage
+        guard !current.protectBackupOnSyncedStorage,
+              pin.protectBackupOnSyncedStorage || pin.unconfirmed.contains(key.rawValue)
+        else { return false }
+        pin.protectBackupOnSyncedStorage = false
+        pin.unconfirmed.removeAll { $0 == key.rawValue }
+        return true
     }
 
     /// `changed` plus the first-sight keys still awaiting a Confirm, in `Key.allCases` order.
@@ -631,8 +647,8 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
     }
 
     /// `protect.backup_on_synced_storage` as this Mac may use it: on only while config.yaml
-    /// says true and that matches a confirmed pin. A change to false applies at once; a change
-    /// to true, or a true first seen, waits for a Confirm on this Mac.
+    /// says true and that matches a confirmed pin. A change to false applies at once and is
+    /// pinned (`check`); a change to true, or a true first seen, waits for a Confirm here.
     static func protectBackupOnSyncedStorage(
         _ configured: Bool, profile: String, appSupport: URL = AppSupport.directory()
     ) -> Bool {

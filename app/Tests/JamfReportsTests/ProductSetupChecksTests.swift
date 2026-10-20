@@ -29,11 +29,16 @@ final class ProductSetupChecksTests: XCTestCase {
         guard case .failed(let protect) = ProductSetupChecks.verdict(
             (3, Data()), product: .protect) else { return XCTFail("exit 3 is a failure") }
         XCTAssertTrue(protect.contains("client ID and secret"), protect)
+        guard case .failed(let long) = ProductSetupChecks.verdict(
+            failure(1, String(repeating: "x", count: 500)), product: .protect) else {
+            return XCTFail("exit 1 is a failure")
+        }
+        XCTAssertFalse(long.contains(String(repeating: "x", count: 201)), "the text is capped")
     }
 
     func testATimeoutNoLaunchOrMissingPermissionStillConnectsWithANote() {
         for attempt: ConnectionCheck.Attempt? in [
-            (CLIBridge.exitCodeTimedOut, Data()), nil,
+            (CLIBridge.exitCodeTimedOut, Data()), nil, (CLIBridge.exitCodeRateLimited, Data()),
             failure(CLIBridge.exitCodePermissionDenied, "permission denied (HTTP 403)"),
         ] {
             guard case .note = ProductSetupChecks.verdict(attempt, product: .protect) else {

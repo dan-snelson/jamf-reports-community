@@ -368,7 +368,7 @@ struct ReauthenticateSheet: View {
 
                 Text("Saving re-runs jamf-cli's School setup for this profile, which rebuilds it "
                      + "from these fields: enter all of them, Platform API included, or that "
-                     + "access is removed. It also makes this jamf-cli's default profile.")
+                     + "access is removed.")
                     .font(.caption)
                     .foregroundStyle(Theme.Colors.fg2)
                     .fixedSize(horizontal: false, vertical: true)

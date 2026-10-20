@@ -46,9 +46,13 @@ enum ProductSetupChecks {
         case CLIBridge.exitCodePermissionDenied:
             return .note("\(product.name) accepted the credentials, but they lack a permission "
                 + "the reports read.")
+        case CLIBridge.exitCodeRateLimited:
+            return .note("The \(product.name) credentials were not checked: the server is "
+                + "throttling requests.")
         default:
             let detail = JamfCLIErrorEnvelope.parse(attempt.stdout)?.message
-                .map { "exit \(attempt.exitCode): \($0)" } ?? "exit \(attempt.exitCode)"
+                .map { "exit \(attempt.exitCode): \(String(LogRedactor.redact($0).prefix(200)))" }
+                ?? "exit \(attempt.exitCode)"
             // School and Protect answer a rejected login with exit 1, so a failure is not
             // proof the credentials are wrong; the profile stays and connecting again replaces it.
             return .failed("jamf-cli saved the profile, but reading \(product.name) with it "
@@ -68,9 +72,12 @@ enum ProductSetupChecks {
         return present.isEmpty ? nil : present.joined(separator: " ")
     }
 
-    /// jamf-cli's default profile, or nil when there is none or the listing cannot be read.
-    nonisolated static func defaultProfile() -> String? {
-        ProfileService.listJamfCLIProfiles(scheduleCounts: [:])?.first(where: \.isDefault)?.name
+    /// jamf-cli's default profile from its config file, which `set-default` writes; `readable`
+    /// is false when the file could not be read.
+    static func defaultProfile() -> (readable: Bool, name: String?) {
+        guard let rows = ProfileService.readConfigFile(at: ProfileService.defaultConfigFileURL)
+        else { return (false, nil) }
+        return (true, rows.first(where: \.isDefault)?.name)
     }
 
     /// `config set-default` back to `previous`; nil when there was no default or it was this one.
@@ -80,7 +87,14 @@ enum ProductSetupChecks {
     }
 
     /// Puts back the default `setUp` replaced. Returns a note when it could not.
-    static func restoreDefault(previous: String?, setUp: String, binary: URL) async -> String? {
+    static func restoreDefault(
+        previous: (readable: Bool, name: String?), setUp: String, binary: URL
+    ) async -> String? {
+        guard previous.readable else {
+            return "jamf-cli may now use \(setUp) as its default profile; check with "
+                + "jamf-cli config list."
+        }
+        let previous = previous.name
         guard let arguments = setDefaultArguments(previous: previous, setUp: setUp),
               let previous else { return nil }
         let outcome = await Task.detached(priority: .userInitiated) {

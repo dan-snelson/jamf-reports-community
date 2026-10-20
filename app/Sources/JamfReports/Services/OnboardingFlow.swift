@@ -660,7 +660,7 @@ final class OnboardingFlow {
         }
 
         let isNew = await isNewProfile(name)
-        let previousDefault = await Task.detached { ProductSetupChecks.defaultProfile() }.value
+        let previousDefault = ProductSetupChecks.defaultProfile()
         do {
             let result = try await Self.runWithPTY(
                 executable: binary,
@@ -697,7 +697,9 @@ final class OnboardingFlow {
             try recordProtectConnection(profileSlug: profileName.trimmed, protectProfileName: name)
             protectConfigNote = ProductSetupChecks.joined(protectConfigNote, checkNote, defaultNote)
         } catch {
-            protectConnectionError = "Connected, but config update failed: \(error.localizedDescription)"
+            protectConnectionError = ProductSetupChecks.joined(
+                "Connected, but config update failed: \(error.localizedDescription)",
+                checkNote, defaultNote)
         }
     }
 
@@ -751,7 +753,7 @@ final class OnboardingFlow {
         }
 
         let isNew = await isNewProfile(name)
-        let previousDefault = await Task.detached { ProductSetupChecks.defaultProfile() }.value
+        let previousDefault = ProductSetupChecks.defaultProfile()
         do {
             let result = try await Self.runWithPTY(
                 executable: binary,
@@ -791,7 +793,9 @@ final class OnboardingFlow {
             try recordSchoolConnection(profileSlug: profileName.trimmed, schoolProfileName: name)
             schoolConfigNote = ProductSetupChecks.joined(schoolConfigNote, checkNote, defaultNote)
         } catch {
-            schoolConnectionError = "Connected, but config update failed: \(error.localizedDescription)"
+            schoolConnectionError = ProductSetupChecks.joined(
+                "Connected, but config update failed: \(error.localizedDescription)",
+                checkNote, defaultNote)
         }
         // A rejected answer keeps the profile: the School API key works without the gateway.
         if sendsPlatform {

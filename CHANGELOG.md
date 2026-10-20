@@ -50,7 +50,6 @@ versions in this repository map to git tags.
   optional Teams or Slack webhook, also when setup was started from demo mode. Finishing with
   the box ticked turns on the daily collection; before, a new workspace had no background item
   until you opened Automation. An existing automation setup is never switched off or changed.
-
 - **Settings › Add connection** and the workspace menu's **Add workspace or product…** now open
   one **Add** sheet, which replaces Add workspace, Add Jamf School workspace and the Jamf
   Pro-only setup they started. Choose a new Jamf Pro, Platform API or Jamf School workspace, or
@@ -224,6 +223,14 @@ versions in this repository map to git tags.
   message. (#284)
 - A custom EA date tab no longer shows "Expiring (0d)" for a date that passed less than a day ago.
   It now reads Expired, with the day count rounded down. (#284)
+- The Mobile Devices supervision chart uses a blue and orange pair that color-blind readers
+  can tell apart.
+- The Fleet Overview stability trend and the second OS version slice are easier to see on
+  the dark background, and the stability pill says Healthy, Watch or Low as well as showing
+  the number.
+- Workbook compliance charts and the app use the same color for each compliance band, and
+  the chart legend no longer cuts long labels short.
+- OS version chart colors for a macOS release without a set color no longer change between runs.
 
 ### Removed
 

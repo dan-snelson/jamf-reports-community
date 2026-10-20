@@ -5,8 +5,8 @@ import AppKit
 /// events), embedded in Settings → Diagnostics. Loads on appear and on manual
 /// Refresh — no continuous polling. Filter by minimum level, time window, and
 /// free-text search (which also matches the `[category]` prefix). Messages are
-/// `LogRedactor`-scrubbed at display, and also stripped of the Jamf host and tenant IDs on
-/// export (`redactedForSharing`). Demo mode shows the demo org's run instead of this
+/// `LogRedactor`-scrubbed at display, and also stripped of every known profile's Jamf host and
+/// tenant IDs on export (`redactedForSharing`). Demo mode shows the demo org's run instead of this
 /// session's buffer and does not export.
 struct LogViewerView: View {
     @Environment(WorkspaceStore.self) private var workspace
@@ -108,11 +108,17 @@ struct LogViewerView: View {
     private func export() {
         guard !workspace.demoMode else { return }
         let body = filtered.map { "\(time($0.date)) [\($0.category)] \($0.message)" }.joined(separator: "\n")
-        let scrubbed = LogRedactor.redactedForSharing(body, profile: workspace.profile)
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "jamf-reports-logs.txt"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? Data(scrubbed.utf8).write(to: url, options: .atomic)
+        // The buffer mixes every profile collected this session, so seed all of them.
+        let profiles = workspace.profiles.map(\.name)
+        Task {
+            let scrubbed = await Task.detached {
+                LogRedactor.redactedForSharing(body, profiles: profiles)
+            }.value
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "jamf-reports-logs.txt"
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try? Data(scrubbed.utf8).write(to: url, options: .atomic)
+        }
     }
 
     private func color(for level: LogEntry.Level) -> Color {

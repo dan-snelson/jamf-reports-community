@@ -622,16 +622,23 @@ enum DiagnosticBundleService {
     }
 
     /// The Jamf server `profile` points at in jamf-cli's config file, as `host:port` and `host`
-    /// (just `host` when no port is set). A bare on-prem host is in no snapshot, so the seeded
-    /// literals and the URL pattern miss it in a shared log. No file or no `url` gives none.
+    /// (just `host` when no port is set), plus the same for the Protect login its workspace
+    /// connects (`protect.profile`), so a Protect tenant label leaves a shared log too. A bare
+    /// on-prem host is in no snapshot, so the seeded literals and the URL pattern miss it. No
+    /// file or no `url` gives none.
     static func serverHosts(
         profile: String,
         configURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".config/jamf-cli/config.yaml")
+            .appendingPathComponent(".config/jamf-cli/config.yaml"),
+        workspacesRoot: URL = ProfileService.workspacesRoot()
     ) -> [String] {
-        guard let configured = ProfileService.readConfigFile(at: configURL),
-              let url = configured.first(where: { $0.name == profile })?.url else { return [] }
-        return hostForms(ofURL: url)
+        guard let configured = ProfileService.readConfigFile(at: configURL) else { return [] }
+        let names = [profile]
+            + [ConnectedProducts.read(profile: profile, under: workspacesRoot).protectProfile]
+                .compactMap { $0 }
+        return names.flatMap { name in
+            configured.first(where: { $0.name == name })?.url.map(hostForms(ofURL:)) ?? []
+        }
     }
 
     /// Pure: `host:port` and `host` of a configured server URL, scheme, credentials and path

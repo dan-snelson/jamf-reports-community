@@ -191,11 +191,23 @@ enum LogRedactor {
         scopeIDs: (String) -> [String] = { DiagnosticBundleService.scopeIDs(profile: $0) },
         serverHosts: (String) -> [String] = { DiagnosticBundleService.serverHosts(profile: $0) }
     ) -> String {
+        redactedForSharing(
+            text, profiles: profile.map { [$0] } ?? [],
+            scopeIDs: scopeIDs, serverHosts: serverHosts)
+    }
+
+    /// As above for a log that mixes several profiles' lines (the in-app buffer): every
+    /// profile's IDs and server are seeded.
+    static func redactedForSharing(
+        _ text: String,
+        profiles: [String],
+        scopeIDs: (String) -> [String] = { DiagnosticBundleService.scopeIDs(profile: $0) },
+        serverHosts: (String) -> [String] = { DiagnosticBundleService.serverHosts(profile: $0) }
+    ) -> String {
         let redactor = DiagnosticRedactor()
-        if let profile {
-            redactor.seedScopeIDs(scopeIDs(profile))
-            redactor.seedServerHosts(serverHosts(profile))
-        }
+        // Each seed call replaces the last, so hand over every profile's values at once.
+        redactor.seedScopeIDs(profiles.flatMap(scopeIDs))
+        redactor.seedServerHosts(profiles.flatMap(serverHosts))
         return redactor.redactText(redact(text))
     }
 

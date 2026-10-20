@@ -90,6 +90,73 @@ final class BoundedReadsTests: XCTestCase {
         XCTAssertEqual(outcome, true, "a FIFO must be refused without blocking")
     }
 
+    // MARK: - BoundedFile.read inside a root
+
+    /// `jamf-cli-data/computers` swapped for a link to a folder outside the workspace after the
+    /// path was validated: refused when not following, and caught by the kernel's path when
+    /// following.
+    func testReadInsideARootRefusesAFolderSwappedForALinkOutsideIt() throws {
+        let workspace = root.appendingPathComponent("ws", isDirectory: true)
+        let kind = workspace.appendingPathComponent("jamf-cli-data/computers", isDirectory: true)
+        let file = kind.appendingPathComponent("s.json")
+        try fm.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data("[1]".utf8).write(to: file)
+        XCTAssertEqual(
+            try BoundedFile.read(file, limit: 10, followSymlinks: false, inside: workspace),
+            Data("[1]".utf8))
+
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("[2]".utf8).write(to: outside.appendingPathComponent("s.json"))
+        try fm.removeItem(at: kind)
+        try link(kind, to: outside)
+        XCTAssertEqual(try BoundedFile.read(file, limit: 10), Data("[2]".utf8), "the swap worked")
+        for follow in [false, true] {
+            XCTAssertThrowsError(
+                try BoundedFile.read(file, limit: 10, followSymlinks: follow, inside: workspace)
+            ) { XCTAssertEqual($0 as? BoundedFile.Failure, .unreadable(ELOOP)) }
+        }
+    }
+
+    /// The temp dir sits under `/var` -> `/private/var`, which `O_NOFOLLOW_ANY` on the whole path
+    /// would refuse; links above the root, a linked root included, are trusted.
+    func testReadInsideARootUnderSystemAndRootLinksStillReads() throws {
+        let workspace = root.appendingPathComponent("ws", isDirectory: true)
+        let file = workspace.appendingPathComponent("jamf-cli-data/computers/s.json")
+        try fm.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("[1]".utf8).write(to: file)
+        let linkedRoot = root.appendingPathComponent("linked-ws")
+        try link(linkedRoot, to: workspace)
+        let throughLink = linkedRoot.appendingPathComponent("jamf-cli-data/computers/s.json")
+        XCTAssertEqual(
+            try BoundedFile.read(throughLink, limit: 10, followSymlinks: false, inside: linkedRoot),
+            Data("[1]".utf8))
+        XCTAssertNoThrow(
+            try BoundedFile.read(file, limit: 10, followSymlinks: false, inside: workspace))
+
+        // Below the root a link is refused unless following, even one that stays inside.
+        let alias = workspace.appendingPathComponent("jamf-cli-data/alias")
+        try link(alias, to: file.deletingLastPathComponent())
+        let viaAlias = alias.appendingPathComponent("s.json")
+        XCTAssertThrowsError(
+            try BoundedFile.read(viaAlias, limit: 10, followSymlinks: false, inside: workspace))
+        XCTAssertNoThrow(
+            try BoundedFile.read(viaAlias, limit: 10, followSymlinks: true, inside: workspace))
+    }
+
+    func testReadInsideARootRefusesAPathNotBelowIt() throws {
+        let workspace = root.appendingPathComponent("ws", isDirectory: true)
+        try fm.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let sibling = root.appendingPathComponent("other.json")
+        try Data("[]".utf8).write(to: sibling)
+        let escaping = workspace.appendingPathComponent("../other.json")
+        for url in [sibling, escaping, workspace] {
+            XCTAssertThrowsError(
+                try BoundedFile.read(url, limit: 10, followSymlinks: false, inside: workspace))
+        }
+    }
+
     // MARK: - Run logs
 
     private func logsDir() throws -> URL {
@@ -397,5 +464,64 @@ final class BoundedReadsTests: XCTestCase {
         XCTAssertEqual(threw, true)
         let candidates = within { CollectedEACandidates.load(dataDir: dataDir, tracked: []) }
         XCTAssertEqual(candidates?.isEmpty, true)
+    }
+
+    // MARK: - Daily summaries, run-in-progress probe, backup and snapshot manifests
+
+    func testSummaryParseRefusesAFIFOALinkAndAnOversizeFile() throws {
+        let dir = root.appendingPathComponent("summaries", isDirectory: true)
+        let real = dir.appendingPathComponent("summary_2026-04-01.json")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let json = #"{"date":"2026-04-01","totalDevices":5,"source":"jamf-cli"}"#
+        try Data(json.utf8).write(to: real)
+        try link(dir.appendingPathComponent("summary_2026-04-02.json"), to: real)
+        try fifo(at: dir.appendingPathComponent("summary_2026-04-03.json"))
+        let big = dir.appendingPathComponent("summary_2026-04-04.json")
+        try sparse(big, bytes: UInt64(SummaryJSONParser.maxSummaryFileBytes) + 1)
+        XCTAssertThrowsError(try SummaryJSONParser.parse(big)) {
+            XCTAssertEqual(($0 as? CocoaError)?.code, .fileReadTooLarge)
+        }
+        let dates = within { SummaryJSONParser.parseDirectory(dir).map(\.date) }
+        XCTAssertEqual(dates, ["2026-04-01"])
+    }
+
+    func testRunInProgressProbeReadsAFIFOOrALinkAsNotRunning() throws {
+        let logs = try logsDir()
+        let pipe = logs.appendingPathComponent("pipe.log")
+        try fifo(at: pipe)
+        XCTAssertEqual(within { ScheduledRunRecorder.isRunInProgress(logURL: pipe) }, false)
+        let real = logs.appendingPathComponent("real.log")
+        try Data("x\n".utf8).write(to: real)
+        let linked = logs.appendingPathComponent("linked.log")
+        try link(linked, to: real)
+        XCTAssertFalse(ScheduledRunRecorder.isRunInProgress(logURL: linked))
+    }
+
+    func testBackupLibraryReadsAFIFOOrOversizeManifestAsNoManifest() throws {
+        let backups = try workspace().appendingPathComponent("backups", isDirectory: true)
+        try fifo(at: backups.appendingPathComponent("20260601T214020/manifest.json"))
+        let big = backups.appendingPathComponent("20260602T214020/manifest.json")
+        try sparse(big, bytes: UInt64(BoundedFile.documentLimit) + 1)
+        let profile = profile
+        let labels = within { BackupLibrary().list(profile: profile).map(\.label) }
+        XCTAssertEqual(labels, ["", ""])
+    }
+
+    func testSnapshotManifestReadsAFIFOOrLinkAsAbsentAndSkipsThem() throws {
+        let kind = root.appendingPathComponent("data/computers", isDirectory: true)
+        let snapshot = kind.appendingPathComponent("computers_20260601T000000.json")
+        try fm.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data("[]".utf8).write(to: snapshot)
+        try fifo(at: kind.appendingPathComponent(SnapshotManifest.fileName))
+        let result = within { SnapshotManifest.verify(snapshot: snapshot, data: Data("[]".utf8)) }
+        XCTAssertEqual(result, .absent)
+
+        let flat = root.appendingPathComponent("flat", isDirectory: true)
+        try fifo(at: flat.appendingPathComponent("summary_2026-04-01.json"))
+        try link(flat.appendingPathComponent("summary_2026-04-02.json"), to: snapshot)
+        try fifo(at: flat.appendingPathComponent("computers.last"))
+        let flatDir: URL = flat
+        XCTAssertEqual(within { SnapshotManifest.scanFlatDir(flatDir).unverified }, 0)
+        XCTAssertEqual(within { SnapshotManifest.scanStateDir(flatDir).unverified }, 0)
     }
 }

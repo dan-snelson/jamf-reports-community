@@ -2439,6 +2439,9 @@ struct ReportEngine: Sendable {
         return args
     }
 
+    /// The School kind that reads the Platform API (`planSchoolCollect` gates it).
+    static let schoolBlueprintsKind = "school-blueprints"
+
     /// The commands a Jamf School collect runs, in order (`schoolCollect`; Data Sources lists
     /// them through `CollectSourcesPlan`).
     static func schoolCommandMatrix(profile: String) -> [(args: [String], kind: String)] {
@@ -2454,6 +2457,9 @@ struct ReportEngine: Sendable {
             (["-p", profile, "school", "locations", "list", "--output", "json"], "school-locations"),
             (["-p", profile, "school", "ibeacons", "list", "--output", "json"], "school-ibeacons"),
             (["-p", profile, "school", "dep-devices", "list", "--output", "json"], "school-dep-devices"),
+            // Experimental: reaches the Platform API, so it needs the profile's Platform fields.
+            (["-p", profile, "school", "blueprints", "list", "--output", "json"],
+             schoolBlueprintsKind),
         ]
     }
 
@@ -3400,7 +3406,11 @@ struct ReportEngine: Sendable {
                 dataDir: dataDir, summariesDir: summariesDir,
                 staleDays: { schoolStaleDays(profile: profile, onLine: onLine) }, onLine: onLine)
         }
-        let plan = planSchoolCollect(profile: profile, tiers: tiers, force: force) {
+        // nil (could not ask) collects: only a profile known to lack Platform fields skips.
+        let resolved = ProfileAuthMethod.resolve(profile: profile, binary: bin)
+        let plan = planSchoolCollect(
+            profile: profile, tiers: tiers, force: force,
+            platformFieldsMissing: resolved.map { !$0.hasTenantID } ?? false) {
             stateStore?.lastRun(report: $0)
         }
         for line in collectPlanLines(profile: profile, fixedPlan: plan) {

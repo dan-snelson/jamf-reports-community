@@ -56,6 +56,11 @@ versions in this repository map to git tags.
   a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
   The first collect after the upgrade also fills in earlier days from the Jamf School device
   snapshots already on disk, so Trends starts at the workspace's first collect. (#284)
+- Experimental: a Jamf School workspace whose profile also has Platform API fields collects its
+  blueprints and writes a Blueprints tab (name, state, last deployed, created, updated). Without
+  those fields Data Sources shows the source as skipped and says how to add them.
+- A Jamf School workspace now builds Trends history: each collect that reads its devices saves
+  a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
 
 ### Changed
 

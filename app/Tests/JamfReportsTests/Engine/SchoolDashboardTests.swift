@@ -507,3 +507,58 @@ final class SchoolDashboardSheetNamesTests: XCTestCase {
         XCTAssertEqual(dash.sheetPlan.map(\.name), SchoolDashboard.sheetNames)
     }
 }
+
+/// Experimental: the Blueprints tab reads `school-blueprints` (BlueprintOverview rows).
+final class SchoolBlueprintsSheetTests: XCTestCase {
+    private func dataDir(_ json: String) throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-bp-\(UUID().uuidString)")
+        let kind = tmp.appendingPathComponent("school-blueprints", isDirectory: true)
+        try FileManager.default.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data(json.utf8).write(to: kind.appendingPathComponent("school-blueprints_fixture.json"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: tmp) }
+        return tmp
+    }
+
+    func test_blueprintsSheet_readsOverviewRows_andToleratesMissingOptionals() throws {
+        let json = """
+        [
+          {"id": "b1", "name": "Update software", "description": "Keep current",
+           "deploymentState": {"state": "OUT_OF_DATE",
+             "lastDeployment": {"started": "2026-10-01T16:35:00Z", "state": "SUCCEEDED"}},
+           "created": "2026-09-01T12:00:00Z", "updated": "2026-10-02T09:00:00Z"},
+          {"id": "b2", "name": "Fresh",
+           "deploymentState": {"state": "NOT_DEPLOYED"},
+           "created": "2026-10-03T12:00:00Z", "updated": "2026-10-03T12:00:00Z"}
+        ]
+        """
+        let workbook = Workbook()
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: try dataDir(json), workbook: workbook)
+        XCTAssertNoThrow(try dash.writeSchoolBlueprints())
+        let cells = (workbook.sheet(named: "Blueprints")?.dedupedCells ?? []).compactMap {
+            if case let .string(s) = $0.value { return s } else { return nil }
+        }
+        for expected in ["Name", "State", "Last deployed", "Created", "Updated",
+                         "Update software", "Out of date", "2026-10-01T16:35:00Z",
+                         "Fresh", "Not deployed", "2026-10-03T12:00:00Z"] {
+            XCTAssertTrue(cells.contains(expected), expected)
+        }
+    }
+
+    func test_blueprintsSheet_isSkippedWithoutASnapshot() {
+        let empty = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-bp-none-\(UUID().uuidString)")
+        let dash = SchoolDashboard(config: ReportConfig(), dataDir: empty, workbook: Workbook())
+        XCTAssertThrowsError(try dash.writeSchoolBlueprints())
+    }
+
+    func test_sheetNames_areTheOldListPlusBlueprints() {
+        let old = ["School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles",
+                   "Locations", "DEP Devices", "iBeacons", "Device Inventory", "OS Versions",
+                   "Device Status", "Stale Devices"]
+        var expected = old
+        expected.insert("Blueprints", at: old.firstIndex(of: "Device Inventory") ?? 0)
+        XCTAssertEqual(SchoolDashboard.sheetNames, expected)
+    }
+}

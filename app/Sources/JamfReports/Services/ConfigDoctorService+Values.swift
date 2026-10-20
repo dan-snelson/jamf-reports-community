@@ -42,8 +42,8 @@ extension ConfigDoctorService {
     /// The tabs `SchoolDashboard.sheetPlan` can write, the only tabs of a Jamf School workbook.
     static let schoolSheetNames = [
         "School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles", "Locations",
-        "DEP Devices", "iBeacons", "Device Inventory", "OS Versions", "Device Status",
-        "Stale Devices",
+        "DEP Devices", "iBeacons", "Blueprints", "Device Inventory", "OS Versions",
+        "Device Status", "Stale Devices",
     ]
 
     // MARK: - Settings the app replaced or clamped

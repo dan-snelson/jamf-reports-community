@@ -166,7 +166,10 @@ final class SnapshotFleetDriftTests: XCTestCase {
         let dash = try dashboard(
             files: [(old, fleet(1...100, taken: old)), (new, fleet(1...40, taken: new))],
             onLine: lines.append)
-        try dash.writeFleetDrift()
+        let log = AttentionLog(profile: "p", usesAppRecord: false)
+        try AttentionLog.$current.withValue(log) { try dash.writeFleetDrift() }
+        XCTAssertEqual(log.changes, [.fleetDriftLargeChange: .raised(
+            "Fleet Drift: 0 joined and 60 left (60% of the fleet)")])
         XCTAssertEqual(try section("Departed Devices", in: dash).count, 60)
         let warning = try cell(row: 2, col: 0, in: dash)
         XCTAssertTrue(warning.hasPrefix("Large change: 0 joined and 60 left since "), warning)
@@ -196,7 +199,9 @@ final class SnapshotFleetDriftTests: XCTestCase {
         let dash = try dashboard(
             files: [(old, fleet(1...100, taken: old)), (new, fleet(3...105, taken: new))],
             onLine: lines.append)
-        try dash.writeFleetDrift()
+        let log = AttentionLog(profile: "p", usesAppRecord: false)
+        try AttentionLog.$current.withValue(log) { try dash.writeFleetDrift() }
+        XCTAssertEqual(log.changes, [.fleetDriftLargeChange: .cleared])
         XCTAssertEqual(try section("New Enrollments", in: dash).count, 5)
         XCTAssertEqual(try section("Departed Devices", in: dash).count, 2)
         XCTAssertFalse(try texts(dash).contains { $0.hasPrefix("Large change") })

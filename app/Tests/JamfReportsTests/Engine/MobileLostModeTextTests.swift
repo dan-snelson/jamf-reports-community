@@ -62,6 +62,24 @@ final class MobileLostModeTextTests: XCTestCase {
         XCTAssertEqual(lines.texts.filter { $0.hasPrefix("[warn] \(kind)") }.count, 1)
     }
 
+    func testAListThatCouldNotBeStrippedNeedsAttentionAndASavedOneClearsIt() throws {
+        let kind = MobileFleetService.deviceKind
+        func changes(_ payload: String) throws -> [AttentionCode: AttentionChange] {
+            let log = AttentionLog(profile: "p", usesAppRecord: false)
+            _ = try AttentionLog.$current.withValue(log) {
+                try ReportEngine.saveCollectedPayload(
+                    kind: kind, data: Data(payload.utf8),
+                    outcome: ReportEngine.CollectOutcome(kind: kind, exitCode: 0),
+                    isPartialFailure: false, dataDir: dataDir, recordManifest: false,
+                    stateStore: nil, collectStart: Date(), onLine: { _ in })
+            }
+            return log.changes
+        }
+        XCTAssertEqual(try changes("5"), [.lostModeStripFailed: .raised(
+            "Mobile device list not saved: lost-mode text not removed")])
+        XCTAssertEqual(try changes(Self.record), [.lostModeStripFailed: .cleared])
+    }
+
     // MARK: - Fixtures
 
     private static let record = #"""

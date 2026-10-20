@@ -105,6 +105,23 @@ final class SchoolSummaryTests: XCTestCase {
         XCTAssertFalse(lines.texts.contains { $0.contains("[partial]") })
     }
 
+    func testZeroDevicesNeedAttentionAndALandedFleetClearsIt() throws {
+        func changes() -> [AttentionCode: AttentionChange] {
+            let log = AttentionLog(profile: "p", usesAppRecord: false)
+            AttentionLog.$current.withValue(log) { write() }
+            return log.changes
+        }
+        try writeDevices("[]")
+        XCTAssertEqual(changes(), [.schoolZeroDevices: .raised("Jamf School returned 0 devices")])
+        try writeDevices(fleet, stamp: "20261019T090000")
+        XCTAssertEqual(changes(), [.schoolZeroDevices: .cleared])
+        XCTAssertEqual({ () -> [AttentionCode: AttentionChange] in
+            let log = AttentionLog(profile: "p", usesAppRecord: false)
+            AttentionLog.$current.withValue(log) { write(landed: []) }
+            return log.changes
+        }(), [:], "a run that did not land the devices did not check")
+    }
+
     func testRunThatLandedNoDevicesLeavesTodaysSummary() throws {
         try writeDevices(fleet)
         write()

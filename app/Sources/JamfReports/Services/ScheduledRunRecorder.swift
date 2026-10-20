@@ -201,10 +201,33 @@ final class ScheduledRunRecorder: @unchecked Sendable {
             default: break
             }
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else {
-            return
+        // The open attention items outlive the run that recorded them (`AttentionLog`).
+        payload.merge(AttentionLog.storedKeys(in: statusURL)) { current, _ in current }
+        let fm = FileManager.default
+        do {
+            try Self.replaceStatusFile(at: statusURL, with: payload)
+        } catch {
+            // The stale status file (if any) now has the PREVIOUS run's data.
+            // Remove it so absence is unambiguous — a missing file is better
+            // than wrong data masquerading as current.
+            if fm.fileExists(atPath: statusURL.path) {
+                do {
+                    try fm.removeItem(at: statusURL)
+                } catch let removeError {
+                    AppLogger.schedule.error(
+                        "ScheduledRunRecorder: failed to remove stale status JSON for \(self.label, privacy: .public): \(removeError.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+            AppLogger.schedule.error(
+                "ScheduledRunRecorder: writeStatusJSON failed for \(self.label, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
         }
+    }
 
+    /// Writes `payload` to `statusURL` through a 0600 temp file and an atomic replace.
+    static func replaceStatusFile(at statusURL: URL, with payload: [String: Any]) throws {
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
         let fm = FileManager.default
         let tempURL = statusURL.deletingLastPathComponent()
             .appendingPathComponent(".\(statusURL.lastPathComponent).\(UUID().uuidString).tmp")
@@ -223,23 +246,8 @@ final class ScheduledRunRecorder: @unchecked Sendable {
             }
             _ = try fm.replaceItemAt(statusURL, withItemAt: tempURL)
         } catch {
-            // Temp file cleanup (best-effort).
             try? fm.removeItem(at: tempURL)
-            // The stale status file (if any) now has the PREVIOUS run's data.
-            // Remove it so absence is unambiguous — a missing file is better
-            // than wrong data masquerading as current.
-            if fm.fileExists(atPath: statusURL.path) {
-                do {
-                    try fm.removeItem(at: statusURL)
-                } catch let removeError {
-                    AppLogger.schedule.error(
-                        "ScheduledRunRecorder: failed to remove stale status JSON for \(self.label, privacy: .public): \(removeError.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
-            AppLogger.schedule.error(
-                "ScheduledRunRecorder: writeStatusJSON failed for \(self.label, privacy: .public): \(error.localizedDescription, privacy: .public)"
-            )
+            throw error
         }
     }
 

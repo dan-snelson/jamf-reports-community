@@ -216,7 +216,10 @@ struct EASheets: Sendable {
         config: ReportConfig, workbook: Workbook, dataDir: URL,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) -> EASheets? {
-        guard let eas = config.customEas, !eas.isEmpty else { return nil }
+        guard let eas = config.customEas, !eas.isEmpty else {
+            AttentionLog.clear(.eaSnapshotUnreadable)
+            return nil
+        }
         var resultsProblem: String?
         var rows: [EAResultRow] = []
         switch read("ea-results", in: dataDir) {
@@ -246,6 +249,15 @@ struct EASheets: Sendable {
             let msg = "[warn] \(kind): snapshot unreadable — \(problem)"
             AppLogger.report.warning("\(msg, privacy: .public)")
             onLine?(.init(timestamp: Date(), level: .warn, text: msg))
+        }
+        let unreadable = [("ea-results", resultsProblem),
+                          ("computer-extension-attributes", definitionsProblem)]
+            .filter { $0.1 != nil }.map(\.0)
+        if unreadable.isEmpty {
+            AttentionLog.clear(.eaSnapshotUnreadable)
+        } else {
+            AttentionLog.raise(.eaSnapshotUnreadable,
+                               "\(unreadable.joined(separator: " and ")) snapshot unreadable")
         }
         guard !rows.isEmpty || names != nil || resultsProblem != nil || definitionsProblem != nil
         else { return nil }

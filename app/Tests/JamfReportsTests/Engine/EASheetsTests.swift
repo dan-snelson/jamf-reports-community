@@ -267,6 +267,21 @@ final class EASheetsTests: XCTestCase {
         XCTAssertTrue(reason.hasPrefix("snapshot unreadable: ea-results"), reason)
     }
 
+    func testAnUnreadableSnapshotNeedsAttentionAndAReadableOneClearsIt() throws {
+        func changes() throws -> [AttentionCode: AttentionChange] {
+            let log = AttentionLog(profile: "p", usesAppRecord: false)
+            try AttentionLog.$current.withValue(log) {
+                _ = try writeLogged([CustomEAConfig(name: "One", column: "One", type: .text)])
+            }
+            return log.changes
+        }
+        try rawSnapshot("ea-results", "this is not json")
+        XCTAssertEqual(try changes(),
+                       [.eaSnapshotUnreadable: .raised("ea-results snapshot unreadable")])
+        try results([(device: "Mac-1", ea: "One", value: "x")])
+        XCTAssertEqual(try changes(), [.eaSnapshotUnreadable: .cleared])
+    }
+
     func testUnreadableDefinitionsAreNotReportedAsNoValuesCollected() throws {
         try results([("A", "Present", "x")])
         try rawSnapshot("computer-extension-attributes", #"{"not": "a list"}"#)

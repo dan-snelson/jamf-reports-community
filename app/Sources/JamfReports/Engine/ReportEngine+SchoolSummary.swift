@@ -47,8 +47,10 @@ extension ReportEngine {
             let msg = "[warn] Jamf School returned 0 devices — summary not written"
             AppLogger.collect.warning("\(msg, privacy: .public)")
             onLine(.init(timestamp: Date(), level: .warn, text: msg))
+            AttentionLog.raise(.schoolZeroDevices, "Jamf School returned 0 devices")
             return .nothingToSummarize
         }
+        AttentionLog.clear(.schoolZeroDevices)
         do {
             try FileManager.default.createDirectory(
                 at: summariesDir, withIntermediateDirectories: true)

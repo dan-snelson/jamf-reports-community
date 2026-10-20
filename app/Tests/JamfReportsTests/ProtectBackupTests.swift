@@ -190,6 +190,39 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertFalse(texts.contains { $0.contains("backed up (0 objects)") })
     }
 
+    // MARK: - Needs attention
+
+    private func attention(
+        config: String?, protect: ProtectMode
+    ) async throws -> [AttentionCode: AttentionChange] {
+        let ctx = try makeContext(config: config, protect: protect)
+        let log = AttentionLog(profile: ctx.profile, usesAppRecord: false)
+        _ = try await AttentionLog.$current.withValue(log) {
+            try await CLIBridge().backup(
+                profile: ctx.profile, label: "scheduled-t", _testExecutable: ctx.stub) { _ in }
+        }
+        return log.changes
+    }
+
+    func test_attention_eachProtectOutcomeRecordsOrClearsItsCode() async throws {
+        let ok = try await attention(config: connectedConfig, protect: .ok)
+        XCTAssertEqual(ok, [.protectBackupSkipped: .cleared, .protectBackupPartial: .cleared])
+        let empty = try await attention(config: connectedConfig, protect: .empty)
+        XCTAssertEqual(empty, [
+            .protectBackupSkipped: .cleared,
+            .protectBackupPartial: .raised("Protect backup partial: no objects exported"),
+        ])
+        let failed = try await attention(config: connectedConfig, protect: .failed)
+        XCTAssertEqual(failed[.protectBackupPartial], .raised("Protect backup failed"))
+        let undecodable = try await attention(config: "thresholds: not-a-mapping\n", protect: .ok)
+        XCTAssertEqual(undecodable, [
+            .protectBackupSkipped: .raised("Protect not backed up: config.yaml does not decode"),
+        ])
+        let none = try await attention(config: nil, protect: .ok)
+        XCTAssertEqual(none, [.protectBackupSkipped: .cleared, .protectBackupPartial: .cleared],
+                       "a workspace without Protect has nothing left to fix")
+    }
+
     // MARK: - backup(): connected
 
     func test_backup_connectedWorkspaceBacksUpProtectIntoTheSameFolder() async throws {

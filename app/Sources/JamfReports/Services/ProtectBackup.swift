@@ -314,6 +314,8 @@ extension CLIBridge {
                 onLine(.init(timestamp: Date(), level: .warn,
                              text: "[warn] Jamf Protect not backed up: \(reason). "
                                  + "The Jamf Pro backup is unaffected."))
+                AttentionLog.raise(
+                    .protectBackupSkipped, "Protect not backed up: config.yaml does not decode")
                 return BackupProductResult(state: .skipped, reason: reason)
             }
         } else {
@@ -335,11 +337,13 @@ extension CLIBridge {
         let protectProfile: String
         switch plan {
         case .notConnected:
+            AttentionLog.clear(.protectBackupSkipped, .protectBackupPartial)
             return nil
         case .skip(let reason):
             onLine(.init(timestamp: Date(), level: .warn,
                          text: "[warn] Jamf Protect not backed up: \(reason). "
                              + "The Jamf Pro backup is unaffected."))
+            AttentionLog.raise(.protectBackupSkipped, "Protect not backed up: \(reason)")
             return BackupProductResult(state: .skipped, reason: reason)
         case .run(let name):
             protectProfile = name
@@ -358,6 +362,7 @@ extension CLIBridge {
             let reason = "the Protect backup path was rejected by the path guard"
             onLine(.init(timestamp: Date(), level: .warn,
                          text: "[warn] Jamf Protect not backed up: \(reason)."))
+            AttentionLog.raise(.protectBackupSkipped, "Protect not backed up: \(reason)")
             return BackupProductResult(state: .skipped, reason: reason)
         }
         onLine(.init(timestamp: Date(), level: .info,
@@ -378,6 +383,8 @@ extension CLIBridge {
                          text: "[error] could not run protect backup: \(error.localizedDescription)"))
         }
         let result = ProtectBackup.result(exit: exit, directory: validated)
+        // It ran, so a skip is over; what it left decides the other code.
+        AttentionLog.clear(.protectBackupSkipped)
         reportProtectBackup(result, exit: exit, timeout: timeout, output: validated, onLine: onLine)
         return result
     }
@@ -391,6 +398,7 @@ extension CLIBridge {
             onLine(.init(timestamp: Date(), level: .ok,
                          text: "[ok] Jamf Protect configuration backed up "
                              + "(\(result.objectTotal) objects)"))
+            AttentionLog.clear(.protectBackupPartial)
             return
         case .skipped:
             return
@@ -428,6 +436,10 @@ extension CLIBridge {
         onLine(.init(timestamp: Date(), level: .warn,
                      text: "[warn] Jamf Protect backup is "
                          + "\(result.state == .partial ? "PARTIAL" : "FAILED"): \(detail)"))
+        AttentionLog.raise(
+            .protectBackupPartial,
+            "Protect backup \(result.state == .partial ? "partial" : "failed")"
+                + (result.reason.map { ": \($0)" } ?? ""))
         onLine(.init(timestamp: Date(), level: .warn,
                      text: "[partial] Jamf Protect configuration is not fully backed up; "
                          + "the Jamf Pro backup is complete"))

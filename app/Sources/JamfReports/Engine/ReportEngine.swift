@@ -2835,10 +2835,13 @@ struct ReportEngine: Sendable {
                 onLine(.init(timestamp: Date(), level: .warn,
                     text: "[warn] \(kind): lost-mode text could not be removed from the payload "
                         + "— snapshot not saved"))
+                AttentionLog.raise(.lostModeStripFailed,
+                                   "Mobile device list not saved: lost-mode text not removed")
                 stateStore?.record(
                     .failed(exitCode: outcome.exitCode), report: kind, at: collectStart)
                 return KindCollectResult(outcome: outcome, saved: false)
             }
+            AttentionLog.clear(.lostModeStripFailed)
             saved = stripped
         }
         do {

@@ -206,10 +206,14 @@ private func scheduledRunSingle(
     honesty: CollectHonestyWatcher,
     retiredCSVAssisted: Bool
 ) async -> Int32 {
-    await SharedConfigPin.announcingOnce {
-        await scheduledRunSingleBody(
-            profile: profile, mode: mode, tiers: tiers, verbose: verbose,
-            label: label, honesty: honesty, retiredCSVAssisted: retiredCSVAssisted)
+    // Its attention items go into the run's status file once the recorder opens it, after
+    // the failure card; a run refused before that writes none.
+    await AttentionLog.recording(profile: profile, usesAppRecord: false) {
+        await SharedConfigPin.announcingOnce {
+            await scheduledRunSingleBody(
+                profile: profile, mode: mode, tiers: tiers, verbose: verbose,
+                label: label, honesty: honesty, retiredCSVAssisted: retiredCSVAssisted)
+        }
     }
 }
 
@@ -286,7 +290,10 @@ private func scheduledRunSingleBody(
     // Legacy plists without --label fall back to a profile+mode label so
     // their runs are recorded too.
     let recorder = ScheduledRunRecorder(workspace: workspace, label: runLabel)
-    if recorder == nil {
+    if let recorder {
+        AttentionLog.current?.record(
+            into: recorder.statusURL, runLog: recorder.logURL.lastPathComponent)
+    } else {
         fputs("[warn] could not open run record in automation/logs — run will not appear in Run History\n", stderr)
     }
 

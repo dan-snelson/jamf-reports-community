@@ -149,6 +149,11 @@ extension CoreDashboard {
             let line = "[warn] Fleet Drift: \(warning)"
             print("  " + line)
             onLine?(.init(timestamp: Date(), level: .warn, text: line))
+            AttentionLog.raise(.fleetDriftLargeChange,
+                               "Fleet Drift: \(drift.joined.count) joined and \(drift.left.count) "
+                                   + "left (\(percent)% of the fleet)")
+        } else {
+            AttentionLog.clear(.fleetDriftLargeChange)
         }
 
         func section(

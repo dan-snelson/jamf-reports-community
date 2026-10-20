@@ -9,13 +9,14 @@ final class CollectSourcesPlanTests: XCTestCase {
 
     private func plan(
         _ product: ProfileProductType = .jamfPro, auth: String? = "oauth2",
-        tenantLevel: Bool = false, protect: String? = nil, skip: Set<String> = [],
+        tenantLevel: Bool = false, hasTenantID: Bool = false, protect: String? = nil,
+        skip: Set<String> = [],
         skipExpensive: Bool = false
     ) -> Plan {
         Plan.build(.init(
             product: product, profile: "prod", protectProfile: protect,
             installedVersion: "1.33.0", skipExpensive: skipExpensive, authMethod: auth,
-            tenantLevel: tenantLevel, collectSkip: skip))
+            tenantLevel: tenantLevel, hasTenantID: hasTenantID, collectSkip: skip))
     }
 
     func testASchoolWorkspaceListsSchoolCommandsOnly() {
@@ -32,13 +33,16 @@ final class CollectSourcesPlanTests: XCTestCase {
 
     func testSchoolBlueprintsAreSkippedOnlyWhenTheProfileLacksPlatformFields() {
         func reason(auth: String?, tenant: Bool) -> String?? {
-            plan(.jamfSchool, auth: auth, tenantLevel: tenant).sources
+            plan(.jamfSchool, auth: auth, hasTenantID: tenant).sources
                 .first { $0.kind == ReportEngine.schoolBlueprintsKind }?.skipReason
         }
         XCTAssertEqual(
             reason(auth: "apikey", tenant: false) ?? nil,
             "the Jamf School profile has no Platform API fields (Data Sources › Add Platform API)")
         XCTAssertEqual(reason(auth: "apikey", tenant: true), .some(nil))
+        let both = plan(.jamfSchool, auth: "apikey", tenantLevel: false, hasTenantID: true)
+        XCTAssertNil(both.sources.first { $0.kind == ReportEngine.schoolBlueprintsKind }?.skipReason,
+                     "a tenant-id with an environment-id is still a Platform profile for School")
         XCTAssertEqual(reason(auth: nil, tenant: false), .some(nil), "unresolved collects")
         let school = plan(.jamfSchool, auth: "apikey")
         XCTAssertTrue(school.sources.filter { $0.product == .school }

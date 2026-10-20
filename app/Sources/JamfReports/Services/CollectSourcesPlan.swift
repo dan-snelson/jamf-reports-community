@@ -39,6 +39,8 @@ struct CollectSourcesPlan: Equatable, Sendable {
         /// `ProfileAuthMethod`'s answer; nil when it could not ask, which skips nothing.
         var authMethod: String?
         var tenantLevel = false
+        /// The profile names a tenant, as a School profile needs for the Platform API.
+        var hasTenantID = false
         var collectSkip: Set<String> = []
     }
 
@@ -51,7 +53,7 @@ struct CollectSourcesPlan: Equatable, Sendable {
         case .jamfSchool:
             let plan = ReportEngine.planSchoolCollect(
                 profile: inputs.profile, tiers: Set(CollectionTier.allCases), force: true,
-                platformFieldsMissing: inputs.authMethod != nil && !inputs.tenantLevel
+                platformFieldsMissing: inputs.authMethod != nil && !inputs.hasTenantID
             ) { _ in nil }
             return CollectSourcesPlan(sources: plan.map {
                 Source(product: $0.kind == ReportEngine.schoolBlueprintsKind

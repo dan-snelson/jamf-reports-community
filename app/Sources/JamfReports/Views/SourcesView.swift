@@ -738,6 +738,7 @@ struct SourcesView: View {
                     staleDays: config?.thresholds?.resolvedStaleDays ?? 30,
                     installedVersion: version, skipExpensive: skipExpensive,
                     authMethod: auth?.authMethod, tenantLevel: auth?.isTenantLevel == true,
+                    hasTenantID: auth?.hasTenantID == true,
                     collectSkip: ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip)))
                 return (plan, Self.newestSnapshots(
                     kinds: plan.sources.map(\.kind), profile: profile))

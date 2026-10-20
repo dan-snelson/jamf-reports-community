@@ -3405,7 +3405,7 @@ struct ReportEngine: Sendable {
         let resolved = ProfileAuthMethod.resolve(profile: profile, binary: bin)
         let plan = planSchoolCollect(
             profile: profile, tiers: tiers, force: force,
-            platformFieldsMissing: resolved.map { !$0.isTenantLevel } ?? false) {
+            platformFieldsMissing: resolved.map { !$0.hasTenantID } ?? false) {
             stateStore?.lastRun(report: $0)
         }
         for line in collectPlanLines(profile: profile, fixedPlan: plan) {

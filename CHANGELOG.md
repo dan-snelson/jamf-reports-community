@@ -280,6 +280,11 @@ versions in this repository map to git tags.
 
 ### Security
 
+- Shared logs and diagnostic bundles now also remove the Jamf Protect tenant's host, and the
+  Logging export removes the host and tenant IDs of every workspace, not only the active one. (#284)
+- Files the app reads from a workspace that others can write to are now opened so that a folder
+  swapped for a link after the app checked it is refused, and the daily summaries, backup manifests
+  and snapshot manifests are read with a size limit. (#284)
 - A workspace in a Desktop or Documents folder that iCloud Drive syncs
   (iCloud Desktop & Documents) is now treated like a workspace in any other cloud folder:
   settings other Macs could change wait for a Confirm on this Mac in Config Doctor, Jamf Protect

@@ -175,7 +175,9 @@ sharing audits), so the choice is yours: if your storage and access policy allow
 **Back up Jamf Protect in this folder** on the Backups screen, or set
 `protect.backup_on_synced_storage: true`. Because every Mac sharing the folder can write
 `config.yaml`, each Mac confirms the setting once (the Backups switch or Config Doctor) before
-it applies there; a value a peer changed keeps this Mac's confirmed one. The backup also skips
+it applies there. Turning it off, on any Mac, applies at once; turning it on again needs that
+confirm. A backup that does include Protect on such storage logs one line saying where and that
+the setting allowed it. The backup also skips
 Protect when `protect.profile` changed in the shared `config.yaml` and has not been confirmed
 on this Mac. Either way the run logs one `[warn]` line saying why and the Jamf Pro backup is
 unaffected. If Protect fails or comes back partial, the Jamf Pro

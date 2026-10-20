@@ -214,6 +214,8 @@ final class ProtectBackupTests: XCTestCase {
                        protect)
         XCTAssertTrue(lines.texts.contains { $0.hasPrefix("[ok] Jamf Protect") }, "\(lines.texts)")
         XCTAssertFalse(lines.texts.contains { $0.hasPrefix("[partial]") })
+        XCTAssertFalse(lines.texts.contains { $0.contains("to synced storage") },
+                       "local storage logs no synced-storage audit line")
     }
 
     func test_backup_workspaceWithoutProtectIsAsBefore() async throws {
@@ -328,6 +330,10 @@ final class ProtectBackupTests: XCTestCase {
         let calls = try ctx.calls()
         XCTAssertEqual(calls.count, 3, "\(calls)")
         XCTAssertFalse(second.texts.contains { $0.hasPrefix("[warn] Jamf Protect not backed up") })
+        let audit = second.texts.filter { $0.hasPrefix("[info] backing up Jamf Protect to synced") }
+        XCTAssertEqual(audit.count, 1, "\(second.texts)")
+        XCTAssertTrue(audit[0].contains("in a shared workspace"), audit[0])
+        XCTAssertTrue(audit[0].contains("protect.backup_on_synced_storage allows it"), audit[0])
         let final = try ctx.onlyBackup()
         XCTAssertEqual(BackupProductResult.protect(inBackup: final)?.state, .ok)
         let hook = final.appendingPathComponent("protect/action-configs/hook.yaml")

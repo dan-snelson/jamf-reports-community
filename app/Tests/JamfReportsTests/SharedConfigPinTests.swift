@@ -1034,13 +1034,20 @@ final class SharedConfigPinTests: XCTestCase {
         else { return XCTFail("a drifted opt-in must not run the Protect backup") }
     }
 
-    func testAConfirmedOptInStandsWhenAPeerChangesIt() throws {
+    func testTurningAConfirmedOptInOffAppliesAtOnceAndBackOnNeedsAConfirm() throws {
         try writeConfig(protectBackup: "true")
         try confirmAll()
-        try writeConfig(protectBackup: "false")
-        XCTAssertTrue(try protectOnSynced(), "the pinned value stands until confirmed")
-        try writeConfig(protectBackup: "\"maybe\"")
         XCTAssertTrue(try protectOnSynced())
+        try writeConfig(protectBackup: "false")
+        XCTAssertFalse(try protectOnSynced(), "a change to false is honoured without a confirm")
+        try writeConfig(protectBackup: "\"maybe\"")
+        XCTAssertFalse(try protectOnSynced(), "a non-boolean reads as false")
+        try writeConfig(protectBackup: "true")
+        XCTAssertTrue(try protectOnSynced(), "true again matches the confirmed pin")
+        try writeConfig(protectBackup: "false")
+        try confirmAll()
+        try writeConfig(protectBackup: "true")
+        XCTAssertFalse(try protectOnSynced(), "a change to true waits for a confirm")
     }
 
     func testTurningTheSwitchOnOverAnUnconfirmedTrueConfirmsIt() throws {

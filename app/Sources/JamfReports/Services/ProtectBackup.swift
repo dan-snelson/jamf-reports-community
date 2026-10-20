@@ -322,11 +322,12 @@ extension CLIBridge {
         let named = config?.protect?.resolvedProfile ?? ""
         let refusal = config?.protect?.isEnabled == true && !named.isEmpty
             ? await ProfileAuthMethod.protectRefusal(profile: named) : nil
+        var syncedPlace: String?
         let plan = ProtectBackup.plan(
             config: config, workspaceProfile: profile,
             pinAllows: { SharedConfigPin.protectAllowed(profile: profile) },
             protectRefusal: { _ in refusal },
-            sharedStorage: sharedStorage,
+            sharedStorage: { syncedPlace = sharedStorage(); return syncedPlace },
             syncedStorageAllowed: {
                 SharedConfigPin.protectBackupOnSyncedStorage(
                     config?.protect?.backsUpOnSyncedStorage ?? false, profile: profile)
@@ -342,6 +343,14 @@ extension CLIBridge {
             return BackupProductResult(state: .skipped, reason: reason)
         case .run(let name):
             protectProfile = name
+        }
+        // Run on shared storage means the opt-in allowed it: say so for the audit trail.
+        if let syncedPlace {
+            onLine(.init(timestamp: Date(), level: .info,
+                         text: "[info] backing up Jamf Protect to synced storage: this workspace "
+                             + "is \(syncedPlace), and "
+                             + "\(SharedConfigPin.Key.protectBackupOnSyncedStorage.rawValue) "
+                             + "allows it on this Mac"))
         }
 
         let output = staging.appendingPathComponent(ProtectBackup.folderName, isDirectory: true)

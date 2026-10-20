@@ -628,18 +628,14 @@ struct SharedConfigPin: Codable, Sendable, Equatable {
         !check(profile: profile, appSupport: appSupport).isDrifted(.protectProfile)
     }
 
-    /// `protect.backup_on_synced_storage` as this Mac may use it: as typed while it matches the
-    /// pin, else the pinned value, and off while it waits for a Confirm (first sight).
+    /// `protect.backup_on_synced_storage` as this Mac may use it: on only while config.yaml
+    /// says true and that matches a confirmed pin. A change to false applies at once; a change
+    /// to true, or a true first seen, waits for a Confirm on this Mac.
     static func protectBackupOnSyncedStorage(
         _ configured: Bool, profile: String, appSupport: URL = AppSupport.directory()
     ) -> Bool {
-        let key = Key.protectBackupOnSyncedStorage
-        let result = check(profile: profile, appSupport: appSupport)
-        guard result.isDrifted(key) else { return configured }
-        guard let pinned = result.pinned, !pinned.unconfirmed.contains(key.rawValue) else {
-            return false
-        }
-        return pinned.protectBackupOnSyncedStorage
+        configured && !check(profile: profile, appSupport: appSupport)
+            .isDrifted(.protectBackupOnSyncedStorage)
     }
 
     // MARK: - Folder overrides

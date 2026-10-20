@@ -58,6 +58,7 @@ final class CollectFailureCauseTests: XCTestCase {
         let stub = root.appendingPathComponent("stub-cli")
         let script = """
         #!/bin/sh
+        [ "$1" = "--version" ] && { echo "jamf-cli version 1.31.1"; exit 0; }
         cat "\(answers.path)/stdout"
         cat "\(answers.path)/stderr" >&2
         exit \(exit)

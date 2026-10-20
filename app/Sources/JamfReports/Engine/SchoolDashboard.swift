@@ -8,8 +8,8 @@ import Foundation
 ///
 /// Sheet plan mirrors Python's `SchoolDashboard.sheet_plan()`:
 ///   School Overview, Device Groups, Users, Classes, Apps, Profiles,
-///   Locations, DEP Devices, iBeacons,
-///   Device Inventory, OS Versions, Device Status, Stale Devices.
+///   Locations, DEP Devices, iBeacons, Blueprints,
+///   Device Inventory, OS Versions, Device Status, Stale Devices, then the Protect tabs.
 struct SchoolDashboard: Sendable {
 
     let config: ReportConfig
@@ -57,13 +57,14 @@ struct SchoolDashboard: Sendable {
     /// workbook (the Generate sheet). `sheetPlan` writes the same names.
     static let sheetNames = [
         "School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles", "Locations",
-        "DEP Devices", "iBeacons", "Device Inventory", "OS Versions", "Device Status",
-        "Stale Devices",
-    ]
+        "DEP Devices", "iBeacons", "Blueprints", "Device Inventory", "OS Versions",
+        "Device Status", "Stale Devices",
+    ] + CoreDashboard.protectSheetNames
 
-    /// The School tabs in their default order.
+    /// The School tabs in their default order, then the Jamf Pro workbook's Protect tabs, which
+    /// are written while `protect.enabled` is on (2.11), under the same gate and names.
     var sheetPlan: [(name: String, write: () throws -> Void)] {
-        [
+        let school: [(name: String, write: () throws -> Void)] = [
             ("School Overview", writeSchoolOverview),
             ("Device Groups", writeSchoolDeviceGroups),
             ("Users", writeSchoolUsers),
@@ -73,11 +74,14 @@ struct SchoolDashboard: Sendable {
             ("Locations", writeSchoolLocations),
             ("DEP Devices", writeSchoolDepDevices),
             ("iBeacons", writeSchoolIBeacons),
+            ("Blueprints", writeSchoolBlueprints),
             ("Device Inventory", writeSchoolDeviceInventory),
             ("OS Versions", writeSchoolOSVersions),
             ("Device Status", writeSchoolDeviceStatus),
             ("Stale Devices", writeSchoolStaleDevices),
         ]
+        return school
+            + CoreDashboard(config: config, dataDir: dataDir, workbook: workbook).protectSheetPlan
     }
 
     // MARK: - School Overview
@@ -323,6 +327,39 @@ struct SchoolDashboard: Sendable {
             ws.write(stringField(item, ["description"]), row: row, col: 2, format: .cell)
             ws.write(intField(item, ["major"]), row: row, col: 3, format: .cell)
             ws.write(intField(item, ["minor"]), row: row, col: 4, format: .cell)
+            row += 1
+        }
+    }
+
+    // MARK: - Blueprints (Experimental: Platform API, `school-blueprints`)
+
+    func writeSchoolBlueprints() throws {
+        let raw = try loadSchoolJSON(names: [ReportEngine.schoolBlueprintsKind])
+        let items = flattenSchoolList(raw)
+        let ws = workbook.addSheet("Blueprints")
+        ws.setColumnWidth(0, 0, 36)
+        ws.setColumnWidth(1, 1, 16)
+        ws.setColumnWidth(2, 4, 24)
+        var row = ws.writeSheetHeader(
+            title: "Blueprints",
+            subtitle: "Experimental. Generated: \(ISO8601DateFormatter().string(from: Date()))",
+            ncols: 5
+        )
+        let hdrs = ["Name", "State", "Last deployed", "Created", "Updated"]
+        for (col, h) in hdrs.enumerated() { ws.write(h, row: row, col: col, format: .header) }
+        row += 1
+        for item in items {
+            let deployment = item["deploymentState"] as? [String: Any]
+            let last = deployment?["lastDeployment"] as? [String: Any]
+            let state = (deployment?["state"] as? String ?? "")
+                .replacingOccurrences(of: "_", with: " ")
+            ws.write(stringField(item, ["name"]), row: row, col: 0, format: .cell)
+            ws.write(state.prefix(1).uppercased() + state.dropFirst().lowercased(),
+                     row: row, col: 1, format: .cell)
+            ws.write(last.map { stringField($0, ["started"]) } ?? "",
+                     row: row, col: 2, format: .cell)
+            ws.write(stringField(item, ["created"]), row: row, col: 3, format: .cell)
+            ws.write(stringField(item, ["updated"]), row: row, col: 4, format: .cell)
             row += 1
         }
     }

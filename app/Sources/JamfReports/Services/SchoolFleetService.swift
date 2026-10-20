@@ -23,6 +23,8 @@ enum SchoolFleetService {
         let isSupervised: Bool?
         let lastCheckin: Date?
         let inTrash: Bool
+        /// jamf-cli's `udid`, for the Protect match; "" when the row has none.
+        var udid = ""
 
         /// The platform word in `os` ("iOS", "iPadOS", "macOS", "tvOS"), or "Unknown".
         var platform: String {
@@ -101,10 +103,7 @@ enum SchoolFleetService {
     static func load(dataDir: URL) -> Snapshot {
         var snapshot = Snapshot()
         if let (rows, date) = newestRows(kind: devicesKind, in: dataDir) {
-            let all = rows.enumerated().map { device(from: $1, index: $0) }
-            snapshot.devices = all.filter { !$0.inTrash }
-            snapshot.trashedCount = all.count - snapshot.devices.count
-            snapshot.devicesDate = date
+            snapshot = devicesSnapshot(rows: rows, date: date)
         }
         if let (rows, date) = newestRows(kind: depDevicesKind, in: dataDir) {
             snapshot.depDevices = rows.enumerated().map { depDevice(from: $1, index: $0) }
@@ -114,6 +113,21 @@ enum SchoolFleetService {
             snapshot.overview = rows.compactMap(overviewRow)
             snapshot.overviewDate = date
         }
+        return snapshot
+    }
+
+    /// The devices of one `school-devices` file, or nil when it does not decode as a row list.
+    static func devicesSnapshot(at file: URL) -> Snapshot? {
+        guard let rows = decodedRows(at: file) else { return nil }
+        return devicesSnapshot(rows: rows, date: snapshotDate(of: file))
+    }
+
+    private static func devicesSnapshot(rows: [[String: Any]], date: Date) -> Snapshot {
+        var snapshot = Snapshot()
+        let all = rows.enumerated().map { device(from: $1, index: $0) }
+        snapshot.devices = all.filter { !$0.inTrash }
+        snapshot.trashedCount = all.count - snapshot.devices.count
+        snapshot.devicesDate = date
         return snapshot
     }
 
@@ -130,7 +144,8 @@ enum SchoolFleetService {
             isManaged: row["isManaged"] as? Bool,
             isSupervised: row["isSupervised"] as? Bool,
             lastCheckin: DateParser().parse(text(row, "lastCheckin")),
-            inTrash: row["inTrash"] as? Bool ?? false
+            inTrash: row["inTrash"] as? Bool ?? false,
+            udid: text(row, "udid")
         )
     }
 
@@ -158,14 +173,21 @@ enum SchoolFleetService {
     private static func newestRows(kind: String, in dataDir: URL) -> ([[String: Any]], Date)? {
         let dir = dataDir.appendingPathComponent(kind, isDirectory: true)
         guard let file = FileManager.newestSnapshotFile(in: dir),
-              let data = try? BoundedFile.read(file, limit: BoundedFile.snapshotLimit),
-              let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
+              let rows = decodedRows(at: file) else { return nil }
+        return (rows, snapshotDate(of: file))
+    }
+
+    private static func decodedRows(at file: URL) -> [[String: Any]]? {
+        guard let data = try? BoundedFile.read(file, limit: BoundedFile.snapshotLimit)
         else { return nil }
-        let date = CloudStorage.snapshotTimestamp(of: file)
+        return (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
+    }
+
+    private static func snapshotDate(of file: URL) -> Date {
+        CloudStorage.snapshotTimestamp(of: file)
             ?? (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
                 .contentModificationDate
             ?? Date.distantPast
-        return (rows, date)
     }
 
     /// The first key holding a string or number, as text; "" when none does.

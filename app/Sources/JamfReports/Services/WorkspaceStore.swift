@@ -247,6 +247,9 @@ final class WorkspaceStore {
     /// cards edit them through `saveSecurityLevel` and its siblings.
     var securityPolicy: SecurityControlPolicy = .default
     var securityPolicyIssues: [SecurityPolicyIssue] = []
+    /// The active workspace has Jamf Protect connected; read with the config and when Data
+    /// Sources connects or disconnects it (`refreshProtectConnection`). False in demo mode.
+    var protectConnected = false
 
     // Last parsed document (preserves unknown keys + original text for round-trip).
     private var _loadedDoc: YAMLCodec.YAMLDocument?
@@ -333,7 +336,7 @@ final class WorkspaceStore {
         self.jamfCLIInstallSource = jamfCLI?.source.label
         self.jamfCLIVerificationFailed = jamfCLI?.codesignVerified == false
         self.jamfCLISpecProVersion = jamfCLI?.specProVersion
-        if isDemo { applyDemoConfig() }
+        if isDemo { applyDemoConfig() } else { refreshProtectConnection() }
     }
 
     /// Managed schedules come from the policy; hand-built from the store.
@@ -415,6 +418,7 @@ final class WorkspaceStore {
                 profile = next
             }
             org = Self.org(for: real.first(where: { $0.name == profile }))
+            refreshProtectConnection()
             Task { await refreshAuthStatus() }
             if wasDemo { restoreLiveStateAfterDemo() }
         }
@@ -730,6 +734,7 @@ final class WorkspaceStore {
     /// file doesn't exist yet (new workspace). Other errors are rethrown.
     func loadConfig() async throws {
         configRepairedKeys = []
+        refreshProtectConnection()
         // A config.yaml under the demo profile's name is not the demo's, and
         // reading it would put real values on demo screens.
         if demoMode {
@@ -1089,7 +1094,14 @@ final class WorkspaceStore {
     /// The sidebar's visibility for the active workspace: the user's hidden tabs, and the tabs
     /// its product cannot fill.
     func tabVisibility(hiddenRaw: String) -> TabVisibility {
-        TabVisibility.parse(hiddenRaw).limited(toSchool: isSchoolWorkspace)
+        TabVisibility.parse(hiddenRaw)
+            .limited(toSchool: isSchoolWorkspace, protectConnected: protectConnected)
+    }
+
+    /// Re-reads whether the active workspace has Jamf Protect connected (`ConnectedProducts`).
+    func refreshProtectConnection() {
+        protectConnected = !demoMode
+            && ConnectedProducts.read(profile: profile).protectProfile != nil
     }
 
     /// After credentials are saved: a profile's auth method or scope level may have changed, so
@@ -1391,11 +1403,14 @@ struct TabVisibility: Sendable, Equatable {
     }
 
     /// This visibility for the active workspace: a Jamf School workspace also leaves out every
-    /// tab outside `Tab.schoolTabs`, and any other workspace leaves out the School Devices tab.
-    func limited(toSchool isSchool: Bool) -> TabVisibility {
+    /// tab outside `Tab.schoolTabs`, except Jamf Protect while Protect is connected (2.11), and
+    /// any other workspace leaves out the School Devices tab.
+    func limited(toSchool isSchool: Bool, protectConnected: Bool = false) -> TabVisibility {
         var copy = self
+        let schoolTabs = protectConnected
+            ? Tab.schoolTabs.union([.protectDashboard]) : Tab.schoolTabs
         copy.unavailable = isSchool
-            ? Set(Tab.allCases).subtracting(Tab.schoolTabs) : [.schoolDevices]
+            ? Set(Tab.allCases).subtracting(schoolTabs) : [.schoolDevices]
         return copy
     }
 

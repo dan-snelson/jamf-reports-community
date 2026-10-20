@@ -20,6 +20,9 @@ enum ProfileAuthMethod {
         /// A Platform API profile that names neither an environment nor a tenant: it reaches
         /// Jamf Account only, so no Jamf Pro report can come back.
         var isOrganizationLevel = false
+        /// The profile names a tenant (any environment): all a Jamf School profile needs, besides
+        /// the Platform URL and credentials, to reach the Platform API.
+        var hasTenantID = false
         /// The product the profile logs in to (`ProfileService.derivedProduct`); `.unknown` when
         /// nothing says, which runs like Jamf Pro.
         var product: JamfCLIProduct = .unknown
@@ -77,6 +80,7 @@ enum ProfileAuthMethod {
             isTenantLevel: JamfCLIConfigList.isTenantLevel(data: data, profile: profile)
                 ?? false,
             isOrganizationLevel: isOrganizationLevel(data: data, profile: profile, entry: entry),
+            hasTenantID: JamfCLIConfigList.hasTenantID(data: data, profile: profile) ?? false,
             product: ProfileService.derivedProduct(
                 configProduct: entry?.product, authMethod: method, url: entry?.url,
                 configFileRead: entry != nil),

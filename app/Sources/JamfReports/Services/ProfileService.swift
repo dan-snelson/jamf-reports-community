@@ -520,8 +520,8 @@ enum ProfileService {
     // MARK: - Product
 
     /// The product a profile logs in to, first answer wins: (a) the `product:` key in jamf-cli's
-    /// config file (`pro`, `protect`, `school`, `security`; a value this build does not know is
-    /// `.unknown`, never Pro); (b) the auth method, where `apikey` is Jamf School (`school
+    /// config file (`pro`, `protect`, `school`, `security`, which is Jamf Pro on a `platform`
+    /// profile; a value this build does not know is `.unknown`, never Pro); (b) the auth method, where `apikey` is Jamf School (`school
     /// setup`), `security` is Security Cloud (`security setup`) and `platform` is Jamf Pro;
     /// (c) the host, where `*.protect.jamfcloud.com` is Protect and `*.jamfschool.com` is Jamf
     /// School. Protect's `protect setup` writes plain `oauth2`, so only (a) and (c) can tell it
@@ -544,7 +544,10 @@ enum ProfileService {
         case "pro": return .pro
         case "protect": return .protect
         case "school": return .school
-        case "security": return .securityCloud
+        case "security":
+            // `security setup` on a Platform API profile keeps `platform`: jamf-cli still
+            // serves `pro` through the gateway, so the merged login is a Jamf Pro workspace.
+            return JamfCLIAuthMethod(raw: authMethod) == .platform ? .pro : .securityCloud
         default: return .unknown
         }
         switch JamfCLIAuthMethod(raw: authMethod) {

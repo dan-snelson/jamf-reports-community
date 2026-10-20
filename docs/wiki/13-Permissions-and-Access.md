@@ -223,7 +223,8 @@ Clients**, with the **Read Only** role or a custom role; jamf-cli's setup guide 
 **Settings > API Clients**. Connect it with the Protect URL, client ID and client secret. It
 is not covered by your Jamf Account integration. **Data Sources > Additional Products >
 Disconnect** turns Protect off in the workspace and leaves the jamf-cli profile, which
-`jamf-cli config remove-profile <name>` removes.
+`jamf-cli config remove-profile <name>` removes. Protect can be connected to a Jamf Pro or,
+experimentally, a Jamf School workspace.
 
 **Jamf School.** Generate an API key at **Organization > Settings > API**, and find the
 Network ID at **Devices > Enroll Device(s)**. Each School API key is limited to the API

@@ -39,6 +39,23 @@ later collect route to the Jamf School engine. `jamf-cli` must still be installe
 the Install CLI step (a free Homebrew binary, no server access needed), but you never enter
 Jamf Pro credentials.
 
+### Platform API for Jamf School (experimental)
+
+If your Jamf School tenant also has a Jamf Account integration for the Platform API (used for
+blueprints), turn on **Do you also have Platform API configured for Jamf School?** in the
+Connect School step and fill in the region, tenant ID, client ID and client secret. These are
+not a separate jamf-cli profile: jamf-cli's `school setup` saves them on the School profile
+itself. After saving, the app lists the tenant's blueprints once to check the fields and shows
+the result: a tenant ID the gateway does not accept, or an integration without
+`blueprints:read`, is named, and the School API key keeps working either way.
+
+To add or change them later, open **Data Sources** on the School workspace and use **Add…** or
+**Update…** on the Platform API card. jamf-cli rebuilds the whole profile when it saves, so the
+sheet asks for the Network ID and API key as well. **Update credentials** on the same screen
+opens with the Platform API switch on when the profile already has the fields; saving with it
+off removes that access, and the sheet says so. Please report how this works on your tenant on
+GitHub.
+
 If you run Jamf School, please
 [open an issue or pull request](https://github.com/tonyyo11/jamf-reports-community/issues)
 with feedback.

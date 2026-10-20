@@ -24,6 +24,10 @@ struct SourcesView: View {
     /// Newest snapshot per kind, read off the main actor when the plan is built.
     @State private var cachedAt: [String: Date] = [:]
     @State private var expandedProducts: Set<CollectSourcesPlan.Product> = []
+    /// A School workspace's own profile from `config list`, for the Platform API row.
+    @State private var schoolResolved: ProfileAuthMethod.Resolved?
+    @State private var schoolPlatformCheck: SchoolPlatformCheck.Verdict?
+    @State private var reauthOpensPlatform = false
 
     private var isSchoolWorkspace: Bool {
         sourcesPlan?.sources.first?.product == .school
@@ -62,12 +66,12 @@ struct SourcesView: View {
                 if !isSchoolWorkspace { eaCard }
             }
             doctorCard
+            if isSchoolWorkspace { schoolPlatformCard }
             ConnectionCard()
-            // Both are Jamf Pro: the matrix lists `pro` commands, and a School workspace never
-            // collects Protect (`ProfileProductType.detect`).
+            // The matrix lists `pro` commands, which a School workspace never runs.
             if !isSchoolWorkspace { capabilityCard }
             familiesCard
-            if !isSchoolWorkspace { additionalProductsCard }
+            additionalProductsCard
         }
         .sheet(isPresented: $showingProtectConnect, onDismiss: reloadConnectedProducts) {
             ProductConnectSheetView(profileSlug: workspace.profile)
@@ -81,9 +85,13 @@ struct SourcesView: View {
                 prefillURL: activeProfileServerURL,
                 prefillAuthMethod: activeProfileAuthMethod,
                 isSchool: isSchoolWorkspace,
+                schoolPlatform: isSchoolWorkspace ? schoolPlatformRow : nil,
+                opensSchoolPlatform: reauthOpensPlatform,
+                onSchoolPlatformCheck: { schoolPlatformCheck = $0 },
                 onSaved: {
                     workspace.credentialsChanged()
                     runDoctor()
+                    reloadSourcesPlan()
                 }
             )
         }
@@ -92,6 +100,8 @@ struct SourcesView: View {
             reloadCapabilities()
         }
         .onChange(of: workspace.profile) { _, _ in
+            schoolResolved = nil
+            schoolPlatformCheck = nil
             doctorOutcome = nil
             doctorRunning = false
             reload()
@@ -203,6 +213,13 @@ struct SourcesView: View {
             }
         )) {
             VStack(spacing: 0) {
+                if product == .platformAPI, isSchoolWorkspace {
+                    Text("Experimental: Jamf School blueprints through the Platform API")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
                 ForEach(sources) { source in
                     sourceRow(source)
                     if source.id != sources.last?.id {
@@ -360,6 +377,7 @@ struct SourcesView: View {
                     // under the demo's name, and the check runs `jamf-cli doctor`.
                     Button("Update credentials\u{2026}") {
                         guard !workspace.demoMode else { return }
+                        reauthOpensPlatform = false
                         showingReauth = true
                     }
                     .disabled(workspace.demoMode)
@@ -433,6 +451,7 @@ struct SourcesView: View {
                         .foregroundStyle(Theme.Text.secondary)
                     Spacer()
                     PNPButton(title: "Update credentials\u{2026}", icon: "key.horizontal", size: .sm) {
+                        reauthOpensPlatform = false
                         showingReauth = true
                     }
                 }
@@ -690,6 +709,7 @@ struct SourcesView: View {
     private func reloadConnectedProducts() {
         connectedProducts = workspace.demoMode
             ? .none : ConnectedProducts.read(profile: workspace.profile)
+        workspace.refreshProtectConnection()
         guard let named = connectedProducts.protectProfile else {
             cliProfileNames = nil
             return
@@ -715,13 +735,12 @@ struct SourcesView: View {
         let version = workspace.jamfCLIVersion
         let skipExpensive = UserDefaults.standard.bool(forKey: "skipExpensiveCollections")
         Task {
-            let (plan, dates) = await Task.detached(priority: .userInitiated) {
+            let (plan, dates, school) = await Task.detached(priority: .userInitiated) {
                 let config = ProfileService.workspaceURL(for: profile).flatMap {
                     try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
                 }
                 let detected = ProfileProductType.detect(from: config, profile: profile)
-                let auth = detected.type == .jamfPro
-                    ? ProfileAuthMethod.resolve(profile: profile) : nil
+                let auth = ProfileAuthMethod.resolve(profile: profile)
                 let protectProfile = ConnectedProducts.read(profile: profile).protectProfile
                 let plan = CollectSourcesPlan.build(.init(
                     product: detected.type, profile: profile,
@@ -732,13 +751,17 @@ struct SourcesView: View {
                     staleDays: config?.thresholds?.resolvedStaleDays ?? 30,
                     installedVersion: version, skipExpensive: skipExpensive,
                     authMethod: auth?.authMethod, tenantLevel: auth?.isTenantLevel == true,
+                    hasTenantID: auth?.hasTenantID == true,
                     collectSkip: ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip)))
+                let school = detected.type == .jamfSchool
+                    ? ProfileAuthMethod.resolve(profile: profile) : nil
                 return (plan, Self.newestSnapshots(
-                    kinds: plan.sources.map(\.kind), profile: profile))
+                    kinds: plan.sources.map(\.kind), profile: profile), school)
             }.value
             guard profile == workspace.profile, !workspace.demoMode else { return }
             sourcesPlan = plan
             cachedAt = dates
+            schoolResolved = school
         }
     }
 
@@ -859,6 +882,41 @@ struct SourcesView: View {
         return dataPath + "/"
     }
 
+    // MARK: - Jamf School Platform API
+
+    private var schoolPlatformRow: SchoolPlatformRow {
+        .state(resolved: schoolResolved, lastCheck: schoolPlatformCheck)
+    }
+
+    /// Opens Update credentials on the School form: `school setup` rebuilds the whole profile,
+    /// so the Platform API fields are added there with the Network ID and API key.
+    private var schoolPlatformCard: some View {
+        Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Text(schoolPlatformRow.label)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(schoolPlatformRow == .rejected
+                                         ? Theme.Colors.warn : Theme.Colors.fg)
+                    Spacer()
+                    PNPButton(title: schoolPlatformRow.actionTitle, icon: "key.horizontal",
+                              size: .sm) {
+                        guard !workspace.demoMode else { return }
+                        reauthOpensPlatform = true
+                        showingReauth = true
+                    }
+                    .disabled(workspace.demoMode)
+                    .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
+                }
+                Text(SchoolPlatformCheck.experimentalNote)
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let check = schoolPlatformCheck { SchoolPlatformFields.banner(check) }
+            }
+        }
+    }
+
     // MARK: - Additional products card
 
     private var additionalProductsCard: some View {
@@ -873,6 +931,12 @@ struct SourcesView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                     .fixedSize(horizontal: false, vertical: true)
+                if isSchoolWorkspace {
+                    Text(Self.schoolProtectNote)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 // Sets up a real jamf-cli connection and writes config.yaml.
                 ProtectProductControl(
@@ -884,15 +948,23 @@ struct SourcesView: View {
                     onConnect: { showingProtectConnect = true },
                     onDisconnected: reloadConnectedProducts)
 
-                Text("Jamf School uses its own workspace: add one with Settings › Add "
-                    + "connection.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .fixedSize(horizontal: false, vertical: true)
+                if !isSchoolWorkspace {
+                    Text("Jamf School uses its own workspace: add one with Settings › Add "
+                        + "connection.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .frame(maxWidth: .infinity)
     }
+
+    /// Jamf Protect on a Jamf School workspace (2.11): collected and reported as on Jamf Pro,
+    /// but not backed up, since a School workspace has no backups.
+    nonisolated static let schoolProtectNote =
+        "Experimental: Jamf Protect with Jamf School. Protect is collected and reported; "
+            + "it is not backed up, as a Jamf School workspace has no backups."
 
     /// JSON snapshots, and the jamf-cli dashboard's page, the one kind saved as HTML.
     private nonisolated static func cacheDates(

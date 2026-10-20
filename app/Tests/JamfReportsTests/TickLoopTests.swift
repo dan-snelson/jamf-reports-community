@@ -190,6 +190,19 @@ final class TickLoopTests: XCTestCase {
         XCTAssertNil(recorder.saved.last?.lastSucceeded[label("first")])
     }
 
+    /// A failed run whose failure a retry repeats is remembered for the hourly retries, and the
+    /// next success forgets it.
+    func testAFailureARetryRepeatsIsRecordedAndASuccessClearsIt() async {
+        let recorder = TickLoopRecorder()
+        _ = await runDue(
+            [due("first")], recorder: recorder,
+            outcome: ScheduleRunOutcome(exitCode: 1, incomplete: false, retryCouldHelp: false))
+        XCTAssertEqual(recorder.saved.last?.retryWouldRepeat, [label("first")])
+        var state = recorder.saved.last ?? TickState()
+        state.noteSucceeded(label("first"), startedAt: Date())
+        XCTAssertTrue(state.retryWouldRepeat.isEmpty)
+    }
+
     func testTheRunNowLineStillSaysIncomplete() {
         let outcome = ScheduleRunOutcome(exitCode: 0, incomplete: true, retryCouldHelp: false)
         XCTAssertEqual(

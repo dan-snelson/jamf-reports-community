@@ -683,13 +683,15 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
     let label = schedule.launchAgentLabel
     guard schedule.isMulti else {
         let honesty = CollectHonestyWatcher()
+        let start = Date()
         let code = await scheduledRunSingle(
             profile: schedule.profile, mode: schedule.mode, tiers: schedule.tiers,
             verbose: verbose, label: label, honesty: honesty,
             retiredCSVAssisted: schedule.retiredCSVAssisted)
         return ScheduleRunOutcome(
             exitCode: code, incomplete: honesty.incomplete,
-            retryCouldHelp: honesty.retryCouldHelp(profile: schedule.profile))
+            retryCouldHelp: honesty.retryCouldHelp(
+                profile: schedule.profile, exitCode: code, since: start))
     }
     let excluded = Set(schedule.excludedProfiles ?? [])
     let discovered = ProfileService.discoverLocal()
@@ -716,13 +718,16 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
         // One watcher per profile: a shared one would carry profile A's
         // stand-down into profile B's completion line.
         let honesty = CollectHonestyWatcher()
+        let start = Date()
         let code = await scheduledRunSingle(
             profile: p.name, mode: schedule.mode, tiers: schedule.tiers,
             verbose: verbose, label: label, honesty: honesty,
             retiredCSVAssisted: schedule.retiredCSVAssisted)
         if code != 0 { anyFailed = true }
         if honesty.incomplete { anyIncomplete = true }
-        if honesty.retryCouldHelp(profile: p.name) { anyRetryable = true }
+        if honesty.retryCouldHelp(profile: p.name, exitCode: code, since: start) {
+            anyRetryable = true
+        }
     }
     if [.jamfCLIOnly, .jamfCLIFull].contains(schedule.mode) {
         emitConsolidatedReports()

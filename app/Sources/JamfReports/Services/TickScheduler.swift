@@ -16,6 +16,9 @@ struct TickState: Codable, Sendable {
     var lastTick: Date?
     /// When the latest catch-up run (`Reason.catchUp`) started: that day's run, ahead of its fire.
     var catchUpStarted: [String: Date] = [:]
+    /// Labels whose last run failed in a way a retry repeats (`ScheduleRunOutcome.retryCouldHelp`
+    /// false): the hourly retries after the backoffs skip them.
+    var retryWouldRepeat: Set<String> = []
 
     init() {}
 
@@ -29,6 +32,7 @@ struct TickState: Codable, Sendable {
         lastTick = try c.decodeIfPresent(Date.self, forKey: .lastTick)
         catchUpStarted =
             try c.decodeIfPresent([String: Date].self, forKey: .catchUpStarted) ?? [:]
+        retryWouldRepeat = try c.decodeIfPresent(Set<String>.self, forKey: .retryWouldRepeat) ?? []
     }
 
     static func load(url: URL = TickState.defaultURL) -> TickState {
@@ -71,6 +75,13 @@ struct TickState: Codable, Sendable {
     mutating func noteSucceeded(_ label: String, startedAt: Date) {
         lastSucceeded[label] = startedAt
         retryCount[label] = 0
+        retryWouldRepeat.remove(label)
+    }
+
+    /// Records whether a retry of a run that did not end its retries could help. True when that
+    /// changed the state.
+    mutating func noteRetry(_ label: String, couldHelp: Bool) -> Bool {
+        couldHelp ? retryWouldRepeat.remove(label) != nil : retryWouldRepeat.insert(label).inserted
     }
 }
 
@@ -205,8 +216,8 @@ enum TickScheduler {
 
     /// Same-day retry of a run that started for `fire` but never succeeded:
     /// collect modes only, each one its backoff after the previous start: `retryBackoffs.count`
-    /// per fire, then hourly until local midnight while `summaryMissing`. Only reached once the
-    /// fire has started.
+    /// per fire, then hourly until local midnight while `summaryMissing`, unless the last run
+    /// failed in a way a retry repeats. Only reached once the fire has started.
     private static func retryIsDue(
         mode: Schedule.RunMode, label: String, fire: Date, state: TickState, now: Date,
         summaryMissing: () -> Bool
@@ -222,6 +233,7 @@ enum TickScheduler {
         guard retryBackoffs.indices.contains(retries) else {
             return Calendar.current.isDate(started, inSameDayAs: now)
                 && now.timeIntervalSince(started) >= missingSummaryRetryInterval
+                && !state.retryWouldRepeat.contains(label)
                 && summaryMissing()
         }
         return now.timeIntervalSince(started) >= retryBackoffs[retries]

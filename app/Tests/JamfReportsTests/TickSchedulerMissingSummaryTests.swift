@@ -53,6 +53,16 @@ final class TickSchedulerMissingSummaryTests: XCTestCase {
         XCTAssertEqual(due(state, date(7, 23, 30), missing: true), [.retry])
     }
 
+    /// Every source failed in a way a retry repeats (a 403, exit 8): the three backoffs still
+    /// run, the hourly retries do not.
+    func testHourlyRetriesSkipAFailureARetryRepeats() {
+        var state = exhausted(startedAt: date(7, 13, 7))
+        state.retryWouldRepeat = [label]
+        XCTAssertTrue(due(state, date(7, 14, 8), missing: true).isEmpty)
+        state.retryCount[label] = 0
+        XCTAssertEqual(due(state, date(7, 14, 8), missing: true), [.retry])
+    }
+
     func testRetriesStopOnceTheSummaryExists() {
         XCTAssertTrue(due(exhausted(startedAt: date(7, 13, 7)), date(7, 14, 8), missing: false)
             .isEmpty)

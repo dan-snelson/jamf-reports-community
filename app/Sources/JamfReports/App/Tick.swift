@@ -224,6 +224,12 @@ enum TickLoop {
                     reportTickError(message)
                     recordFailure(run.schedule, message)
                 }
+            } else if state.noteRetry(label, couldHelp: outcome.retryCouldHelp) {
+                // Best-effort: unrecorded, the hourly retries run as if a retry could help.
+                do { try save(state) } catch {
+                    AppLogger.schedule.warning(
+                        "tick: \(label, privacy: .public) retry verdict not recorded")
+                }
             }
             print(tickResultLine(
                 label: label, reason: run.reason, outcome: outcome,

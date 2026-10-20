@@ -567,6 +567,26 @@ final class CollectHonestyWatcher: @unchecked Sendable {
         }
     }
 
+    /// `retryCouldHelp(profile:)` for a run that exited `exitCode` after starting at `start`. A
+    /// run that failed outright (a dead collect prints no `[partial]` line) is also worth a retry
+    /// unless every source that failed since `start` failed in a way a retry repeats; one that
+    /// recorded no failure (no workspace, a config that does not decode) still retries.
+    func retryCouldHelp(profile: String, exitCode: Int32, since start: Date) -> Bool {
+        if retryCouldHelp(profile: profile) { return true }
+        guard exitCode != 0, let stateDir = try? WorkspacePaths.stateDir(for: profile) else {
+            return exitCode != 0
+        }
+        let store = StateFileStore(directory: stateDir)
+        let floor = Date(timeIntervalSince1970: start.timeIntervalSince1970.rounded(.down))
+        let failed = ((try? FileManager.default.contentsOfDirectory(atPath: stateDir.path)) ?? [])
+            .filter { $0.hasSuffix(".fail") }.map { String($0.dropLast(".fail".count)) }
+            .filter { (store.failures(report: $0)?.last ?? .distantPast) >= floor }
+        guard !failed.isEmpty else { return true }
+        return !failed.allSatisfy {
+            WorkspaceStore.lastFailureRepeatsOnRetry($0, in: store, countingUnauthorized: false)
+        }
+    }
+
     /// Whether the run may claim it refreshed the fleet's data. False for
     /// either marker: both mean today's summary is not this run's work.
     var producedFreshSnapshot: Bool { !stoodDown && !summaryWriteFailed }

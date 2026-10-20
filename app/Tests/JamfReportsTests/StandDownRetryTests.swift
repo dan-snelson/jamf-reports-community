@@ -46,6 +46,26 @@ final class StandDownRetryTests: XCTestCase {
         XCTAssertFalse(watcherAfterFreshnessStandDown().retryCouldHelp(profile: profile))
     }
 
+    /// A dead collect prints no `[partial]` line, so the verdict comes from the failures it
+    /// recorded: one a retry repeats (exit 8, a 403) ends the hourly retries, an outage does not.
+    func testAFailedRunIsJudgedByTheFailuresItRecorded() throws {
+        let start = Date().addingTimeInterval(-60)
+        let store = StateFileStore(directory: try WorkspacePaths.stateDir(for: profile))
+        let watcher = CollectHonestyWatcher()
+        XCTAssertTrue(watcher.retryCouldHelp(profile: profile, exitCode: 1, since: start),
+                      "nothing recorded: retry as before")
+        XCTAssertFalse(watcher.retryCouldHelp(profile: profile, exitCode: 0, since: start))
+        try store.recordFailure(report: "computers", at: start.addingTimeInterval(-3600),
+                                exitCode: 1)
+        try store.recordFailure(report: "policies", at: start, exitCode: 8)
+        let forbidden = FailureCause(kind: .missingPermission, names: [], hint: nil, exitCode: 5)
+        store.record(.failed(exitCode: 5), report: "patch-status", at: start, cause: forbidden)
+        XCTAssertFalse(watcher.retryCouldHelp(profile: profile, exitCode: 1, since: start),
+                       "an older failure is not this run's")
+        try store.recordFailure(report: "computers", at: start, exitCode: 1)
+        XCTAssertTrue(watcher.retryCouldHelp(profile: profile, exitCode: 1, since: start))
+    }
+
     func testARunThatDidNotStandDownIsUnaffected() {
         let watcher = CollectHonestyWatcher()
         watcher.observe("[ok] collected")

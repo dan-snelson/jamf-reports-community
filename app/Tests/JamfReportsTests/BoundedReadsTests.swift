@@ -90,6 +90,73 @@ final class BoundedReadsTests: XCTestCase {
         XCTAssertEqual(outcome, true, "a FIFO must be refused without blocking")
     }
 
+    // MARK: - BoundedFile.read inside a root
+
+    /// `jamf-cli-data/computers` swapped for a link to a folder outside the workspace after the
+    /// path was validated: refused when not following, and caught by the kernel's path when
+    /// following.
+    func testReadInsideARootRefusesAFolderSwappedForALinkOutsideIt() throws {
+        let workspace = root.appendingPathComponent("ws", isDirectory: true)
+        let kind = workspace.appendingPathComponent("jamf-cli-data/computers", isDirectory: true)
+        let file = kind.appendingPathComponent("s.json")
+        try fm.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data("[1]".utf8).write(to: file)
+        XCTAssertEqual(
+            try BoundedFile.read(file, limit: 10, followSymlinks: false, inside: workspace),
+            Data("[1]".utf8))
+
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        try Data("[2]".utf8).write(to: outside.appendingPathComponent("s.json"))
+        try fm.removeItem(at: kind)
+        try link(kind, to: outside)
+        XCTAssertEqual(try BoundedFile.read(file, limit: 10), Data("[2]".utf8), "the swap worked")
+        for follow in [false, true] {
+            XCTAssertThrowsError(
+                try BoundedFile.read(file, limit: 10, followSymlinks: follow, inside: workspace)
+            ) { XCTAssertEqual($0 as? BoundedFile.Failure, .unreadable(ELOOP)) }
+        }
+    }
+
+    /// The temp dir sits under `/var` -> `/private/var`, which `O_NOFOLLOW_ANY` on the whole path
+    /// would refuse; links above the root, a linked root included, are trusted.
+    func testReadInsideARootUnderSystemAndRootLinksStillReads() throws {
+        let workspace = root.appendingPathComponent("ws", isDirectory: true)
+        let file = workspace.appendingPathComponent("jamf-cli-data/computers/s.json")
+        try fm.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("[1]".utf8).write(to: file)
+        let linkedRoot = root.appendingPathComponent("linked-ws")
+        try link(linkedRoot, to: workspace)
+        let throughLink = linkedRoot.appendingPathComponent("jamf-cli-data/computers/s.json")
+        XCTAssertEqual(
+            try BoundedFile.read(throughLink, limit: 10, followSymlinks: false, inside: linkedRoot),
+            Data("[1]".utf8))
+        XCTAssertNoThrow(
+            try BoundedFile.read(file, limit: 10, followSymlinks: false, inside: workspace))
+
+        // Below the root a link is refused unless following, even one that stays inside.
+        let alias = workspace.appendingPathComponent("jamf-cli-data/alias")
+        try link(alias, to: file.deletingLastPathComponent())
+        let viaAlias = alias.appendingPathComponent("s.json")
+        XCTAssertThrowsError(
+            try BoundedFile.read(viaAlias, limit: 10, followSymlinks: false, inside: workspace))
+        XCTAssertNoThrow(
+            try BoundedFile.read(viaAlias, limit: 10, followSymlinks: true, inside: workspace))
+    }
+
+    func testReadInsideARootRefusesAPathNotBelowIt() throws {
+        let workspace = root.appendingPathComponent("ws", isDirectory: true)
+        try fm.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let sibling = root.appendingPathComponent("other.json")
+        try Data("[]".utf8).write(to: sibling)
+        let escaping = workspace.appendingPathComponent("../other.json")
+        for url in [sibling, escaping, workspace] {
+            XCTAssertThrowsError(
+                try BoundedFile.read(url, limit: 10, followSymlinks: false, inside: workspace))
+        }
+    }
+
     // MARK: - Run logs
 
     private func logsDir() throws -> URL {

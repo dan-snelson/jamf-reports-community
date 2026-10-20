@@ -212,7 +212,10 @@ these interactive dashboards either — it produces a separate generated workboo
   keys); Raw is deliberately unredacted, for scripting against. A workspace with Jamf
   Protect connected backs Protect up in the same backup folder (under `protect/`); a banner
   above the table says what the latest backup holds for Protect: object counts per
-  resource, or that the Protect part is incomplete, failed or skipped, and why. Diff
+  resource, or that the Protect part is incomplete, failed or skipped, and why. On shared
+  storage, where Protect is skipped by default, the banner explains what a Protect backup
+  holds and offers **Back up Jamf Protect in this folder** for organizations whose storage
+  policy allows it (`protect.backup_on_synced_storage`). Diff
   compares Jamf Pro objects only, and its sheet says Protect is not compared.
   Data source: `jamf-cli pro backup` and `jamf-cli protect backup` exports (tier 2).
 

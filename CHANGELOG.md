@@ -9,6 +9,10 @@ versions in this repository map to git tags.
 
 ### Added
 
+- Jamf Protect now works with a Jamf School workspace (experimental): connect it from Data
+  Sources and Protect is collected after each School collect, gets its own Jamf Protect screen,
+  matches Protect computers to Jamf School Macs, and adds its tabs to the School workbook. It is
+  not backed up, as a Jamf School workspace has no backups. (#284)
 - Jamf School setup can also save Platform API access for blueprints (experimental): turn on
   "Do you also have Platform API configured for Jamf School?" and enter the region, tenant ID,
   client ID and secret, or add them later from Data Sources. The app checks them once and says

@@ -92,7 +92,8 @@ shared workspace gets none of the stand-down or claim behavior above, by design
 — School collects on its own schedule with no cross-Mac awareness. Jamf Protect
 runs only after a Jamf Pro collect that actually collected: when the Pro collect
 stands down for another Mac, or skips because today's collect already ran,
-Protect is skipped with it and the run log says so.
+Protect is skipped with it and the run log says so. On a Jamf School workspace
+(experimental) Protect follows every School collect.
 
 **Every Mac must reach Jamf the same way under the same profile name.** The
 workspace's `config.yaml` names the jamf-cli profile collects use

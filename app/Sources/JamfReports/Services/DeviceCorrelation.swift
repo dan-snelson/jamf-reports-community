@@ -50,9 +50,18 @@ struct DeviceCorrelation: Sendable {
     }
 }
 
-/// Which Protect computers are Jamf Pro computers. Protect's `uuid` is taken to be the
-/// hardware UUID, Jamf Pro's `udid` (unverified against a tenant); `hostname` is never matched.
+/// Which Protect computers are Jamf Pro computers, or on a Jamf School workspace (2.11) Jamf
+/// School devices. Protect's `uuid` is taken to be the hardware UUID, the inventory's `udid`
+/// (Protect writes it lowercased; identifiers compare lowercased); `hostname` is never matched.
 struct ProtectProCorrelation: Sendable {
+    /// The inventory Protect is matched against.
+    enum Inventory: Sendable {
+        case jamfPro, jamfSchool
+
+        var product: String { self == .jamfPro ? "Jamf Pro" : "Jamf School" }
+    }
+
+    var inventory = Inventory.jamfPro
     var protectCount = 0
     var matched = 0
     var ambiguous = 0
@@ -84,10 +93,37 @@ struct ProtectProCorrelation: Sendable {
         return result
     }
 
-    /// nil when there is no Jamf Pro `computers` snapshot to match against.
+    /// Against Jamf School devices by `udid`, then serial. Every device can match, but only
+    /// Macs can run Protect, so `proWithoutProtect` lists the Macs no Protect computer claimed.
+    static func build(
+        protect: [ProtectComputerRow], school: [SchoolFleetService.Device]
+    ) -> ProtectProCorrelation {
+        // The position is the id: two School rows can share an `id` when neither has a udid.
+        let records = school.enumerated().map { position, device in
+            var record = DeviceInventoryRecord.empty(id: "\(position)", source: "school")
+            record.name = device.name
+            record.serial = device.serial
+            record.udid = device.udid
+            record.osVersion = device.os
+            return record
+        }
+        let macs = Set(school.indices.filter { school[$0].platform == "macOS" }.map { "\($0)" })
+        var result = build(protect: protect, pro: records)
+        result.inventory = .jamfSchool
+        result.proWithoutProtect.removeAll { !macs.contains($0.id) }
+        return result
+    }
+
+    /// nil when there is no Jamf Pro `computers` snapshot (or, for Jamf School, no
+    /// `school-devices` snapshot) to match against.
     static func load(
-        protect: [ProtectComputerRow], profile: String, demoMode: Bool
+        protect: [ProtectComputerRow], profile: String, demoMode: Bool, school: Bool = false
     ) -> ProtectProCorrelation? {
+        if school, !demoMode {
+            let snapshot = SchoolFleetService.load(profile: profile)
+            guard snapshot.devicesDate != nil else { return nil }
+            return build(protect: protect, school: snapshot.devices)
+        }
         let pro = demoMode
             ? DemoData.outreachRecords
             : DeviceInventoryService.cachedComputerRecords(profile: profile)

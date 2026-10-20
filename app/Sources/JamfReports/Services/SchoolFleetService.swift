@@ -23,6 +23,8 @@ enum SchoolFleetService {
         let isSupervised: Bool?
         let lastCheckin: Date?
         let inTrash: Bool
+        /// jamf-cli's `udid`, for the Protect match; "" when the row has none.
+        var udid = ""
 
         /// The platform word in `os` ("iOS", "iPadOS", "macOS", "tvOS"), or "Unknown".
         var platform: String {
@@ -142,7 +144,8 @@ enum SchoolFleetService {
             isManaged: row["isManaged"] as? Bool,
             isSupervised: row["isSupervised"] as? Bool,
             lastCheckin: DateParser().parse(text(row, "lastCheckin")),
-            inTrash: row["inTrash"] as? Bool ?? false
+            inTrash: row["inTrash"] as? Bool ?? false,
+            udid: text(row, "udid")
         )
     }
 

@@ -95,12 +95,10 @@ versions in this repository map to git tags.
 
 ### Fixed
 
-- A Mac that is on only part of the day now gets its daily summary. After a night off or
-  asleep, a daily schedule runs at the Mac's first background check of the day instead of
-  waiting for a scheduled time the Mac may be off again. That run counts as the day's run, so
-  the scheduled time does not repeat it, and if it fails it is retried that morning. A Mac that
-  is on at the scheduled time runs then, once a day, and Run now never moves or cancels it.
-  (#284)
+- A Mac that is on only part of the day now gets its daily summary. A daily collect runs at
+  its scheduled time, or, after the Mac was off or asleep, at its first background check after
+  waking, and that run is the day's run, so the scheduled time does not repeat it. A failed run
+  is retried that day, until midnight. Run now never moves or cancels the scheduled run. (#284)
 - A collect that has not produced today's summary after its three retries keeps retrying
   every hour until midnight, so a laptop that was off the VPN until the afternoon still gets its
   day; Jamf School workspaces too. It stops after the three retries when every source failed in

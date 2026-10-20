@@ -269,9 +269,13 @@ final class ScheduledRunRecorder: @unchecked Sendable {
 
     /// True while a recorder in any process holds `logURL` open for writing.
     static func isRunInProgress(logURL: URL) -> Bool {
-        let fd = open(logURL.path, O_RDONLY)
+        // Non-blocking and type-checked, so a FIFO or link a peer planted at the name reads as
+        // not running instead of hanging the open.
+        let fd = open(logURL.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         guard fd >= 0 else { return false }
         defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return false }
         if flock(fd, LOCK_SH | LOCK_NB) == 0 {
             flock(fd, LOCK_UN)
             return false

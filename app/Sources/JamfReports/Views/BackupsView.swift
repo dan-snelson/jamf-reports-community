@@ -132,7 +132,7 @@ struct BackupsView: View {
                     )
                 }
             }
-            reload()
+            await reload()
             await refreshSyncedChoice()
         }
     }
@@ -606,7 +606,7 @@ struct BackupsView: View {
             isRunningBackup = false
             if exit == 0 {
                 backupLabel = ""
-                reload()
+                await reload()
             } else {
                 errorMessage = CLIBridge.explainExit(exit, operation: "Backup for \(profile)")
             }
@@ -659,10 +659,16 @@ struct BackupsView: View {
         }
     }
 
-    private func reload() {
-        backups = workspace.demoMode
+    private func reload() async {
+        let profile = workspace.profile
+        // Walks every backup folder and reads its manifest, which can be slow on a synced share.
+        let listed = workspace.demoMode
             ? DemoData.backups
-            : BackupLibrary().list(profile: workspace.profile)
+            : await Task.detached(priority: .userInitiated) {
+                BackupLibrary().list(profile: profile)
+            }.value
+        guard profile == workspace.profile else { return }
+        backups = listed
         selectedBackups = selectedBackups.intersection(Set(backups.map(\.id)))
     }
 
@@ -674,7 +680,7 @@ struct BackupsView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
-        reload()
+        await reload()
     }
 
     private func color(for level: CLIBridge.LogLevel) -> Color {
@@ -776,7 +782,8 @@ struct BackupLibrary {
 
     private func readManifest(_ url: URL, root: URL) -> BackupManifest {
         guard let file = WorkspacePathGuard.validate(url, under: root),
-              let data = try? Data(contentsOf: file),
+              let data = try? BoundedFile.read(
+                file, limit: BoundedFile.documentLimit, followSymlinks: false),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return BackupManifest()
         }

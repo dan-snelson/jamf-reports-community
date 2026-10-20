@@ -615,10 +615,10 @@ private extension DeviceInventoryService {
         warnings: inout [String]
     ) -> Data? {
         guard let file = validatedFile(url, root: root) else { return nil }
-        // One descriptor for the type check and the read, so a file swapped after the check is
-        // not what gets read.
+        // One descriptor for the type check and the read, opened below the workspace, so neither a
+        // file nor a folder swapped for a link after the check is what gets read.
         do {
-            return try BoundedFile.read(file, limit: maxBytes, followSymlinks: false)
+            return try BoundedFile.read(file, limit: maxBytes, followSymlinks: false, inside: root)
         } catch BoundedFile.Failure.tooLarge {
             warnings.append("Skipped \(file.lastPathComponent); file is larger than \(maxBytes / 1_048_576) MB")
         } catch BoundedFile.Failure.notRegular {

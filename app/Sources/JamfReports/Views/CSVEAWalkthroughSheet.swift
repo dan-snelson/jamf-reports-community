@@ -370,7 +370,7 @@ struct CSVEAWalkthroughSheet: View {
                 .foregroundStyle(Theme.Colors.danger)
             Text(message)
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(Theme.Colors.danger)
+                .foregroundStyle(Theme.Colors.dangerSoft)
             Spacer()
         }
         .padding(12)

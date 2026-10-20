@@ -327,6 +327,8 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         XCTAssertEqual(detail(found, "sheets.skip"),
                        "\"Fleet Overview\" matches no sheet, so the app ignores it.")
         XCTAssertEqual(try rows(school + "sheets:\n  order: [iBeacons, Stale Devices]\n"), [])
+        XCTAssertEqual(try rows(school + "sheets:\n  skip: [Protect Alerts]\n"), [],
+                       "the School workbook has the Protect tabs (2.11)")
         XCTAssertEqual(try rows("sheets:\n  skip: [Cover, charts]\n"), [], "a Jamf Pro profile")
     }
 

@@ -39,12 +39,9 @@ extension ConfigDoctorService {
     /// The tab `EASheets` can write besides one per custom EA; the Jamf-cli tabs are `SheetID`.
     static let eaWarningsSheetNames = ["EA Warnings"]
 
-    /// The tabs `SchoolDashboard.sheetPlan` can write, the only tabs of a Jamf School workbook.
-    static let schoolSheetNames = [
-        "School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles", "Locations",
-        "DEP Devices", "iBeacons", "Blueprints", "Device Inventory", "OS Versions",
-        "Device Status", "Stale Devices",
-    ]
+    /// The tabs `SchoolDashboard.sheetPlan` can write, the only tabs of a Jamf School workbook
+    /// (with the Protect tabs from 2.11).
+    static let schoolSheetNames = SchoolDashboard.sheetNames
 
     // MARK: - Settings the app replaced or clamped
 

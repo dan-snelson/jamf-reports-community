@@ -125,8 +125,6 @@ struct StaleDataBanner: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.Colors.warn)
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(message)
         }
     }
 

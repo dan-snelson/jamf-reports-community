@@ -213,19 +213,44 @@ final class AccessibilitySweepTests: XCTestCase {
         }
     }
 
-    /// EmptyStateView accessibility hint should use "Activate to" phrasing on macOS (addresses issue #101)
-    func testEmptyStateViewUsesProperMacOSAccessibilityHint() {
-        let emptyState = EmptyStateView(
-            title: "No reports yet",
-            message: "Generate your first report",
-            primaryAction: EmptyStateAction(label: "Generate Report") { }
-        )
+    /// EditableNumberStepper names its field from the label, else the prefix and suffix text.
+    func testEditableNumberStepperAccessibilityName() {
+        typealias Stepper = EditableNumberStepper
+        XCTAssertEqual(Stepper.accessibilityName(label: "Stale after days", prefix: "Stale", suffix: "d"),
+                       "Stale after days")
+        XCTAssertEqual(Stepper.accessibilityName(label: nil, prefix: "Stale", suffix: "d"), "Stale d")
+        XCTAssertEqual(Stepper.accessibilityName(label: nil, prefix: nil, suffix: "pts"), "pts")
+        XCTAssertEqual(Stepper.accessibilityName(label: "", prefix: nil, suffix: nil), "Value")
+    }
 
-        // Should use "Activate to" not "Double-tap to" on macOS
-        let hint = emptyState.accessibilityHintText
-        XCTAssertTrue(hint.contains("Activate to"),
-                     "Accessibility hint should use 'Activate to' for macOS")
-        XCTAssertFalse(hint.contains("Double-tap"),
-                      "Accessibility hint should not use iOS 'Double-tap' phrasing on macOS")
+    /// The workspace chip names the error dot; the activation phrase is a hint, not label text.
+    func testWorkspaceChipLabelNamesErrorState() {
+        let ok = Sidebar.workspaceChipLabel(profile: "prod", subtitle: "2 workspaces", hasError: false)
+        let bad = Sidebar.workspaceChipLabel(profile: "prod", subtitle: "2 workspaces", hasError: true)
+        XCTAssertEqual(ok, "Workspace: prod. 2 workspaces.")
+        XCTAssertTrue(bad.contains("Has an error"))
+        XCTAssertFalse(bad.contains("Activate"))
+    }
+
+    /// A stale School device says so in words, not only in the warning color.
+    func testSchoolDeviceStaleStateIsSpoken() {
+        let now = Date()
+        let device = SchoolFleetService.Device(
+            id: "1", name: "iPad", serial: "S1", model: "iPad", os: "iPadOS 18",
+            isManaged: true, isSupervised: true,
+            lastCheckin: now.addingTimeInterval(-45 * 86_400), inTrash: false)
+        XCTAssertEqual(
+            SchoolDevicesTable.checkinAccessibilityValue(device, stale: true, now: now),
+            "Stale, 45 days ago")
+        XCTAssertEqual(
+            SchoolDevicesTable.checkinAccessibilityValue(device, stale: false, now: now),
+            "45 days ago")
+    }
+
+    /// Icon-only remove buttons say what they remove.
+    func testRemoveButtonLabelNamesTarget() {
+        XCTAssertEqual(removeButtonLabel(noun: "benchmark", name: "CIS Level 1"),
+                       "Remove benchmark CIS Level 1")
+        XCTAssertEqual(removeButtonLabel(noun: "benchmark", name: "  "), "Remove benchmark")
     }
 }

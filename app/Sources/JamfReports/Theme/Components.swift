@@ -804,7 +804,20 @@ struct EditableNumberStepper: View {
     var suffix: String? = nil
     /// Width of the inner text field. Tune up if your max value has more digits.
     var fieldWidth: CGFloat = 32
+    /// Spoken name of the field; defaults to the prefix and suffix text.
+    var label: String? = nil
     var help: String? = nil
+
+    /// What VoiceOver calls the field: the explicit label, else the visible prefix and suffix.
+    static func accessibilityName(label: String?, prefix: String?, suffix: String?) -> String {
+        if let label, !label.isEmpty { return label }
+        let joined = [prefix, suffix].compactMap { $0 }.joined(separator: " ")
+        return joined.isEmpty ? "Value" : joined
+    }
+
+    private var name: String {
+        Self.accessibilityName(label: label, prefix: prefix, suffix: suffix)
+    }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -815,8 +828,9 @@ struct EditableNumberStepper: View {
                     .foregroundStyle(Theme.Colors.fgMuted)
                     .fixedSize()
             }
-            TextField("", value: $value, format: .number)
+            TextField(name, value: $value, format: .number)
                 .textFieldStyle(.plain)
+                .labelsHidden()
                 .multilineTextAlignment(.trailing)
                 .font(Theme.Fonts.mono(11.5))
                 .foregroundStyle(Theme.Colors.fg2)
@@ -835,7 +849,7 @@ struct EditableNumberStepper: View {
                     .foregroundStyle(Theme.Colors.fgMuted)
                     .fixedSize()
             }
-            Stepper("", value: $value, in: range, step: 1)
+            Stepper(name, value: $value, in: range, step: 1)
                 .labelsHidden()
                 .controlSize(.small)
         }

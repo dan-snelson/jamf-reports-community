@@ -96,6 +96,8 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- VoiceOver can reach the Retry and action buttons on empty and error screens, and more controls
+  have names. (#284)
 - A webhook that answers with an error now shows in the log as an error with the HTTP status,
   and the failure-card and heartbeat "notification failed" lines say why. (#284)
 - A backup of a workspace whose config.yaml does not decode now says Jamf Protect was not backed

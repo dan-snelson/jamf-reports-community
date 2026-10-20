@@ -107,8 +107,12 @@ func runTick(
 }
 
 /// True when a run of `schedule` is meant to write today's summary for a workspace that has
-/// none. Jamf Pro and Jamf School collects both write one.
+/// none. Jamf Pro and Jamf School collects both write one; only a collect that reaches the
+/// refresh or inventory tier is meant to, not the weekly scan or a run from cache.
 func summaryMissing(for schedule: Schedule, profiles: [JamfCLIProfile], now: Date) -> Bool {
+    guard schedule.mode.runsAtLoad,
+          schedule.tiers.map({ !$0.isDisjoint(with: [.refresh, .inventory]) }) ?? true
+    else { return false }
     let names = schedule.isMulti
         ? ProfileService.runnableProfiles(
             profiles, excluding: Set(schedule.excludedProfiles ?? [])).map(\.name)

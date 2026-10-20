@@ -81,6 +81,23 @@ final class TickSchedulerMissingSummaryTests: XCTestCase {
         XCTAssertTrue(due(state, date(7, 14, 8), missing: true).isEmpty)
     }
 
+    /// Only a collect meant to write the summary is retried for it: not the weekly scan-only
+    /// collect, and not a run from cache.
+    func testOnlyACollectThatWritesTheSummaryCountsAsMissingIt() {
+        func missing(_ mode: Schedule.RunMode, _ tiers: Set<CollectionTier>?) -> Bool {
+            var s = schedule
+            s.mode = mode
+            s.tiers = tiers
+            return summaryMissing(for: s, profiles: [], now: date(7, 9, 0))
+        }
+        XCTAssertTrue(missing(.snapshotOnly, nil))
+        XCTAssertTrue(missing(.snapshotOnly, [.refresh, .inventory]))
+        XCTAssertTrue(missing(.jamfCLIFull, [.inventory]))
+        XCTAssertFalse(missing(.snapshotOnly, [.scan]))
+        XCTAssertFalse(missing(.jamfCLIOnly, nil))
+        XCTAssertFalse(missing(.backup, nil))
+    }
+
     func testHasSummaryReadsTodaysFileOnly() throws {
         XCTAssertFalse(SummaryJSONParser.hasSummary(profile: "alpha", on: date(7, 9, 0)))
         let dir = try WorkspacePaths.summariesDir(for: "alpha")

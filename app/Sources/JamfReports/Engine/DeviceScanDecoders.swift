@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - `jamf-cli pro ddm-status status-items <managementId> --output json`
+// MARK: - `jamf-cli pro declarative-device-management status-items <managementId> --output json`
 // Verified on prod 2026-09-04. `value` is JSON null for unset items.
 
 struct DDMStatusItemsPayload: Decodable, Sendable {

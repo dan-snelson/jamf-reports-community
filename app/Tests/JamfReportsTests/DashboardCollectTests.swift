@@ -48,7 +48,7 @@ final class DashboardCollectTests: XCTestCase {
     }
 
     func testMatrixRowAndTier() {
-        let row = ReportEngine.collectCommandMatrix(profile: "p", specNames: true, staleDays: 30)
+        let row = ReportEngine.collectCommandMatrix(profile: "p", staleDays: 30)
             .first { $0.kind == ReportEngine.dashboardKind }
         XCTAssertEqual(row?.args, ["-p", "p", "dashboard", "--output", "json"])
         XCTAssertEqual(CollectionTier.tier(forReport: "dashboard"), .inventory)
@@ -174,6 +174,17 @@ final class DashboardCollectTests: XCTestCase {
         let store = StateFileStore(directory: try WorkspacePaths.stateDir(for: profile))
         XCTAssertNil(store.lastRun(report: "dashboard"))
         XCTAssertNil(store.failures(report: "dashboard"))
+    }
+
+    func testAJamfCLIBelowTheFloorCollectsNothing() async throws {
+        try answer("version", "jamf-cli version 1.28.0")
+        do {
+            _ = try await runCollect()
+            XCTFail("a jamf-cli below 1.29.0 must not collect")
+        } catch ReportEngineError.jamfCLITooOld(let installed) {
+            XCTAssertEqual(installed, "1.28.0")
+        }
+        XCTAssertFalse(callsLog().contains(" pro "), callsLog())
     }
 
     func testExitSevenLandsThePageWithAWarning() async throws {

@@ -49,7 +49,7 @@ final class ConnectionCredentialsModelTests: XCTestCase {
     }
 
     private let context = ConnectionCredentialsModel.JamfCLIContext(
-        binary: URL(fileURLWithPath: "/nonexistent/stub-cli"), version: "1.31.1")
+        binary: URL(fileURLWithPath: "/nonexistent/stub-cli"))
 
     private func harness(
         mode: ConnectionCredentialsModel.Mode,

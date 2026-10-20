@@ -2039,13 +2039,17 @@ struct ReportEngine: Sendable {
         // (preflightStrictManifestCheck) has something to verify against.
         let recordManifest = loadedConfig?.jamfCli?.isManifestRequired == true
 
-        // Resolved once per run; the matrix, the scan phase and the quiet-flag
-        // gate below all key on it.
+        // Resolved once per run; the dashboard and quiet-flag gates below key on it.
         let detectedVersion = JamfCLIInstaller.installedVersion(at: bin)
-        let specNames = JamfCLIInstaller.supportsSpecDerivedNames(detectedVersion)
+        // Older binaries exit 2 on the 1.29 resource names, so every source would fail one by one.
+        if let detectedVersion, JamfCLIInstaller.isBelowMinimumSupported(detectedVersion) {
+            onLine(.init(timestamp: Date(), level: .fail,
+                         text: JamfCLIInstaller.floorLine(installed: detectedVersion, profile: profile)))
+            throw ReportEngineError.jamfCLITooOld(installed: detectedVersion)
+        }
         let dashboardSupported = JamfCLIInstaller.supportsDashboard(detectedVersion)
         let commands = Self.collectCommandMatrix(
-            profile: profile, specNames: specNames,
+            profile: profile,
             staleDays: loadedConfig?.thresholds?.resolvedStaleDays ?? 30)
 
         // Cadence state store: persists per-kind last-success timestamps so
@@ -2054,13 +2058,11 @@ struct ReportEngine: Sendable {
             .map(StateFileStore.init(directory:))
         let collectStart = Date()
 
-        // Gate --no-hints/--no-version-check on the installed binary being >= 1.18.0.
-        // These flags are 1.18-only; passing them to an older binary produces exit 1
-        // (unknown flag) and silently skips every snapshot. Default-off when version
-        // detection fails (nil) — safer than risking unknown flags on an old binary.
+        // --no-hints/--no-version-check only on a binary known to meet the floor: a pre-1.18
+        // binary exits 1 on them and skips every snapshot, and an unknown version may be one.
         // They are global flags: `schoolCollect` passes them under the same gate.
         let supportsQuietFlags = detectedVersion.map {
-            !JamfCLIInstaller.isBelowMinimumRunnable($0)
+            !JamfCLIInstaller.isBelowMinimumSupported($0)
         } ?? false
 
         // Resolved once per run, not per kind — it spawns `config list`.
@@ -2168,7 +2170,7 @@ struct ReportEngine: Sendable {
         // run never starts a fleet-wide fan-out) and before finalize (so its kinds count
         // as live in today's summary).
         let scanSaved = await Self.runDeviceScanPhase(
-            profile: profile, bin: bin, specNames: specNames, dataDir: dataDir, plan: scanPlan,
+            profile: profile, bin: bin, dataDir: dataDir, plan: scanPlan,
             recordManifest: recordManifest,
             stateStore: stateStore, collectStart: collectStart,
             authConfirmationProbe: authConfirmationProbe, limits: deviceLimits, onLine: onLine
@@ -2479,12 +2481,8 @@ struct ReportEngine: Sendable {
     /// function reads as the flow it is. Must stay in sync with
     /// `knownCollectKinds` — `CollectionTierLookupTests` enforces that in CI.
     static func collectCommandMatrix(
-        profile: String, specNames: Bool, staleDays: Int
+        profile: String, staleDays: Int
     ) -> [(args: [String], kind: String)] {
-        // jamf-cli 1.29.0 named this resource after its OpenAPI tag. The old name warns
-        // on stderr until 2027-03-09; the new one exits 2 before 1.29. `mobile-devices`
-        // has the same name on every supported version, so it is not gated.
-        let enrollments = specNames ? "device-enrollments" : "device-enrollment-instances"
         let mobileSections = mobileInventorySections.flatMap { ["--section", $0] }
         return [
             (["-p", profile, "pro", "overview", "--output", "json"], "overview"),
@@ -2550,7 +2548,8 @@ struct ReportEngine: Sendable {
              "categories"),
             (["-p", profile, "pro", "classic-mobile-config-profiles", "list", "--output", "json"],
              "classic-ios-profiles"),
-            (["-p", profile, "pro", enrollments, "list", "--output", "json"],
+            // The kind keeps the name jamf-cli used for the resource before 1.29.
+            (["-p", profile, "pro", "device-enrollments", "list", "--output", "json"],
              "device-enrollment-instances"),
             // Health audit — single cheap server call; matches CLIBridge.audit() shape that
             // AuditView and WorkspaceStore+Refresh all consume as "audit".
@@ -2737,7 +2736,7 @@ struct ReportEngine: Sendable {
         // --no-hints suppresses interactive usage tips; --no-version-check
         // suppresses the "new version available" banner that jamf-cli 1.18+
         // emits on stderr. Both keep Runs-screen output signal-to-noise clean
-        // during automated collects. Only appended when the binary is >= 1.18.0
+        // during automated collects. Only appended when the binary meets the floor
         // (see `supportsQuietFlags` at the call site).
         let invokeArgs = supportsQuietFlags
             ? arguments + ["--no-hints", "--no-version-check"]
@@ -3416,9 +3415,9 @@ struct ReportEngine: Sendable {
         for line in collectPlanLines(profile: profile, fixedPlan: plan) {
             onLine(.init(timestamp: Date(), level: .info, text: line))
         }
-        // Same gate as the Pro loop: the flags exist from the runnable floor (1.18) on.
+        // Same gate as the Pro loop.
         let quiet = JamfCLIInstaller.installedVersion(at: bin).map {
-            !JamfCLIInstaller.isBelowMinimumRunnable($0)
+            !JamfCLIInstaller.isBelowMinimumSupported($0)
         } ?? false
         let commands = plan.filter { $0.skip == nil }.map {
             (args: quiet ? $0.args + ["--no-hints", "--no-version-check"] : $0.args, kind: $0.kind)
@@ -4389,6 +4388,8 @@ enum ReportEngineError: Error, LocalizedError {
     /// link or otherwise refused.
     case reportFolderUnavailable(String)
     case jamfCLINotFound
+    /// The installed jamf-cli is older than `JamfCLIInstaller.minimumSupportedVersion`.
+    case jamfCLITooOld(installed: String)
     case invalidProfile(String)
     /// config.yaml's `jamf_cli.profile` names a profile other than the one the run is for.
     case profileMismatch(named: String, run: String)
@@ -4434,6 +4435,10 @@ enum ReportEngineError: Error, LocalizedError {
                 + "the workspace is missing or is a link. Nothing was written."
         case .jamfCLINotFound:
             return "jamf-cli not found on PATH. Install it via Homebrew or from GitHub."
+        case .jamfCLITooOld(let installed):
+            return "jamf-cli \(installed) is older than "
+                + "\(JamfCLIInstaller.minimumSupportedVersion), the oldest Jamf Reports can run. "
+                + "Update jamf-cli in Settings."
         case .invalidProfile(let p):
             return "Invalid profile name '\(p)'."
         case .profileMismatch(let named, let run):

@@ -11,7 +11,6 @@ import Observation
 final class ConnectionCredentialsModel {
     struct JamfCLIContext: Sendable {
         let binary: URL
-        let version: String?
     }
 
     struct Registration: Sendable {

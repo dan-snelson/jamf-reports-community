@@ -358,23 +358,20 @@ private func scheduledRunSingleBody(
     // not followed (folders, retention, webhook); the run says which and carries on.
     SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
 
-    // Version-floor preflight (v2.2.0 Phase 3; split in 2.10): below the runnable floor a
-    // scheduled run stops before any collect/backup, so it never writes data from a binary
-    // the app cannot drive; below the supported floor it warns and carries on. jamf-cli-only
-    // generates from cache and never calls jamf-cli, so it is exempt; an absent jamf-cli is
-    // also exempt (the collect path handles it).
+    // Version-floor preflight (v2.2.0 Phase 3): below the floor a scheduled run stops before
+    // any collect/backup, so it never writes data from a binary the app cannot drive.
+    // jamf-cli-only generates from cache and never calls jamf-cli, so it is exempt; an absent
+    // jamf-cli or an unknown version is also exempt (the collect path handles it).
     if mode != .jamfCLIOnly, let belowVersion = JamfCLIInstaller.installedVersionBelowFloor() {
         let line = JamfCLIInstaller.floorLine(installed: belowVersion, profile: profile)
-        fputs(line.text + "\n", stderr)
-        recorder?.record(line.text)
-        if line.stops {
-            recorder?.finish(exitCode: 1)
-            await ScheduledRunSignals.notifyScheduledRunFailure(
-                config: routingConfig, profile: profile, mode: mode,
-                errorDescription: line.text, recorder: nil, fallbackNotify: routingNotify,
-                scheduleKey: cardKey)
-            return 1
-        }
+        fputs(line + "\n", stderr)
+        recorder?.record(line)
+        recorder?.finish(exitCode: 1)
+        await ScheduledRunSignals.notifyScheduledRunFailure(
+            config: routingConfig, profile: profile, mode: mode,
+            errorDescription: line, recorder: nil, fallbackNotify: routingNotify,
+            scheduleKey: cardKey)
+        return 1
     }
 
     // Backup mode (v2.2.0): export configuration objects; no collect, no

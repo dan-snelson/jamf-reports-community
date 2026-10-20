@@ -25,11 +25,9 @@ enum ConnectionCheck {
         case undecided(exitCode: Int32?)
     }
 
-    /// Needs no permission. jamf-cli 1.29 renamed `jamf-pro-versions` to `jamf-pro-version`;
-    /// the old name warns until 2027-03-09 and the new one exits 2 before 1.29.
-    static func versionArguments(profile: String, specNames: Bool) -> [String] {
-        ["-p", profile, "pro", specNames ? "jamf-pro-version" : "jamf-pro-versions", "list",
-         "--output", "json"]
+    /// Needs no permission.
+    static func versionArguments(profile: String) -> [String] {
+        ["-p", profile, "pro", "jamf-pro-version", "list", "--output", "json"]
     }
 
     /// A Platform call that matches nothing and returns one empty page.
@@ -84,8 +82,8 @@ enum ConnectionCheck {
         JamfCLIErrorEnvelope.parse(stdout)?.message?.contains("TENANT_NOT_FOUND") == true
     }
 
-    static func run(profile: String, specNames: Bool, runner: Runner) async -> Verdict {
-        let version = await runner(versionArguments(profile: profile, specNames: specNames))
+    static func run(profile: String, runner: Runner) async -> Verdict {
+        let version = await runner(versionArguments(profile: profile))
         var probe: Attempt?
         if needsProbe(version) {
             probe = await runner(probeArguments(profile: profile))

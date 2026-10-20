@@ -69,9 +69,7 @@ struct CollectSourcesPlan: Equatable, Sendable {
 
     private static func matrix(_ inputs: Inputs) -> [Source] {
         let commands = ReportEngine.collectCommandMatrix(
-            profile: inputs.profile,
-            specNames: JamfCLIInstaller.supportsSpecDerivedNames(inputs.installedVersion),
-            staleDays: inputs.staleDays)
+            profile: inputs.profile, staleDays: inputs.staleDays)
         let plan = ReportEngine.planCollect(
             commands: commands,
             inputs: ReportEngine.CollectPlanInputs(
@@ -94,11 +92,10 @@ struct CollectSourcesPlan: Equatable, Sendable {
     private static func deviceScan(_ inputs: Inputs) -> [Source] {
         let off = inputs.skipExpensive
             ? text(.settingsSkipExpensive) : nil
-        let resource = JamfCLIInstaller.supportsSpecDerivedNames(inputs.installedVersion)
-            ? "declarative-device-management" : "ddm-status"
         return [
             Source(product: .jamfPro, kind: ReportEngine.ddmDeviceStatusKind,
-                   command: "pro \(resource) status-items <management ID>, each DDM-enabled Mac",
+                   command: "pro declarative-device-management status-items <management ID>, "
+                       + "each DDM-enabled Mac",
                    skipReason: off),
             Source(product: .jamfPro, kind: ReportEngine.mdmCommandHealthKind,
                    command: "pro classic-computer-history get <id> --subset commands, each Mac",

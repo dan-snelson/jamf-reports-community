@@ -124,10 +124,8 @@ final class JamfCLIInstaller {
     static let expectedJamfTeamID: String = "483DWKW443"
     static let enforceCodesignVerification: Bool = true
 
-    /// Minimum supported jamf-cli version. Bumping this is a documentation +
-    /// soft-warning change — the app does NOT hard-fail on older binaries
-    /// because most code paths still work; Settings shows a notice and every scheduled
-    /// run logs a `[warn]` line so users on older releases know to update.
+    /// The oldest jamf-cli the app supports and runs: Settings shows a notice below it, and a
+    /// scheduled collect or backup stops rather than write data from a binary it cannot drive.
     ///
     /// Floor history:
     /// - 2026-04: 1.14.0 — when CoreDashboard's W21 work removed pre-v1.4
@@ -140,27 +138,20 @@ final class JamfCLIInstaller {
     ///   `jamf-cli version -o json`.
     /// - 2026-10-14: 1.29.0 (2.10) — environment-scope Platform profiles (1.28), the
     ///   spec-derived resource names whose old spellings stop after 2027-03-09, and
-    ///   `pro report security`, which 1.24–1.27 sent to the Security Cloud gate. Below it a
-    ///   run carries on with a warning; only `minimumRunnableVersion` refuses one.
+    ///   `pro report security`, which 1.24–1.27 sent to the Security Cloud gate. A run
+    ///   below it still ran down to 1.18.0 with a warning.
+    /// - 2026-10-20: 1.29.0 (2.11) — also the runnable floor; the version gates for 1.28
+    ///   and 1.29 are gone, so only the 1.29 spellings and `--no-verify` are sent.
     nonisolated static let minimumSupportedVersion: String = "1.29.0"
-
-    /// The oldest jamf-cli a scheduled run uses at all, and the first with the
-    /// `--no-hints`/`--no-version-check` flags `collect` passes. Below it a scheduled
-    /// collect or backup stops rather than write data from a binary the app cannot drive.
-    nonisolated static let minimumRunnableVersion: String = "1.18.0"
 
     /// Returns true when `installedVersion` is below `minimumSupportedVersion`
     /// (a pre-release of the minimum, `1.29.0-rc1`, counts as below).
     /// Returns false if the installed version is unknown/unparseable so we
     /// don't nag users when version detection itself failed.
     nonisolated static func isBelowMinimumSupported(_ installedVersion: String?) -> Bool {
-        isBelow(installedVersion, minimumSupportedVersion)
-    }
-
-    /// Returns true when `installedVersion` is below `minimumRunnableVersion`; false for an
-    /// unknown or unparseable version, as `isBelowMinimumSupported` does.
-    nonisolated static func isBelowMinimumRunnable(_ installedVersion: String?) -> Bool {
-        isBelow(installedVersion, minimumRunnableVersion)
+        guard let installedVersion,
+              !versionParts(installedVersion).isEmpty else { return false }
+        return compareVersions(installedVersion, minimumSupportedVersion) == .orderedAscending
     }
 
     /// What `installedVersionBelowFloor` reads the installed version through; a test replaces it.
@@ -169,73 +160,29 @@ final class JamfCLIInstaller {
     }
 
     /// The installed jamf-cli version when it is present but below the supported floor; nil when
-    /// jamf-cli is absent (optional) or meets the floor. Nonisolated, so the headless runner
-    /// calls it without a MainActor hop.
+    /// jamf-cli is absent (optional), its version is unknown, or it meets the floor. Nonisolated,
+    /// so the headless runner calls it without a MainActor hop.
     nonisolated static func installedVersionBelowFloor() -> String? {
         guard let installed = installedVersionProbe(), isBelowMinimumSupported(installed)
         else { return nil }
         return installed
     }
 
-    /// The scheduled-run line for a jamf-cli below the supported floor: an `[error]` that stops
-    /// the run below `minimumRunnableVersion`, else a `[warn]`, and the run carries on.
-    nonisolated static func floorLine(
-        installed: String, profile: String
-    ) -> (text: String, stops: Bool) {
-        if isBelowMinimumRunnable(installed) {
-            return ("[error] jamf-cli \(installed) is below \(minimumRunnableVersion), the "
-                + "oldest Jamf Reports can run — aborting '\(profile)' to avoid writing data "
-                + "from an unsupported binary. Update jamf-cli in Settings or with "
-                + "brew upgrade jamf-cli.", true)
-        }
-        return ("[warn] jamf-cli \(installed) is older than the supported "
-            + "\(minimumSupportedVersion); some sources may be skipped or incomplete. "
-            + "Update jamf-cli in Settings or with brew upgrade jamf-cli.", false)
-    }
-
-    private nonisolated static func isBelow(_ installedVersion: String?, _ floor: String) -> Bool {
-        guard let installedVersion,
-              !versionParts(installedVersion).isEmpty else { return false }
-        return compareVersions(installedVersion, floor) == .orderedAscending
-    }
-
-    /// First release whose `config add-profile --auth-method platform` accepts
-    /// `--environment-id` (GA scope). Older binaries only know `--tenant-id`.
-    nonisolated static let environmentScopeVersion: String = "1.28.0"
-
-    /// True unless `installedVersion` parses and is below 1.28.0 — an unknown
-    /// version fails toward the GA default rather than the legacy flag. A parsed
-    /// pre-release of 1.28.0 (`1.28.0-rc1`) counts as below it, so it takes the legacy flag.
-    nonisolated static func supportsEnvironmentScope(_ installedVersion: String?) -> Bool {
-        guard let installedVersion,
-              !versionParts(installedVersion).isEmpty else { return true }
-        return compareVersions(installedVersion, environmentScopeVersion) != .orderedAscending
-    }
-
-    /// First release whose `pro` resource names come from the OpenAPI spec
-    /// (`device-enrollments`, `declarative-device-management`, …) and whose
-    /// `config add-profile` verifies credentials unless `--no-verify` is passed.
-    /// Older binaries reject both the new names and the flag (exit 2).
-    nonisolated static let specDerivedNamesVersion: String = "1.29.0"
-
-    /// True only when `installedVersion` parses and is at least 1.29.0. An
-    /// unknown version fails toward the old spelling — never send a name or a
-    /// flag an older binary refuses (the `supportsQuietFlags` direction). A
-    /// pre-release of 1.29.0 (`1.29.0-rc1`) counts as below it, so it also gets
-    /// the older behaviour.
-    nonisolated static func supportsSpecDerivedNames(_ installedVersion: String?) -> Bool {
-        guard let installedVersion,
-              !versionParts(installedVersion).isEmpty else { return false }
-        return compareVersions(installedVersion, specDerivedNamesVersion) != .orderedAscending
+    /// The `[error]` line that stops a scheduled run on a jamf-cli below the floor.
+    nonisolated static func floorLine(installed: String, profile: String) -> String {
+        "[error] jamf-cli \(installed) is below \(minimumSupportedVersion), the "
+            + "oldest Jamf Reports can run — aborting '\(profile)' to avoid writing data "
+            + "from an unsupported binary. Update jamf-cli in Settings or with "
+            + "brew upgrade jamf-cli."
     }
 
     /// First release with the top-level `dashboard` command: one self-contained
     /// HTML page of fleet aggregates. Older binaries have no such command.
     nonisolated static let dashboardVersion: String = "1.31.0"
 
-    /// True only when `installedVersion` parses and is at least 1.31.0. An unknown
-    /// version fails toward not running it, like `supportsSpecDerivedNames`. A
-    /// pre-release of 1.31.0 (`1.31.0-rc1`) counts as below it, so the command is not run.
+    /// True only when `installedVersion` parses and is at least 1.31.0. An unknown version
+    /// fails toward not running it. A pre-release of 1.31.0 (`1.31.0-rc1`) counts as below it,
+    /// so the command is not run.
     nonisolated static func supportsDashboard(_ installedVersion: String?) -> Bool {
         guard let installedVersion,
               !versionParts(installedVersion).isEmpty else { return false }

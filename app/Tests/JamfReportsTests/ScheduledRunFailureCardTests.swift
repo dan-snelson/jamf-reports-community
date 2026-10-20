@@ -40,8 +40,8 @@ final class ScheduledRunFailureCardTests: XCTestCase {
             launchAgentLabel: "com.github.tonyyo11.jamf-reports-community.card.\(mode.rawValue)")
     }
 
-    func testAJamfCLIBelowTheRunnableFloorPostsAFailureCard() async {
-        JamfCLIInstaller.installedVersionProbe = { "1.10.0" }
+    func testAJamfCLIBelowTheFloorPostsAFailureCard() async {
+        JamfCLIInstaller.installedVersionProbe = { "1.28.0" }
         let outcome = await runSchedule(schedule(.snapshotOnly), verbose: false)
         XCTAssertEqual(outcome.exitCode, 1)
         XCTAssertEqual(WebhookCapture.posted.count, 1)

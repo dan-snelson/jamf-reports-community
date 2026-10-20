@@ -93,6 +93,8 @@ func runTick(
             await hold.keepingAlive(onGiveUp: { exitAfterLockGiveUp(profiles: profiles) }) {
                 await notifyOverdueSchedulesHeadless(
                     profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
+                // A Run now (the GUI, `schedules run`) is not the background item's own wake.
+                guard !arguments.contains("--now") else { return }
                 await ScheduledRunSignals.notifyHeartbeats(
                     profiles: profiles.map(\.name), excluding: Set(policy.excludedProfiles))
             }

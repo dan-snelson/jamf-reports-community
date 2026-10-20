@@ -111,6 +111,22 @@ final class NotifyHeartbeatTests: XCTestCase {
         XCTAssertEqual(WebhookCapture.posted.count, 2)
     }
 
+    /// The GUI's and `schedules run`'s Run now go through `--tick --now`: no heartbeat from
+    /// those, one from the background item's own wake.
+    func testARunNowTickPostsNoHeartbeat() async throws {
+        let key = AutomationPolicy.storageKey
+        let savedPolicy = UserDefaults.standard.string(forKey: key)
+        UserDefaults.standard.set(AutomationPolicy().serialize(), forKey: key)
+        addTeardownBlock { UserDefaults.standard.set(savedPolicy, forKey: key) }
+        try writeNotify("  heartbeat: true\n")
+        let lock = TickLock(url: root.appendingPathComponent(".tick.lock"))
+        let label = "\(LaunchAgentWriter.labelPrefix).\(profile).none"
+        _ = await runTick(arguments: ["--tick", "--now", label], lock: lock)
+        XCTAssertTrue(WebhookCapture.posted.isEmpty, "\(WebhookCapture.posted)")
+        _ = await runTick(arguments: ["--tick"], lock: lock)
+        XCTAssertEqual(WebhookCapture.posted.count, 1)
+    }
+
     func testNothingIsSentUnlessHeartbeatAndNotifyAreOn() async throws {
         try writeNotify()
         await beat(on: Date())

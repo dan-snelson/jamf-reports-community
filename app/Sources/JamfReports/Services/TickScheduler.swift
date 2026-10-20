@@ -14,6 +14,8 @@ struct TickState: Codable, Sendable {
     /// When the previous wake ran. A long gap means the Mac was off or asleep, which is what
     /// lets a daily schedule run early on the first wake of a day it would otherwise miss.
     var lastTick: Date?
+    /// When the latest catch-up run (`Reason.catchUp`) started: that day's run, ahead of its fire.
+    var catchUpStarted: [String: Date] = [:]
 
     init() {}
 
@@ -25,6 +27,8 @@ struct TickState: Codable, Sendable {
         lastSucceeded = try c.decodeIfPresent([String: Date].self, forKey: .lastSucceeded) ?? [:]
         retryCount = try c.decodeIfPresent([String: Int].self, forKey: .retryCount) ?? [:]
         lastTick = try c.decodeIfPresent(Date.self, forKey: .lastTick)
+        catchUpStarted =
+            try c.decodeIfPresent([String: Date].self, forKey: .catchUpStarted) ?? [:]
     }
 
     static func load(url: URL = TickState.defaultURL) -> TickState {
@@ -42,12 +46,15 @@ struct TickState: Codable, Sendable {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    /// Stamp a start. A calendar fire restarts the retry count, a retry
+    /// Stamp a start. A calendar fire or a catch-up restarts the retry count, a retry
     /// advances it, and a run-now leaves it alone — it belongs to no fire.
     mutating func noteStarted(_ label: String, at now: Date, reason: TickScheduler.Reason) {
         lastStarted[label] = now
         switch reason {
         case .fire: retryCount[label] = 0
+        case .catchUp:
+            retryCount[label] = 0
+            catchUpStarted[label] = now
         case .retry: retryCount[label] = (retryCount[label] ?? 0) + 1
         case .runNow: break
         }
@@ -104,8 +111,10 @@ enum TickScheduler {
     /// off or asleep.
     static let offGap: TimeInterval = 15 * 60
 
-    /// Why a run is due — the tick stamps each differently (`TickState.noteStarted`).
-    enum Reason: Sendable, Equatable { case runNow, fire, retry }
+    /// Why a run is due — the tick stamps each differently (`TickState.noteStarted`). A
+    /// `catchUp` is a daily schedule's run on the first wake of a day the Mac was off, ahead of
+    /// that day's fire.
+    enum Reason: Sendable, Equatable { case runNow, fire, catchUp, retry }
 
     struct DueRun: Sendable {
         let schedule: Schedule
@@ -142,12 +151,13 @@ enum TickScheduler {
                     "tick: \(label, privacy: .public) has an unreadable cadence and was skipped")
                 return nil
             }
-            let started = startStamp(label, state: state, now: now)
+            let started = startStamp(state.lastStarted[label], now: now)
             let dayStart = Calendar.current.startOfDay(for: now)
             let daily = schedule.mode.runsAtLoad && isDaily(entries)
-            // A run today is the day's run: a daily schedule's fire later today (after an early
-            // run below) must not start a second one.
-            let slot = daily && started >= dayStart ? min(fire, started) : fire
+            // A catch-up on the fire's day, or after it, is that day's run: the fire starts no
+            // second one, and retries count from the catch-up. A Run now covers no fire.
+            let catchUp = startStamp(state.catchUpStarted[label], now: now)
+            let slot = daily && catchUp >= Calendar.current.startOfDay(for: fire) ? catchUp : fire
             if slot > started {
                 let catchesUp = schedule.mode.runsAtLoad
                     || anchor.timeIntervalSince(slot) <= nonCatchUpWindow
@@ -157,7 +167,7 @@ enum TickScheduler {
             // fire may come after it is off again (18:00 fire, Mac on 08:00-17:00), so the
             // first wake of the day runs it. An always-on Mac has no gap and waits for its fire.
             if daily, started < dayStart, wasOff(state: state, now: now) {
-                return DueRun(schedule: schedule, reason: .fire)
+                return DueRun(schedule: schedule, reason: .catchUp)
             }
             let retry = retryIsDue(
                 mode: schedule.mode, label: label, fire: slot, state: state, now: now,
@@ -179,11 +189,10 @@ enum TickScheduler {
         return now.timeIntervalSince(last) > offGap
     }
 
-    /// When `label` last started, or `.distantPast` for a stamp beyond clock skew in the future
-    /// (a clock set ahead once): a future stamp would otherwise cover every fire until then.
-    private static func startStamp(_ label: String, state: TickState, now: Date) -> Date {
-        guard let stamp = state.lastStarted[label],
-              stamp.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance
+    /// `stamp`, or `.distantPast` for none or one beyond clock skew in the future (a clock set
+    /// ahead once): a future stamp would otherwise cover every fire until then.
+    private static func startStamp(_ stamp: Date?, now: Date) -> Date {
+        guard let stamp, stamp.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance
         else { return .distantPast }
         return stamp
     }
@@ -203,7 +212,7 @@ enum TickScheduler {
         } ?? .distantPast
         guard succeeded < fire else { return false }
         let retries = state.retryCount[label] ?? 0
-        let started = startStamp(label, state: state, now: now)
+        let started = startStamp(state.lastStarted[label], now: now)
         guard retryBackoffs.indices.contains(retries) else {
             return Calendar.current.isDate(started, inSameDayAs: now)
                 && now.timeIntervalSince(started) >= missingSummaryRetryInterval

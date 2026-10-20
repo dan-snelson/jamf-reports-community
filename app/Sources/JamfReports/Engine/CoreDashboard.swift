@@ -1874,16 +1874,13 @@ struct CoreDashboard: Sendable {
         row += 1
         for item in items {
             let compliance = item["compliance"] as? String ?? ""
+            let fmt: CellFormat = compliance.isEmpty ? .yellow : .cell
             ws.write(item["benchmark"] as? String ?? "", row: row, col: 0, format: .cell)
             ws.write(item["device"] as? String ?? "", row: row, col: 1, format: .cell)
             ws.write(item["deviceId"] as? String ?? "", row: row, col: 2, format: .cell)
             ws.write(asInt(item["rulesPassed"]), row: row, col: 3, format: .cell)
             ws.write(asInt(item["rulesFailed"]), row: row, col: 4, format: .cell)
-            if let fraction = percentFraction(compliance) {
-                ws.write(fraction, row: row, col: 5, format: .pct)
-            } else {
-                ws.write(compliance, row: row, col: 5, format: compliance.isEmpty ? .yellow : .cell)
-            }
+            ws.write(compliance, row: row, col: 5, format: fmt)
             row += 1
         }
     }
@@ -1903,7 +1900,7 @@ struct CoreDashboard: Sendable {
         ws.setColumnWidth(1, 1, 40)
         ws.setColumnWidth(2, 6, 12)
         ws.setColumnWidth(7, 7, 28)
-        // Rule ID goes last so the columns Power BI already reads keep their positions.
+        // Rule ID goes last so the columns Power BI already reads keep their positions and types.
         let hdrs = ["Benchmark", "Rule", "Passed", "Failed", "Unknown", "Devices", "Pass Rate",
                     "Rule ID"]
         for (col, h) in hdrs.enumerated() { ws.write(h, row: row, col: col, format: .header) }
@@ -1916,11 +1913,7 @@ struct CoreDashboard: Sendable {
             ws.write(asInt(item["failed"]), row: row, col: 3, format: .cell)
             ws.write(asInt(item["unknown"]), row: row, col: 4, format: .cell)
             ws.write(asInt(item["devices"]), row: row, col: 5, format: .cell)
-            if let fraction = percentFraction(pctStr) {
-                ws.write(fraction, row: row, col: 6, format: pctFormat(fraction))
-            } else {
-                ws.write(pctStr, row: row, col: 6, format: .cell)
-            }
+            ws.write(pctStr, row: row, col: 6, format: colorForPctString(pctStr))
             ws.write(item["ruleId"] as? String ?? "", row: row, col: 7, format: .cell)
             row += 1
         }
@@ -3582,18 +3575,6 @@ struct CoreDashboard: Sendable {
         if num >= 95 { return .green }
         if num >= 80 { return .yellow }
         return .red
-    }
-
-    /// A "93.3%" string as the fraction a `0.0%` cell shows (0.933); nil for a blank or
-    /// unparseable one, which stays text.
-    private func percentFraction(_ pct: String) -> Double? {
-        let text = pct.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)
-        guard let num = Double(text), num.isFinite else { return nil }
-        return num / 100
-    }
-
-    private func pctFormat(_ fraction: Double) -> CellFormat {
-        fraction >= 0.95 ? .pctGreen : fraction >= 0.80 ? .pctYellow : .pctRed
     }
 
     // MARK: - mSCP Compliance sheet

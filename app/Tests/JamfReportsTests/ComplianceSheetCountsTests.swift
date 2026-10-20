@@ -71,7 +71,7 @@ final class ComplianceSheetCountsTests: XCTestCase {
         for col in 2...5 { XCTAssertEqual(measured[col], "0", "column \(col)") }
     }
 
-    func testComplianceRulesWritesThePassRateAsANumberAndTheRuleIDLast() throws {
+    func testComplianceRulesKeepsThePassRateAsTextAndPutsTheRuleIDLast() throws {
         let dash = try dashboard(kind: "compliance-rules", rows: [
             ["benchmark": "CIS", "rule": "Audit logging", "ruleId": "audit_flags_lo",
              "passed": 9, "failed": 1, "unknown": 0, "devices": 10, "passRate": "90.0%"],
@@ -81,20 +81,11 @@ final class ComplianceSheetCountsTests: XCTestCase {
         let cells = try XCTUnwrap(dash.workbook.sheet(named: "Compliance Rules")).dedupedCells
         XCTAssertTrue(cells.contains { text($0.value) == "Rule ID" && $0.col == 7 })
         let cis = try row(dash, "Compliance Rules", "CIS")
-        XCTAssertEqual(cis[6], "0.9", "a fraction in a 0.0% cell, not text")
-        let rate = try XCTUnwrap(cells.first { text($0.value) == "0.9" })
-        XCTAssertEqual(rate.format, .pctYellow)
+        XCTAssertEqual(cis[6], "90.0%", "text as before, which Power BI reads")
         XCTAssertEqual(cis[7], "audit_flags_lo")
         let noID = try row(dash, "Compliance Rules", "NoID")
         XCTAssertEqual(noID[6] ?? "", "")
         XCTAssertEqual(noID[7] ?? "", "", "a row without a rule ID leaves the cell blank")
     }
 
-    func testComplianceDevicesWritesComplianceAsANumber() throws {
-        let dash = try dashboard(kind: "compliance-devices", rows: [
-            ["benchmark": "CIS", "device": "Mac-1", "deviceId": "1", "compliance": "50%"],
-        ])
-        try dash.writeComplianceDevices()
-        XCTAssertEqual(try row(dash, "Compliance Devices", "CIS")[5], "0.5")
-    }
 }

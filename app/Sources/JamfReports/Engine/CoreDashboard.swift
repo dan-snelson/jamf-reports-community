@@ -1991,7 +1991,7 @@ struct CoreDashboard: Sendable {
 
     // MARK: - DDM Device Status
     // Source: `ddm-device-status` snapshot (ReportEngine+DeviceScan, jamf-cli
-    // `pro ddm-status status-items` per DDM-enabled Mac). One row per device.
+    // `pro declarative-device-management status-items` per DDM-enabled Mac). One row per device.
 
     func writeDDMDeviceStatus() throws {
         let raw = try loadLatestJSON(names: ["ddm-device-status"])

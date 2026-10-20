@@ -61,7 +61,7 @@ final class CollectSourcesPlanTests: XCTestCase {
 
     func testTheJamfProListIsTheCollectMatrixPlusTheScanAndTheLateSources() {
         let pro = plan()
-        let matrix = ReportEngine.collectCommandMatrix(profile: "prod", specNames: true, staleDays: 30)
+        let matrix = ReportEngine.collectCommandMatrix(profile: "prod", staleDays: 30)
         XCTAssertEqual(
             Array(pro.sources.map(\.kind).prefix(matrix.count)), matrix.map(\.kind),
             "the matrix as collect runs it, in order")

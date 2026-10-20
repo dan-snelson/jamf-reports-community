@@ -2039,13 +2039,11 @@ struct ReportEngine: Sendable {
         // (preflightStrictManifestCheck) has something to verify against.
         let recordManifest = loadedConfig?.jamfCli?.isManifestRequired == true
 
-        // Resolved once per run; the matrix, the scan phase and the quiet-flag
-        // gate below all key on it.
+        // Resolved once per run; the dashboard and quiet-flag gates below key on it.
         let detectedVersion = JamfCLIInstaller.installedVersion(at: bin)
-        let specNames = JamfCLIInstaller.supportsSpecDerivedNames(detectedVersion)
         let dashboardSupported = JamfCLIInstaller.supportsDashboard(detectedVersion)
         let commands = Self.collectCommandMatrix(
-            profile: profile, specNames: specNames,
+            profile: profile,
             staleDays: loadedConfig?.thresholds?.resolvedStaleDays ?? 30)
 
         // Cadence state store: persists per-kind last-success timestamps so
@@ -2166,7 +2164,7 @@ struct ReportEngine: Sendable {
         // run never starts a fleet-wide fan-out) and before finalize (so its kinds count
         // as live in today's summary).
         let scanSaved = await Self.runDeviceScanPhase(
-            profile: profile, bin: bin, specNames: specNames, dataDir: dataDir, plan: scanPlan,
+            profile: profile, bin: bin, dataDir: dataDir, plan: scanPlan,
             recordManifest: recordManifest,
             stateStore: stateStore, collectStart: collectStart,
             authConfirmationProbe: authConfirmationProbe, limits: deviceLimits, onLine: onLine
@@ -2477,12 +2475,8 @@ struct ReportEngine: Sendable {
     /// function reads as the flow it is. Must stay in sync with
     /// `knownCollectKinds` — `CollectionTierLookupTests` enforces that in CI.
     static func collectCommandMatrix(
-        profile: String, specNames: Bool, staleDays: Int
+        profile: String, staleDays: Int
     ) -> [(args: [String], kind: String)] {
-        // jamf-cli 1.29.0 named this resource after its OpenAPI tag. The old name warns
-        // on stderr until 2027-03-09; the new one exits 2 before 1.29. `mobile-devices`
-        // has the same name on every supported version, so it is not gated.
-        let enrollments = specNames ? "device-enrollments" : "device-enrollment-instances"
         let mobileSections = mobileInventorySections.flatMap { ["--section", $0] }
         return [
             (["-p", profile, "pro", "overview", "--output", "json"], "overview"),
@@ -2548,7 +2542,8 @@ struct ReportEngine: Sendable {
              "categories"),
             (["-p", profile, "pro", "classic-mobile-config-profiles", "list", "--output", "json"],
              "classic-ios-profiles"),
-            (["-p", profile, "pro", enrollments, "list", "--output", "json"],
+            // The kind keeps the name jamf-cli used for the resource before 1.29.
+            (["-p", profile, "pro", "device-enrollments", "list", "--output", "json"],
              "device-enrollment-instances"),
             // Health audit — single cheap server call; matches CLIBridge.audit() shape that
             // AuditView and WorkspaceStore+Refresh all consume as "audit".

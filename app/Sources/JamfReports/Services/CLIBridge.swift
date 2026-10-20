@@ -1096,14 +1096,6 @@ final class CLIBridge {
         return false
     }
 
-    /// Returns `true` when the auth method does not require a bearer-token probe.
-    ///
-    /// API-key auth (Jamf School) uses key-based authentication with no bearer token
-    /// to inspect, so the `pro auth token` probe must be skipped for those profiles.
-    nonisolated static func shouldSkipAuthProbe(for authMethod: String) -> Bool {
-        JamfCLIAuthMethod(raw: authMethod) == .apiKey
-    }
-
     /// The refusal, after one `[error]` line, when `profile` is known to belong to another
     /// product (Jamf School, Protect, Security Cloud) or is an organization-level integration:
     /// no `pro` command may run against it. Nil for a Jamf Pro profile and for one that cannot

@@ -3,7 +3,7 @@ import XCTest
 @testable import JamfReports
 
 /// The exit-code constants the auth guard and its callers branch on, and the apikey bypass
-/// (`CLIBridge.shouldSkipAuthProbe`). The guard calls `pro auth token`; the timeout test injects a
+/// (`JamfCLIAuthMethod.apiKey`). The guard calls `pro auth token`; the timeout test injects a
 /// sleeping stub, and no test runs a real jamf-cli.
 @MainActor
 final class CLIBridgeAuthGuardTests: XCTestCase {
@@ -35,16 +35,13 @@ final class CLIBridgeAuthGuardTests: XCTestCase {
         XCTAssertEqual(CLIBridge.exitCodeNotFound, 4)
     }
 
-    // MARK: - shouldSkipAuthProbe unit tests
+    // MARK: - apikey auth method
 
-    func test_shouldSkipAuthProbe_trueForAPIKey() {
-        XCTAssertTrue(CLIBridge.shouldSkipAuthProbe(for: "apikey"))
-    }
-
-    func test_shouldSkipAuthProbe_falseForBearer() {
-        XCTAssertFalse(CLIBridge.shouldSkipAuthProbe(for: "bearer"))
-        XCTAssertFalse(CLIBridge.shouldSkipAuthProbe(for: ""))
-        XCTAssertFalse(CLIBridge.shouldSkipAuthProbe(for: "APIKEY")) // case-sensitive
+    func test_apiKeyAuthMethodIsReadExactly() {
+        XCTAssertEqual(JamfCLIAuthMethod(raw: "apikey"), .apiKey)
+        XCTAssertNotEqual(JamfCLIAuthMethod(raw: "bearer"), .apiKey)
+        XCTAssertNotEqual(JamfCLIAuthMethod(raw: ""), .apiKey)
+        XCTAssertNotEqual(JamfCLIAuthMethod(raw: "APIKEY"), .apiKey) // case-sensitive
     }
 
     // MARK: - Probe timeout

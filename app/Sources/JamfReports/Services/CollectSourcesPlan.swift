@@ -59,7 +59,7 @@ struct CollectSourcesPlan: Equatable, Sendable {
                 Source(product: $0.kind == ReportEngine.schoolBlueprintsKind
                         ? .platformAPI : .school,
                        kind: $0.kind, command: command($0.args), skipReason: $0.skip.map(text))
-            } + protect(inputs))
+            } + [sofa(inputs)] + protect(inputs))
         case .jamfPro:
             return CollectSourcesPlan(
                 sources: matrix(inputs) + deviceScan(inputs) + afterMatrix(inputs)
@@ -104,16 +104,22 @@ struct CollectSourcesPlan: Equatable, Sendable {
     }
 
     private static func afterMatrix(_ inputs: Inputs) -> [Source] {
-        let reason = text(.collectSkip)
-        func skip(_ kind: String) -> String? { inputs.collectSkip.contains(kind) ? reason : nil }
-        return [
+        [
             Source(product: .jamfPro, kind: ReportEngine.patchReleaseDatesKind,
                    command: "pro patch-software-title-configurations definitions <id>, each title",
-                   skipReason: skip(ReportEngine.patchReleaseDatesKind)),
-            Source(product: .other, kind: ReportEngine.sofaKind,
-                   command: "SOFA macOS and iOS feeds (sofafeed.macadmins.io)",
-                   skipReason: skip(ReportEngine.sofaKind)),
+                   skipReason: inputs.collectSkip.contains(ReportEngine.patchReleaseDatesKind)
+                       ? text(.collectSkip) : nil),
+            sofa(inputs),
         ]
+    }
+
+    /// The one fetch from a third-party host; a Jamf School collect makes it too, for OS
+    /// currency in its daily summary.
+    private static func sofa(_ inputs: Inputs) -> Source {
+        Source(product: .other, kind: ReportEngine.sofaKind,
+               command: "SOFA macOS and iOS feeds (sofafeed.macadmins.io)",
+               skipReason: inputs.collectSkip.contains(ReportEngine.sofaKind)
+                   ? text(.collectSkip) : nil)
     }
 
     private static func protect(_ inputs: Inputs) -> [Source] {

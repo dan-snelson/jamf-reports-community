@@ -57,7 +57,8 @@ struct Generate: AsyncParsableCommand {
             let failures: [SheetFailure]
             if isSchool {
                 failures = try await ReportEngine.schoolGenerate(
-                    config: config, dataDir: dataDir, outputURL: outputURL, onLine: onLine)
+                    config: config, dataDir: dataDir, outputURL: outputURL, profile: profile,
+                    onLine: onLine)
             } else {
                 failures = try await engine.generate(
                     outputURL: outputURL, template: resolved, onLine: onLine)

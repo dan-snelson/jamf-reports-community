@@ -141,15 +141,17 @@ struct TrendPoint: Identifiable, Sendable, Equatable {
         isLoading = false
     }
 
-    /// The second phase of a load, after `apply`: fills per-agent history for older days from
-    /// their dated `ea-results` snapshots (`resolvingAgentCoverage`) off the main actor, then
-    /// republishes. Dropped if another load started, or the profile changed, meanwhile.
+    /// The second phase of a load, after `apply`: fills per-agent and mobile history for older
+    /// days from their dated `ea-results` and `mobile-devices-list` snapshots
+    /// (`resolvingAgentCoverage`, `resolvingMobile`) off the main actor, then republishes.
+    /// Dropped if another load started, or the profile changed, meanwhile.
     @MainActor
-    func backfillAgentCoverage(profile: String) async {
+    func backfillHistory(profile: String) async {
         let generation = loadGeneration
         let summaries = allSummaries
         let resolved = await Task.detached(priority: .utility) {
-            TrendStore.resolvingAgentCoverage(summaries, profile: profile)
+            TrendStore.resolvingMobile(
+                TrendStore.resolvingAgentCoverage(summaries, profile: profile), profile: profile)
         }.value
         guard generation == loadGeneration, currentProfile == profile else { return }
         allSummaries = resolved
@@ -348,7 +350,23 @@ struct TrendPoint: Identifiable, Sendable, Equatable {
             // mobile-only or iPad-only fleet) has its mobile count, never a headline of 0.
             if summary.totalDevices == 0 { return summary.mobileDeviceCount.map(Double.init) }
             return Double(summary.totalDevices)
+        case .mobileManaged: return summary.mobile.map { Double($0.managed) }
+        case .mobileOSCurrent: return summary.mobile?.osCurrent?.pct
+        case .mobilePasscode: return summary.mobile?.passcode?.pct
+        case .mobileSupervised: return summary.mobile?.supervised?.pct
+        case .mobileDataProtection: return summary.mobile?.dataProtection?.pct
+        case .mobileStale: return summary.mobile?.stale.map(Double.init)
+        case .mobileJailbroken: return summary.mobile?.jailbroken.map(Double.init)
         }
+    }
+
+    /// Whether the loaded history can show `metric`, by the device types its days carry: a
+    /// mobile metric needs a day that carries it, a Mac metric a day with Macs. With no history
+    /// loaded yet every Mac metric stays offered, so a load in flight keeps the selection.
+    func offers(_ metric: TrendSeries.Metric) -> Bool {
+        if metric.isMobile { return allSummaries.contains { value(for: metric, in: $0) != nil } }
+        if metric == .managedDevices { return true }
+        return allSummaries.isEmpty || allSummaries.contains { $0.totalDevices > 0 }
     }
 
     func dates() -> [Date] {
@@ -491,7 +509,7 @@ struct TrendPoint: Identifiable, Sendable, Equatable {
         var series: [ChartSeries] = []
         if !computerPoints.isEmpty {
             series.append(ChartSeries(
-                label: "Computers", color: ChartPalette.seriesColors[0], points: computerPoints))
+                label: "Macs", color: ChartPalette.seriesColors[0], points: computerPoints))
         }
 
         let mobilePoints: [(date: Date, value: Double)] = filteredSummaries.compactMap { summary in

@@ -201,6 +201,9 @@ extension TrendSeries.Metric {
             "Needs a compliance baseline mapped in Config."
         case .managedDevices:
             "Needs a collected inventory."
+        case .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+             .mobileDataProtection, .mobileStale, .mobileJailbroken:
+            "Needs the mobile device inventory."
         }
     }
 

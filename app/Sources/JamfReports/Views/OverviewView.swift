@@ -360,7 +360,7 @@ struct OverviewView: View {
             TrendStore.computeSnapshot(profile: profile)
         }.value
         trendStore.apply(snapshot, profile: profile, range: range, generation: generation)
-        await trendStore.backfillAgentCoverage(profile: profile)
+        await trendStore.backfillHistory(profile: profile)
     }
 
     /// First-load overlay: shown only while the initial scan runs with no cached
@@ -1823,6 +1823,9 @@ struct OverviewView: View {
             "Per-baseline mSCP compliance band trends over time. Open Compliance Posture for current distribution."
         case .managedDevices:
             "Historical computers-vs-mobile split. Open Computers or Mobile Devices to inspect current records."
+        case .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+             .mobileDataProtection, .mobileStale, .mobileJailbroken:
+            "Open Mobile Devices to inspect current records."
         case .sip, .firewall, .gatekeeper:
             "Open Security Posture for the per-control breakdown."
         }
@@ -1843,6 +1846,9 @@ struct OverviewView: View {
             return [.devices, .config]
         case .managedDevices:
             return [.devices, .mobileFleet]
+        case .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+             .mobileDataProtection, .mobileStale, .mobileJailbroken:
+            return [.mobileFleet]
         case .sip, .firewall, .gatekeeper:
             return [.securityPosture, .devices]
         }

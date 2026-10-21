@@ -305,7 +305,7 @@ final class MobileOnlySummaryReaderTests: XCTestCase {
                 day("2026-10-13", macs: 0, mobile: 6),
             ], range: .all)
         let series = store.managedDeviceSeries()
-        XCTAssertEqual(series.first { $0.label == "Computers" }?.points.map(\.value), [20])
+        XCTAssertEqual(series.first { $0.label == "Macs" }?.points.map(\.value), [20])
         XCTAssertEqual(series.first { $0.label == "Mobile devices" }?.points.map(\.value),
                        [5, 5, 6])
 

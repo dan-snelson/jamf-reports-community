@@ -23,6 +23,13 @@ enum AlertMetric: String, CaseIterable, Sendable {
     case staleCount = "stale_count"
     case actionItemsP0 = "action_items_p0"
     case totalDevices = "total_devices"
+    // Mobile devices (`DailySummary.mobile`); each pct is `met / of`.
+    case mobileOSCurrentPct = "mobile_os_current_pct"
+    case mobilePasscodePct = "mobile_passcode_pct"
+    case mobileSupervisedPct = "mobile_supervised_pct"
+    case mobileDataProtectionPct = "mobile_data_protection_pct"
+    case mobileStaleCount = "mobile_stale_count"
+    case mobileJailbrokenCount = "mobile_jailbroken_count"
 
     /// Short human label for the alert card (never a percentage sign — the
     /// message string carries units).
@@ -44,13 +51,20 @@ enum AlertMetric: String, CaseIterable, Sendable {
         case .staleCount: return "Stale devices"
         case .actionItemsP0: return "P0 action items"
         case .totalDevices: return "Total Macs"
+        case .mobileOSCurrentPct: return "Mobile OS currency"
+        case .mobilePasscodePct: return "Mobile passcode compliance"
+        case .mobileSupervisedPct: return "Supervised mobile devices"
+        case .mobileDataProtectionPct: return "Mobile data protection"
+        case .mobileStaleCount: return "Stale mobile devices"
+        case .mobileJailbrokenCount: return "Jailbroken mobile devices"
         }
     }
 
     /// True for percentage metrics (0–100). Used only for message formatting.
     var isPercentage: Bool {
         switch self {
-        case .staleCount, .actionItemsP0, .totalDevices: return false
+        case .staleCount, .actionItemsP0, .totalDevices, .mobileStaleCount,
+             .mobileJailbrokenCount: return false
         default: return true
         }
     }
@@ -77,6 +91,13 @@ enum AlertMetric: String, CaseIterable, Sendable {
         // A day with no Macs (a mobile-only fleet, or a collect that read none) measured no
         // count, so a `below` or `drops_more_than` rule on it never fires.
         case .totalDevices: return summary.totalDevices > 0 ? Double(summary.totalDevices) : nil
+        // An absent pair (no device reports the field) is no value, so it never fires.
+        case .mobileOSCurrentPct: return summary.mobile?.osCurrent?.pct
+        case .mobilePasscodePct: return summary.mobile?.passcode?.pct
+        case .mobileSupervisedPct: return summary.mobile?.supervised?.pct
+        case .mobileDataProtectionPct: return summary.mobile?.dataProtection?.pct
+        case .mobileStaleCount: return summary.mobile?.stale.map(Double.init)
+        case .mobileJailbrokenCount: return summary.mobile?.jailbroken.map(Double.init)
         }
     }
 }

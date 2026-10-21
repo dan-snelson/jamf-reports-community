@@ -472,7 +472,7 @@ struct ReportEngine: Sendable {
     /// - `existing.complianceIsProxy == true` AND `fresh.complianceIsProxy == false`
     ///   (real mSCP data is now available where before only the 4-control proxy was), OR
     /// - `existing` has no `mscpBands` (or empty) AND `fresh` has non-empty `mscpBands`, OR
-    /// - `existing.staleCount`/`mobileDeviceCount`/`crowdstrikePct` is nil (unmeasured) AND
+    /// - `existing.staleCount`/`mobileDeviceCount`/`mobile`/`crowdstrikePct` is nil AND
     ///   `fresh` measured it, or `existing.staleCount == 0` on a non-empty fleet AND `fresh`
     ///   measures a real value.
     ///
@@ -501,6 +501,7 @@ struct ReportEngine: Sendable {
         // later collect measures it. Upgrade only; a measured count is never
         // replaced by nil.
         if existing.mobileDeviceCount == nil, fresh.mobileDeviceCount != nil { return true }
+        if existing.mobile == nil, fresh.mobile != nil { return true }
         // The same for the EDR figure: the first collect after an upgrade past the build that
         // began recording it must not leave that day's summary, and the Overview's EDR score
         // card reading it, empty. Upgrade only; a recorded figure is never replaced by nil.
@@ -752,16 +753,22 @@ struct ReportEngine: Sendable {
         // 0) when the mobile-devices-list snapshot is absent or undecodable;
         // most tenants that only manage Macs will never populate this.
         var mobileDeviceCount: Int? = nil
+        var mobile: MobileSummary? = nil
         if let mobileData = cachedData(kind: "mobile-devices-list") {
             mobileDeviceCount = MobileFleetService.deviceCount(fromMobileDevicesListData: mobileData)
+            // Read past `cachedData` so the scan does not join the digest's sources.
+            let scan = try? Self.loadLatestSnapshotData(
+                kind: "update-device-failures", dataDir: dataDir,
+                maxCacheAgeHours: maxCacheAgeHours)
+            mobile = mobileFigures(mobileData, updateFailures: scan)
         }
 
         // A fleet with no Macs still gets a point when it manages mobile devices. A Mac
         // figure computed over 0 Macs would be 0 or NaN, never "unmeasured", so none is taken.
         guard totalDevices > 0 else {
-            guard let mobile = mobileDeviceCount, mobile > 0 else { return nil }
+            guard let count = mobileDeviceCount, count > 0 else { return nil }
             return Self.mobileOnlySummary(
-                date: date, mobileDeviceCount: mobile,
+                date: date, mobileDeviceCount: count, mobile: mobile,
                 collectionSources: liveKinds != nil && !sourceStatus.isEmpty ? sourceStatus : nil,
                 collectedByHost: Self.collectingHostLabel(dataDir: dataDir))
         }
@@ -976,21 +983,42 @@ struct ReportEngine: Sendable {
             collectedByHost: Self.collectingHostLabel(dataDir: dataDir),
             patchPctBasis: DailySummary.deviceWeightedPatchBasis,
             securityScoreBasis: score.basis,
-            securityAgentCoverage: agentCoveragePct.isEmpty ? nil : agentCoveragePct
+            securityAgentCoverage: agentCoveragePct.isEmpty ? nil : agentCoveragePct,
+            mobile: mobile
         )
+    }
+
+    /// The summary's `mobile` object from a `mobile-devices-list` snapshot, judged now against
+    /// the cached iOS feed, with update errors from a `--scan-failures` snapshot when one exists.
+    private func mobileFigures(_ data: Data, updateFailures: Data?) -> MobileSummary? {
+        let iOSRows = SOFAFeedService.load(dataDir: dataDir).rows
+            .filter { $0.platform == SOFAFeedService.platformLabels["ios"] }
+        return MobileSummary.fromMobileDevicesList(
+            data, latestByMajor: SOFAFeedService.latestByMajor(iOSRows),
+            staleDays: config.thresholds?.resolvedStaleDays ?? 30, now: Date(),
+            updateErrors: updateFailures.flatMap(Self.mobileUpdateErrorCount))
+    }
+
+    /// Rows of a `--scan-failures` snapshot's `error_devices` that are not computers; nil for a
+    /// summary-only snapshot, whose empty list says nothing.
+    static func mobileUpdateErrorCount(_ data: Data) -> Int? {
+        guard let scan = try? JSONDecoder().decode([UpdateFailuresReport].self, from: data).first
+        else { return nil }
+        return scan.errorDevices.filter { $0.deviceType.uppercased() != "COMPUTER" }.count
     }
 
     /// The day's summary for a fleet with no Macs and some mobile devices: `totalDevices` is
     /// 0 and every Mac figure is nil, which every reader treats as unmeasured (never 0%).
     static func mobileOnlySummary(
-        date: String, mobileDeviceCount: Int,
+        date: String, mobileDeviceCount: Int, mobile: MobileSummary? = nil,
         collectionSources: [String: String]?, collectedByHost: String?
     ) -> DailySummary {
         DailySummary(
             date: date, totalDevices: 0, fileVaultPct: nil, compliancePct: nil,
             staleCount: nil, osCurrentPct: nil, crowdstrikePct: nil, patchPct: nil,
             source: "jamf-cli", collectionSources: collectionSources,
-            mobileDeviceCount: mobileDeviceCount, collectedByHost: collectedByHost)
+            mobileDeviceCount: mobileDeviceCount, collectedByHost: collectedByHost,
+            mobile: mobile)
     }
 
     /// The score's sources from what the summary writer already read, plus the `computers`
@@ -2298,6 +2326,29 @@ struct ReportEngine: Sendable {
         return error
     }
 
+    /// Fetches the SOFA feeds when the plan lists `sofa`, records the outcome in the state
+    /// store and logs it. A failed fetch is a `[warn]`, never `[partial]`: the cached feed
+    /// stays in use. Shared by the Jamf Pro and Jamf School collects.
+    static func fetchSOFAIfPlanned(
+        afterMatrix: [String], profile: String, dataDir: URL, refreshSOFA: SOFARefresh,
+        stateStore: StateFileStore?, onLine: @Sendable (CLIBridge.LogLine) -> Void
+    ) async -> Bool {
+        guard afterMatrix.contains(Self.sofaKind) else { return false }
+        onLine(.init(timestamp: Date(), level: .info,
+                     text: "[info] collecting sofa for \(profile)"))
+        let (sofaSnapshot, sofaWarnings) = await refreshSOFA(dataDir)
+        for w in sofaWarnings {
+            onLine(.init(timestamp: Date(), level: .warn, text: "[warn] \(w)"))
+        }
+        let succeeded = !sofaSnapshot.rows.isEmpty
+        stateStore?.record(succeeded ? .landed : .failed(exitCode: nil), report: "sofa", at: Date())
+        onLine(.init(timestamp: Date(), level: succeeded ? .ok : .warn,
+                     text: succeeded
+                        ? "[ok] sofa: feeds refreshed"
+                        : "[warn] sofa: no feed data — kept the previous cache"))
+        return succeeded
+    }
+
     /// The post-collect work that turns saved snapshots into something the
     /// dashboards read: the SOFA feeds, the merged patch release dates, and
     /// the day's summary. Reached only once the verdicts above have passed.
@@ -2325,23 +2376,9 @@ struct ReportEngine: Sendable {
         // them as "never landed" and reports them far behind schedule after
         // every successful collect, and self-remediation re-collects the whole
         // refresh tier hourly for nothing.
-        var sofaRefreshSucceeded = false
-        if afterMatrix.contains(Self.sofaKind) {
-            onLine(.init(timestamp: Date(), level: .info,
-                         text: "[info] collecting sofa for \(profile)"))
-            let (sofaSnapshot, sofaWarnings) = await refreshSOFA(dataDir)
-            for w in sofaWarnings {
-                onLine(.init(timestamp: Date(), level: .warn, text: "[warn] \(w)"))
-            }
-            sofaRefreshSucceeded = !sofaSnapshot.rows.isEmpty
-            stateStore?.record(
-                sofaRefreshSucceeded ? .landed : .failed(exitCode: nil), report: "sofa", at: Date()
-            )
-            onLine(.init(timestamp: Date(), level: sofaRefreshSucceeded ? .ok : .warn,
-                         text: sofaRefreshSucceeded
-                            ? "[ok] sofa: feeds refreshed"
-                            : "[warn] sofa: no feed data — kept the previous cache"))
-        }
+        let sofaRefreshSucceeded = await fetchSOFAIfPlanned(
+            afterMatrix: afterMatrix, profile: profile, dataDir: dataDir,
+            refreshSOFA: refreshSOFA, stateStore: stateStore, onLine: onLine)
 
         // Patch release dates: collect per-title definitions after patch-status.
         // Gated on the "patch-release-dates" kind being in the requested tiers
@@ -3387,6 +3424,7 @@ struct ReportEngine: Sendable {
         tiers: Set<CollectionTier> = Set(CollectionTier.allCases),
         force: Bool = false,
         locateJamfCLI: @Sendable () -> URL? = { ExecutableLocator.locate("jamf-cli") },
+        refreshSOFA: SOFARefresh = defaultSOFARefresh,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
         guard let bin = locateJamfCLI() else {
@@ -3412,8 +3450,20 @@ struct ReportEngine: Sendable {
             platformFieldsMissing: resolved.map { !$0.hasTenantID } ?? false) {
             stateStore?.lastRun(report: $0)
         }
-        for line in collectPlanLines(profile: profile, fixedPlan: plan) {
+        let collectSkip = Self.collectSkipKinds(schoolCollectSkip(profile: profile))
+        let afterMatrix = Self.sourcesAfterMatrix(tiers: tiers, collectSkip: collectSkip)
+            .filter { $0 == sofaKind }
+        let afterMatrixSkipped = Self.skippedAfterMatrix(tiers: tiers, collectSkip: collectSkip)
+            .filter { $0 == sofaKind }
+        for line in collectPlanLines(
+            profile: profile, fixedPlan: plan, afterMatrix: afterMatrix,
+            afterMatrixSkipped: afterMatrixSkipped) {
             onLine(.init(timestamp: Date(), level: .info, text: line))
+        }
+        for kind in afterMatrixSkipped {
+            onLine(.init(
+                timestamp: Date(), level: .info,
+                text: "[skip] \(kind): \(CollectSkipReason.collectSkip.skipDetail ?? "")"))
         }
         // Same gate as the Pro loop.
         let quiet = JamfCLIInstaller.installedVersion(at: bin).map {
@@ -3492,10 +3542,23 @@ struct ReportEngine: Sendable {
             onLine(.init(timestamp: Date(), level: .fail, text: msg))
             throw ReportEngineError.collectDead(profile: profile, failedCount: failedCount)
         }
+        // Before the summary, so the same run's OS currency can read the feed. Past the outage
+        // guard, as in the Pro path: a dead tenant fetches nothing.
+        _ = await fetchSOFAIfPlanned(
+            afterMatrix: afterMatrix, profile: profile, dataDir: dataDir,
+            refreshSOFA: refreshSOFA, stateStore: stateStore, onLine: onLine)
         writeSchoolSummaryAfterCollect(
             profile: profile, dataDir: dataDir, workspacePaths: workspacePaths,
             landedKinds: schoolSaved, onLine: onLine)
         reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
+    }
+
+    /// `jamf_cli.collect_skip` as typed; empty when config.yaml is absent or will not load
+    /// (`schoolStaleDays` already warns about the latter).
+    private static func schoolCollectSkip(profile: String) -> [String] {
+        ProfileService.workspaceURL(for: profile)
+            .flatMap { try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml")) }?
+            .jamfCli?.collectSkip ?? []
     }
 
     /// `thresholds.stale_device_days` for a School summary; 30 when config.yaml will not load,
@@ -3654,6 +3717,7 @@ struct ReportEngine: Sendable {
         config: ReportConfig,
         dataDir: URL,
         outputURL: URL,
+        profile: String? = nil,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async throws -> [SheetFailure] {
         // PR-10 / threat-model T-11: strict-mode pre-flight applies to School
@@ -3663,7 +3727,11 @@ struct ReportEngine: Sendable {
         try preflightStrictManifestCheck(config: config, dataDir: dataDir)
         let accent = (config.branding ?? BrandingConfig()).sanitizedAccentColor
         let workbook = Workbook(accentColor: accent)
-        let core = SchoolDashboard(config: config, dataDir: dataDir, workbook: workbook)
+        // The profile's daily summaries feed the Trends tab; none leaves it out.
+        let summaries = profile.flatMap { try? WorkspacePaths.summariesDir(for: $0) }
+            .map(SummaryJSONParser.parseDirectory) ?? []
+        let core = SchoolDashboard(
+            config: config, dataDir: dataDir, workbook: workbook, summaries: summaries)
         let sheets = sheetSettings(config, tabs: core.sheetPlan.map(\.name), onLine: onLine)
         let (_, schoolFailures) = core.writeAll(sheets: sheets)
 

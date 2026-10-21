@@ -553,13 +553,14 @@ final class SchoolBlueprintsSheetTests: XCTestCase {
         XCTAssertThrowsError(try dash.writeSchoolBlueprints())
     }
 
-    func test_sheetNames_areTheOldListPlusBlueprints() {
+    func test_sheetNames_areTheOldListPlusBlueprintsAndTrends() {
         let old = ["School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles",
                    "Locations", "DEP Devices", "iBeacons", "Device Inventory", "OS Versions",
                    "Device Status", "Stale Devices"]
         var expected = old
         expected.insert("Blueprints", at: old.firstIndex(of: "Device Inventory") ?? 0)
-        XCTAssertEqual(SchoolDashboard.sheetNames, expected + CoreDashboard.protectSheetNames)
+        XCTAssertEqual(SchoolDashboard.sheetNames,
+                       expected + ["Trends"] + CoreDashboard.protectSheetNames)
     }
 }
 
@@ -601,5 +602,83 @@ final class SchoolDashboardProtectSheetTests: XCTestCase {
             .writeAll()
         XCTAssertNil(off.sheet(named: "Protect Alerts"))
         XCTAssertEqual(failures.map(\.sheet), [])
+    }
+
+    // MARK: - Trends
+
+    private func trendDay(
+        _ date: String, macs: Int, stale: Int?, osCurrent: Double?, mobile: MobileSummary?
+    ) -> DailySummary {
+        DailySummary(
+            date: date, totalDevices: macs, fileVaultPct: nil, compliancePct: nil,
+            staleCount: stale, osCurrentPct: osCurrent, crowdstrikePct: nil, patchPct: nil,
+            source: "jamf-cli", mobileDeviceCount: mobile.map { $0.managed + $0.unmanaged },
+            mobile: mobile)
+    }
+
+    /// Row cells of the Trends tab below its header, by row, as written.
+    private func trendRows(_ workbook: Workbook) throws -> [[CellValue]] {
+        let cells = try XCTUnwrap(workbook.sheet(named: "Trends")).dedupedCells
+        let header = try XCTUnwrap(cells.first { cell in
+            if case .string("Date") = cell.value { return true } else { return false }
+        }).row
+        return Dictionary(grouping: cells.filter { $0.row > header }, by: \.row)
+            .sorted { $0.key < $1.key }
+            .map { $0.value.sorted { $0.col < $1.col }.map(\.value) }
+    }
+
+    func testTrendsTabHasOneRowPerSummaryNewestFirstWithEachTypeApart() throws {
+        let workbook = Workbook()
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
+            workbook: workbook, summaries: [
+                trendDay("2026-10-18", macs: 0, stale: nil, osCurrent: nil, mobile: MobileSummary(
+                    managed: 4, unmanaged: 0, supervised: .init(met: 3, of: 4), stale: 1)),
+                trendDay("2026-10-19", macs: 2, stale: 1, osCurrent: 50, mobile: nil),
+            ])
+        try dash.writeSchoolTrends()
+
+        let rows = try trendRows(workbook)
+        XCTAssertEqual(rows.count, 2)
+        guard case .string("2026-10-19") = rows[0][0] else { return XCTFail("\(rows[0])") }
+        func describe(_ row: [CellValue]) -> [String] {
+            row.map {
+                switch $0 {
+                case .blank: return "-"
+                case .int(let n): return "\(n)"
+                case .double(let d): return "\(d)"
+                case .string(let t): return t
+                case .bool(let b): return "\(b)"
+                }
+            }
+        }
+        XCTAssertEqual(describe(rows[0]),
+                       ["2026-10-19", "2", "1", "0.5", "-", "-", "-", "-", "-", "-", "-"],
+                       "a Mac-only day leaves every mobile column blank")
+        XCTAssertEqual(describe(rows[1]),
+                       ["2026-10-18", "-", "-", "-", "4", "4", "1", "3", "4", "0.75", "-"],
+                       "a mobile-only day leaves the Mac columns blank, never 0")
+        XCTAssertEqual(rows[0].count, SchoolDashboard.trendColumns.count)
+    }
+
+    func testTrendsTabIsSkippedWithNoSummaries() throws {
+        let workbook = Workbook()
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
+            workbook: workbook)
+        XCTAssertThrowsError(try dash.writeSchoolTrends()) { XCTAssertTrue($0 is SheetSkippable) }
+        XCTAssertNil(workbook.sheet(named: "Trends"))
+    }
+
+    func testTrendsTabComesAfterTheExistingSchoolTabsAndFollowsSheetsSkip() throws {
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
+            workbook: Workbook())
+        let names = dash.sheetPlan.map(\.name)
+        XCTAssertEqual(names, SchoolDashboard.sheetNames)
+        XCTAssertEqual(names.firstIndex(of: "Trends"), names.firstIndex(of: "Stale Devices")! + 1)
+        let skipped = SheetsConfig(only: nil, skip: ["Trends"], order: nil)
+            .applyTo(dash.sheetPlan).map(\.name)
+        XCTAssertFalse(skipped.contains("Trends"))
     }
 }

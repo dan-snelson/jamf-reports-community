@@ -75,7 +75,9 @@ struct TrendsView: View {
     /// A metric's name as the pills show it: the configured compliance
     /// benchmark and EDR agent in place of the generic names.
     private func metricLabel(_ m: TrendSeries.Metric) -> String {
-        m.displayLabel(
+        // A School history counts stale Macs and stale mobile devices side by side.
+        if m == .stale, workspaceStore.isSchoolWorkspace { return "Stale Macs" }
+        return m.displayLabel(
             benchmarkLabel: workspaceStore.complianceBenchmarkLabel,
             edrAgentName: workspaceStore.edrAgentName
         )
@@ -348,7 +350,7 @@ struct TrendsView: View {
             TrendStore.computeSnapshot(profile: profile)
         }.value
         trendStore.apply(snapshot, profile: profile, range: r, generation: generation)
-        await trendStore.backfillAgentCoverage(profile: profile)
+        await trendStore.backfillHistory(profile: profile)
     }
 
     /// First-load placeholder: shown only while the initial scan runs with no
@@ -447,6 +449,9 @@ struct TrendsView: View {
     /// computer and mobile series.
     private var availableMetrics: [TrendSeries.Metric] {
         workspaceStore.availableMetrics.filter { metric in
+            // The demo history has no mobile series; a live one offers by device type.
+            if metric.isMobile { return !workspaceStore.demoMode && trendStore.offers(metric) }
+            guard workspaceStore.demoMode || trendStore.offers(metric) else { return false }
             switch metric {
             case .mscpBandTrend:
                 return workspaceStore.demoMode || trendStore.hasMSCPBandHistory
@@ -454,9 +459,9 @@ struct TrendsView: View {
                 return !points(for: .securityScore).isEmpty
             case .managedDevices:
                 return true
-            case .stale:
-                // A School fleet with no Macs records no stale count.
-                return !workspaceStore.isSchoolWorkspace || !points(for: .stale).isEmpty
+            case .stale, .osCurrent:
+                // School records these only for Macs, and OS currency only with a feed.
+                return !workspaceStore.isSchoolWorkspace || !points(for: metric).isEmpty
             default:
                 return true
             }
@@ -1587,7 +1592,7 @@ enum TrendDemoSeries {
         let computers = points(dates: dates, values: DemoData.totalDevicesTrend, range: range)
         let mobile = points(dates: dates, values: DemoData.mobileDevicesTrend, range: range)
         return [
-            ChartSeries(label: "Computers", color: ChartPalette.seriesColors[0],
+            ChartSeries(label: "Macs", color: ChartPalette.seriesColors[0],
                         points: computers.map { (date: $0.date, value: $0.value) }),
             ChartSeries(label: "Mobile devices", color: ChartPalette.seriesColors[4],
                         points: mobile.map { (date: $0.date, value: $0.value) }),

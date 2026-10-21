@@ -267,8 +267,12 @@ extension ReportEngine {
     }
 
     /// The `[plan]` lines for a fixed-list plan (Jamf School): what runs, then what is skipped
-    /// under its reason.
-    static func collectPlanLines(profile: String, fixedPlan plan: [PlannedKind]) -> [String] {
+    /// under its reason. `afterMatrix` and `afterMatrixSkipped` are the sources fetched after
+    /// the commands (`sofa`), listed like the Pro plan lists them.
+    static func collectPlanLines(
+        profile: String, fixedPlan plan: [PlannedKind], afterMatrix: [String] = [],
+        afterMatrixSkipped: [String] = []
+    ) -> [String] {
         var groups: [(label: String, kinds: [String])] = []
         for item in plan {
             guard let skip = item.skip else { continue }
@@ -278,8 +282,12 @@ extension ReportEngine {
                 groups.append((skip.planLabel, [item.kind]))
             }
         }
+        if !afterMatrixSkipped.isEmpty {
+            groups.append((CollectSkipReason.collectSkip.planLabel, afterMatrixSkipped))
+        }
         return collectPlanLines(
-            profile: profile, running: plan.filter { $0.skip == nil }.map(\.kind), skipped: groups)
+            profile: profile, running: plan.filter { $0.skip == nil }.map(\.kind) + afterMatrix,
+            skipped: groups)
     }
 
     /// The `[plan]` lines for a collect with a fixed list (Jamf School, Protect): `running`

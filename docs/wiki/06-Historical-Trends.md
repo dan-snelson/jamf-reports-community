@@ -30,6 +30,14 @@ end, and the change over a quarter or any other window — generate a
 from the Generated screen instead. It reads the same `summary.json` snapshots described
 below, plus your collected extension attributes.
 
+## Mobile devices
+
+When the workspace has mobile devices, Trends also offers their series: managed, supervised,
+stale (last inventory on Jamf Pro, last check-in on Jamf School) and on the current OS, plus
+passcode compliant, data protection and jailbreaks where Jamf Pro reports them. Macs and mobile
+devices are never added together into one figure. A figure the product does not report is left
+out, not drawn as 0. Each share is counted over the devices that report the field.
+
 ## Compliance band history
 
 When `compliance.baselines` (see [Configuration & Templates](https://github.com/tonyyo11/jamf-reports-community/wiki/04-Configuration-and-Templates))

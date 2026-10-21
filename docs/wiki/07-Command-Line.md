@@ -34,18 +34,17 @@ Every command operates on a workspace **profile** (the same profiles the app
 manages under `~/Jamf-Reports/<profile>/`), except `scaffold`, which writes a
 standalone `config.yaml` (its `--csv` is optional — see below).
 
-If the workspace has been moved off its default location (Settings → Workspace
-location), point the CLI at it with `JRC_WORKSPACES_ROOT`:
+To point one command at a different workspaces folder than the app's Settings →
+Workspace location, use `JRC_WORKSPACES_ROOT`:
 
 ```sh
 JRC_WORKSPACES_ROOT="$HOME/Library/CloudStorage/OneDrive-Contoso/Team/Jamf Reports" \
   jamf-reports check --profile prod
 ```
 
-Set it in the script or launchd job that calls the CLI. Scheduled runs the app
-creates carry it automatically; a cron job or script you wrote yourself does not,
-and without it the CLI reads the default `~/Jamf-Reports` and reports an empty
-workspace rather than failing.
+The CLI, the app and its scheduled runs all read the Settings → Workspace location
+setting, so the variable is needed only to point one command at a different folder (see
+[Managed Preferences](https://github.com/tonyyo11/jamf-reports-community/wiki/14-Managed-Preferences)).
 
 `--profile` takes the jamf-cli profile name exactly as jamf-cli spells it. Quote a
 name with spaces or shell characters (`--profile 'Acme Prod'`), and join a name that

@@ -24,6 +24,22 @@ final class TrendsViewYDomainTests: XCTestCase {
         XCTAssertEqual(domain.upperBound, 48, accuracy: 0.0001)
     }
 
+    func testSmallMobileFleetFillsItsAxis() {
+        let domain = TrendsView.chartYDomain(metric: .mobileManaged, values: [13])
+        XCTAssertEqual(domain.lowerBound, 0)
+        XCTAssertEqual(domain.upperBound, 16, accuracy: 0.0001)
+    }
+
+    func testEveryDeviceCountMetricFollowsTheData() {
+        let counts = TrendSeries.Metric.allCases + TrendSeries.Metric.mobileMetrics
+        XCTAssertEqual(
+            Set(counts.filter(\.isDeviceCount)),
+            [.managedDevices, .activeDevices, .stale, .mobileManaged, .mobileStale,
+             .mobileJailbroken])
+        XCTAssertEqual(TrendsView.chartYDomain(metric: .stale, values: [3]).upperBound, 10)
+        XCTAssertEqual(TrendsView.chartYDomain(metric: .mobileJailbroken, values: [0]).upperBound, 10)
+    }
+
     func testDeviceCountAxisTopNeverDropsBelowTen() {
         XCTAssertEqual(TrendsView.deviceCountAxisTop(0), 10, accuracy: 0.0001)
         XCTAssertEqual(TrendsView.deviceCountAxisTop(3), 10, accuracy: 0.0001)

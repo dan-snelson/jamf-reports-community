@@ -68,14 +68,14 @@ final class TrendInsightInputTests: XCTestCase {
             "- \(stale): 11 (down 9 vs prior, better)",
             "- Patch Compliance: 90.0% (up 5.0 pp vs prior, better)",
             "- Security Score (Weighted): 72.5 (up 2.5 vs prior, better)",
-            "- Managed Devices: 110",
+            "- Managed Computers: 110",
             "Range: 2026-09-01 to 2026-09-15, 3 snapshots. Each value is the last snapshot in "
                 + "the range and its prior is the first.",
             "Active Devices: 80 at the start, 99 at the end.",
             "\(stale): 20 at the start, 11 at the end.",
             "Security Score (Weighted): compared from 2026-09-08 to 2026-09-15, its first and "
                 + "last snapshots in the range.",
-            "Managed Devices: 100 at the start, 110 at the end.",
+            "Managed Computers: 100 at the start, 110 at the end.",
         ])
     }
 

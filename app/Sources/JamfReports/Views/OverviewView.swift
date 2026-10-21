@@ -1822,7 +1822,7 @@ struct OverviewView: View {
         case .mscpBandTrend:
             "Per-baseline mSCP compliance band trends over time. Open Compliance Posture for current distribution."
         case .managedDevices:
-            "Historical computers-vs-mobile split. Open Computers or Mobile Devices to inspect current records."
+            "Historical Mac count. Open Computers to inspect current records."
         case .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
              .mobileDataProtection, .mobileStale, .mobileJailbroken:
             "Open Mobile Devices to inspect current records."
@@ -1845,7 +1845,7 @@ struct OverviewView: View {
         case .edrAgent, .agent:
             return [.devices, .config]
         case .managedDevices:
-            return [.devices, .mobileFleet]
+            return [.devices]
         case .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
              .mobileDataProtection, .mobileStale, .mobileJailbroken:
             return [.mobileFleet]

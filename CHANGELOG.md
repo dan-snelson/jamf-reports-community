@@ -150,6 +150,10 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- Trends' **Managed Devices** is now **Managed Computers**: its figure and chart count Macs
+  only, where before the figure counted Macs and the chart also drew mobile devices. Mobile
+  devices have their own **Managed mobile devices** series. Device-count charts now scale to
+  the data, so a small fleet no longer sits flat at the bottom of a 0–1,000 axis. (#284)
 - The `jamf-reports` command run through its `/usr/local/bin` link now reads the app's
   settings and configuration profiles, including the workspace location. (#284)
 - Every setting a configuration profile manages is now locked in the app and says so, and

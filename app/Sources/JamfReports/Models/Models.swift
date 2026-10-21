@@ -1052,11 +1052,9 @@ struct TrendSeries: Identifiable, Sendable {
         /// of device counts by compliance band (Pass/Low/Medium/High) over time.
         /// Only appears in TrendsView metric picker when mscpBands history exists.
         case mscpBandTrend
-        /// Historical computers-vs-mobile device count, split into two series
-        /// in the chart (`TrendStore.managedDeviceSeries()`) while this single
-        /// case drives the pill/hero headline number via `value(for:in:)`
-        /// (computer count — Jamf Pro itself can't answer "how many managed
-        /// Macs did we have on <past date>", but every archived summary can).
+        /// Historical Mac count (`totalDevices`; labelled "Managed Computers"). Jamf Pro itself
+        /// can't answer "how many managed Macs did we have on <past date>", but every archived
+        /// summary can. Mobile devices are `.mobileManaged`. Raw value kept for stored selections.
         case managedDevices
         /// Share of Macs with each control on, read from the summary's own shares.
         /// Appended last so `allCases` keeps every older position.
@@ -1164,7 +1162,7 @@ struct TrendSeries: Identifiable, Sendable {
             case .patch:         return "Patch Compliance"
             case .securityScore: return "Security Score (Weighted)"
             case .mscpBandTrend: return "mSCP Compliance Bands"
-            case .managedDevices: return "Managed Devices"
+            case .managedDevices: return "Managed Computers"
             case .sip:           return "System Integrity Protection"
             case .firewall:      return "Firewall Enabled"
             case .gatekeeper:    return "Gatekeeper Enabled"
@@ -1206,6 +1204,15 @@ struct TrendSeries: Identifiable, Sendable {
             case .stability, .compliance, .fileVault, .osCurrent, .edrAgent, .agent, .patch,
                  .securityScore, .sip, .firewall, .gatekeeper, .mobileOSCurrent, .mobilePasscode,
                  .mobileSupervised, .mobileDataProtection: .higherIsBetter
+            }
+        }
+        /// A count of devices, not a share or score: the Trends axis fits its top to the data
+        /// instead of a fixed frame, so a small fleet is not drawn flat at the bottom.
+        var isDeviceCount: Bool {
+            switch self {
+            case .managedDevices, .activeDevices, .stale, .mobileManaged, .mobileStale,
+                 .mobileJailbroken: true
+            default: false
             }
         }
         var minY: Double {

@@ -80,7 +80,7 @@ final class TrendStoreMobileMetricsTests: XCTestCase {
         for mac in [TrendSeries.Metric.fileVault, .stale, .osCurrent, .patch] {
             XCTAssertFalse(store.offers(mac), mac.rawValue)
         }
-        XCTAssertTrue(store.offers(.managedDevices))
+        XCTAssertFalse(store.offers(.managedDevices), "no Macs, so no Managed Computers figure")
         XCTAssertEqual(TrendSeries.Metric.mobileMetrics.filter(store.offers),
                        [.mobileManaged, .mobileSupervised, .mobileStale])
     }

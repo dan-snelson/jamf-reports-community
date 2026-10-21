@@ -133,12 +133,8 @@ enum DemoData {
 
     /// iPads and iPhones in the demo fleet — Mobile Devices' demo inventory has 25.
     static let mobileDeviceCount = 25
-    /// The Managed Devices chart's mobile line, ending on `mobileDeviceCount`.
-    static let mobileDevicesTrend = trend(
-        start: 18, end: 25, jitter: 1, pinnedLast: Double(mobileDeviceCount))
 
     static let trends: [TrendSeries.Metric: [Double]] = [
-        // Headline value is the computer count, as it is live.
         .managedDevices:  totalDevicesTrend,
         .activeDevices:   activeDevicesTrend,
         .stability:       stabilityTrend,

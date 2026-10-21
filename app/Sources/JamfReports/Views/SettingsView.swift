@@ -1061,7 +1061,7 @@ struct SettingsView: View {
                 Toggle("Enable AI insights", isOn: Binding(
                     get: { aiConfig.isEnabled },
                     set: { aiConfig.enabled = $0; saveAIConfig() }))
-                    .disabled(workspace.demoMode)
+                    .disabled(workspace.demoMode || AIPolicy.locksSettings())
                     .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
 
                 if aiConfig.isEnabled {
@@ -1079,9 +1079,16 @@ struct SettingsView: View {
                     reportSummaryToggle
                 }
 
-                Text(ModelAvailability.current(for: aiConfig).message)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                if let note = AIPolicy.settingsNote() {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                }
+                if !AIPolicy.locksSettings() {
+                    Text(ModelAvailability.current(for: aiConfig).message)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                }
 
                 aiSaveStatus
             }
@@ -1103,7 +1110,7 @@ struct SettingsView: View {
             Toggle("Include the AI summary in reports", isOn: Binding(
                 get: { aiConfig.includeInReports ?? false },
                 set: { aiConfig.includeInReports = $0; saveAIConfig() }))
-                .disabled(workspace.demoMode)
+                .disabled(workspace.demoMode || AIPolicy.locksSettings())
             Text("Adds a model-written paragraph to the HTML and PDF reports you generate "
                 + "here. It can misstate a figure; scheduled reports never include it.")
                 .font(.caption)

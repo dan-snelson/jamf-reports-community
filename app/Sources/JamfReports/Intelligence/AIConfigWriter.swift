@@ -9,10 +9,12 @@ import Foundation
 enum AIConfigWriter {
     enum WriteError: Error, LocalizedError {
         case invalidProfile(String)
+        case turnedOffByPolicy
 
         var errorDescription: String? {
             switch self {
             case .invalidProfile(let profile): "Invalid profile name: \(profile)"
+            case .turnedOffByPolicy: "AI is turned off by the AIPolicy preference"
             }
         }
     }
@@ -33,9 +35,12 @@ enum AIConfigWriter {
 
     @discardableResult
     static func save(
-        _ config: AIConfig, profile: String
+        _ config: AIConfig, profile: String, defaults: UserDefaults = .standard
     ) throws -> (stamp: ConfigFileStamp, report: ConfigSaveReport) {
         guard ProfileService.isValid(profile) else { throw WriteError.invalidProfile(profile) }
+        if config.isEnabled, AIPolicy.current(defaults: defaults) == .off {
+            throw WriteError.turnedOffByPolicy
+        }
         return try ConfigService.saveBlock(key: "ai", profile: profile) {
             apply(config, to: &$0)
         }

@@ -466,6 +466,34 @@ final class BoundedReadsTests: XCTestCase {
         XCTAssertEqual(candidates?.isEmpty, true)
     }
 
+    private func logged(_ text: String) -> Bool {
+        LogBuffer.shared.snapshot(minLevel: .debug, limit: 2000).contains { $0.message == text }
+    }
+
+    func testAFIFOAtTheSOFACacheReturnsQuicklyWithAWarning() throws {
+        let dataDir = root.appendingPathComponent("sofa-data", isDirectory: true)
+        try fifo(at: dataDir.appendingPathComponent("sofa/macos_data_feed.json"))
+        let snapshot = try XCTUnwrap(within { SOFAFeedService.load(dataDir: dataDir) })
+        XCTAssertEqual(snapshot.warnings, ["Could not decode SOFA cache for macos"])
+        XCTAssertTrue(logged("macos_data_feed.json not read: not a regular file"))
+    }
+
+    func testAMobileListFIFOOrOversizeFileIsNotReadAndIsLogged() throws {
+        let pipe = root.appendingPathComponent("mobile/list.json")
+        try fifo(at: pipe)
+        let snapshot = within {
+            MobileFleetService.load(listURL: pipe, inventoryURL: nil, profilesURL: nil)
+        }
+        XCTAssertNotNil(snapshot)
+        XCTAssertTrue(logged("list.json not read: not a regular file"))
+
+        let big = root.appendingPathComponent("mobile/big.json")
+        try Data("[]".utf8).write(to: big)
+        XCTAssertNil(BoundedFile.readLogged(big, limit: 1, category: .collect))
+        XCTAssertTrue(logged("big.json not read: over 0 MB"))
+        XCTAssertEqual(BoundedFile.readLogged(big, limit: 2, category: .collect), Data("[]".utf8))
+    }
+
     // MARK: - Daily summaries, run-in-progress probe, backup and snapshot manifests
 
     func testSummaryParseRefusesAFIFOALinkAndAnOversizeFile() throws {

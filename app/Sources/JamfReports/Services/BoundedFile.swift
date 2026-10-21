@@ -132,6 +132,25 @@ enum BoundedFile {
     /// Largest cached `pro audit` or group-tools snapshot read for the Audit screen.
     static let snapshotLimit = 64 * 1024 * 1024
 
+    /// Largest inventory snapshot (`mobile-devices-list`): a large district's list passes 64 MB.
+    static let inventoryLimit = 256 * 1024 * 1024
+
+    /// `read` following links, or nil. A file over `limit` or not a regular file is logged by
+    /// name, so a snapshot left unread is never silent; other failures are the caller's to log.
+    static func readLogged(_ url: URL, limit: Int, category: AppLogger.Category) -> Data? {
+        do {
+            return try read(url, limit: limit)
+        } catch let failure as Failure where failure == .tooLarge || failure == .notRegular {
+            let name = ConfigSchema.displayText(url.lastPathComponent)
+            let detail = failure == .tooLarge
+                ? "over \(limit / 1_048_576) MB" : failure.localizedDescription
+            AppLogger.event(category, .error, "\(name) not read: \(detail)")
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
     /// Largest cached single-device record.
     static let deviceDetailLimit = 16 * 1024 * 1024
 

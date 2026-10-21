@@ -513,7 +513,9 @@ struct MobileFleetService: Sendable {
 
     /// The inventory rows in `url`, or nil when the file cannot be read or decoded.
     static func inventoryRows(at url: URL) -> [MobileDeviceInventoryItem]? {
-        guard let data = try? Data(contentsOf: url) else {
+        guard let data = BoundedFile.readLogged(
+            url, limit: BoundedFile.inventoryLimit, category: .collect
+        ) else {
             AppLogger.collect.info(
                 "MobileFleetService: could not read \(url.lastPathComponent, privacy: .public)"
             )
@@ -633,7 +635,9 @@ struct MobileFleetService: Sendable {
         from url: URL?, success: inout Bool
     ) -> [MobileDeviceListRow] {
         guard let url else { return [] }
-        guard let data = try? Data(contentsOf: url) else {
+        guard let data = BoundedFile.readLogged(
+            url, limit: BoundedFile.inventoryLimit, category: .collect
+        ) else {
             AppLogger.collect.info(
                 "MobileFleetService: could not read mobile-devices-list file \(url.lastPathComponent, privacy: .public)"
             )
@@ -653,7 +657,9 @@ struct MobileFleetService: Sendable {
         from url: URL?, success: inout Bool
     ) -> [MobileConfigProfileRow] {
         guard let url else { return [] }
-        guard let data = try? Data(contentsOf: url) else {
+        guard let data = BoundedFile.readLogged(
+            url, limit: BoundedFile.snapshotLimit, category: .collect
+        ) else {
             AppLogger.collect.info(
                 "MobileFleetService: could not read classic-ios-profiles file \(url.lastPathComponent, privacy: .public)"
             )

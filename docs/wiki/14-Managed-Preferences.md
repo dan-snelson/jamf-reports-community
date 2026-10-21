@@ -13,15 +13,16 @@ in the repository, with example files ready to upload to Jamf Pro.
 
 | Key | Type | Default | Purpose |
 |---|---|---|---|
-| `checkForAppUpdates` | Boolean | `true` | Daily check for a newer stable release. Settings shows it as managed. |
+| `AIPolicy` | String | absent | `off` turns every AI feature off; `onDevice` allows only on-device Apple models. Any other value reads as `off`. |
+| `checkForAppUpdates` | Boolean | `true` | Daily check for a newer stable release. |
 | `autoUpdateJamfCLI` | Boolean | `false` | Install jamf-cli updates at launch. |
 | `skipExpensiveCollections` | Boolean | `false` | Leave per-device commands out of collects the app runs while open. |
 | `workspacesRootPath` | String | `~/Jamf-Reports` | The folder that holds every workspace. Absolute path only. |
 | `defaultTrendRange` | String | `W4` | The range Overview and Trends open on. |
 | `hiddenTabs` | String | empty | Sidebar tabs to hide. |
 
-A managed value always takes effect. Only `checkForAppUpdates` is shown as managed in
-Settings; for the other keys the control stays enabled, and a change made there is not used.
+A managed value always takes effect. Its control in the app is locked and says "Set by your
+organization's configuration profile", and the app never writes that key itself.
 
 ## In Jamf Pro
 

@@ -13,31 +13,27 @@ for that file. The keys here are per user, per Mac.
 com.tonyyo.jamfreports
 ```
 
-This is the app's bundle identifier. The app and its bundled background item (the
-`--tick` run every five minutes) read this domain.
-
-The included `jamf-reports` command is a symlink to the app's executable. Run through that
-symlink, macOS does not see the app bundle, so the command reads a domain named
-`jamf-reports` instead and does not see a profile for `com.tonyyo.jamfreports`. Run the
-command by its full path (`/Applications/JamfReports.app/Contents/MacOS/JamfReports`) when
-it must read the app's preferences, or set the environment variable below.
+This is the app's bundle identifier. The app, its bundled background item (the `--tick` run
+every five minutes) and the included `jamf-reports` command all read this domain. The command
+is a link to the app's executable; started through the link, it runs the executable inside
+the app, so it sees the same preferences and profiles.
 
 ## Keys you can manage
 
 | Key | Type | Default | What it does | Shown as managed in the app |
 |---|---|---|---|---|
-| `checkForAppUpdates` | Boolean | `true` | Once a day while the app is open, one request to `api.github.com` for the latest stable release, and a notice when it is newer. Nothing is downloaded or installed. Read at launch and every 30 minutes, so a profile that arrives while the app is open applies within half an hour. | Yes. Settings › App updates says "Set by your organization's configuration profile" and the switch is locked. |
-| `autoUpdateJamfCLI` | Boolean | `false` | At launch, check for a jamf-cli update and install it. Read once per launch. | No |
-| `skipExpensiveCollections` | Boolean | `false` | Leave the four per-device report commands (EA results, patch failures, update failures, device compliance) and the per-device scan out of the collects the app runs while open, and stop the health strip expecting them. Scheduled runs, and the app's catch-up and repair collects, do not read it. Read at each collect. | No |
-| `workspacesRootPath` | String | absent (`~/Jamf-Reports`) | The folder that holds every workspace. An absolute path: `~` and `$HOME` are not expanded. Read on every use, by the app and the background item. | No |
-| `defaultTrendRange` | String | `W4` | The range Overview and Trends open on: `W4`, `W12`, `W26`, `W52` or `All`. | No |
-| `hiddenTabs` | String | empty | Sidebar tabs to hide, as a comma-separated list. Overview, Computers, Data Sources and Settings are never hidden. To get the value, hide the tabs in Settings › Sidebar Visibility on a test Mac and run `defaults read com.tonyyo.jamfreports hiddenTabs`. | No |
+| `checkForAppUpdates` | Boolean | `true` | Once a day while the app is open, one request to `api.github.com` for the latest stable release, and a notice when it is newer. Nothing is downloaded or installed. Read at launch and every 30 minutes, so a profile that arrives while the app is open applies within half an hour. | Yes |
+| `AIPolicy` | String | absent | `off` turns every AI feature off (insight cards, the run-failure explainer, the report summary), whatever each workspace's `config.yaml` says. `onDevice` allows AI but only on-device Apple Foundation Models; each workspace's `ai.enabled` still decides whether it is used. Any other value, including a different spelling, reads as `off`. Absent leaves AI to each workspace. Read when Settings or a screen loads a workspace's AI settings, so a change applies after switching workspace or relaunching. | Yes |
+| `autoUpdateJamfCLI` | Boolean | `false` | At launch, check for a jamf-cli update and install it. Read once per launch. | Yes |
+| `skipExpensiveCollections` | Boolean | `false` | Leave the four per-device report commands (EA results, patch failures, update failures, device compliance) and the per-device scan out of the collects the app runs while open, and stop the health strip expecting them. Scheduled runs, and the app's catch-up and repair collects, do not read it. Read at each collect. | Yes |
+| `workspacesRootPath` | String | absent (`~/Jamf-Reports`) | The folder that holds every workspace. An absolute path: `~` and `$HOME` are not expanded. Read on every use, by the app and the background item. | Yes |
+| `defaultTrendRange` | String | `W4` | The range Overview and Trends open on: `W4`, `W12`, `W26`, `W52` or `All`. | Yes |
+| `hiddenTabs` | String | empty | Sidebar tabs to hide, as a comma-separated list. Overview, Computers, Data Sources and Settings are never hidden. To get the value, hide the tabs in Settings › Sidebar Visibility on a test Mac and run `defaults read com.tonyyo.jamfreports hiddenTabs`. | Yes |
 
 **Managed values win.** macOS returns a configuration profile's value to the app ahead of
-anything the user sets, so every key above takes effect when managed. Only
-`checkForAppUpdates` is shown as managed. For the others the Settings control stays
-enabled: a change the user makes is saved, but the app keeps reading the managed value. When
-you manage one of them, tell your users that the control will not change it.
+anything the user sets. When a profile sets a key, its control in Settings (or Trends' range
+picker, or Sidebar Visibility) is locked and says "Set by your organization's configuration
+profile", and the app never writes that key itself.
 
 **`workspacesRootPath` notes.**
 
@@ -49,8 +45,8 @@ you manage one of them, tell your users that the control will not change it.
   read-only, in a system or credentials location, or open to other accounts.
 - A system or credentials location is refused and the default `~/Jamf-Reports` is used.
 - Existing workspaces are not moved. Copy them to the new folder yourself.
-- Settings › Workspace location still offers Change and Use default. With the key managed,
-  either one reports success but the managed folder stays in use.
+- With the key managed, Settings › Workspace location's Choose folder and Use default are
+  locked, and the app refuses to change the folder.
 
 ## Not for management
 
@@ -92,6 +88,8 @@ Sign it first if your organization requires signed profiles.
 
 | File | Sets |
 |---|---|
+| `jamf-reports-ai-off.plist` | `AIPolicy` to `off` |
+| `jamf-reports-ai-on-device-only.plist` | `AIPolicy` to `onDevice` |
 | `jamf-reports-disable-update-check.plist` | `checkForAppUpdates` to `false` |
 | `jamf-reports-auto-update-jamf-cli.plist` | `autoUpdateJamfCLI` to `true` |
 | `jamf-reports-skip-expensive-collections.plist` | `skipExpensiveCollections` to `true` |
@@ -126,15 +124,16 @@ cat "/Library/Managed Preferences/com.tonyyo.jamfreports.plist"
 cat "/Library/Managed Preferences/$(whoami)/com.tonyyo.jamfreports.plist"
 ```
 
-Settings › App updates also shows whether `checkForAppUpdates` is managed.
+Each managed key's control in the app also says when a profile sets it.
 
 ## Logging profile
 
 Verbose logging is a separate profile, for the `com.apple.system.logging` payload, not this
 preference domain. The app bundles one:
 `JamfReports.app/Contents/Resources/JamfReports-Debug-Logging.mobileconfig` (Settings ›
-Logging › Reveal MDM profile shows it). It sets `Enable-Level` and `Persist` to `Debug` for
-the subsystem `com.github.tonyyo11.jamf-reports-community`, so debug and info messages are
+Logging › Reveal MDM profile shows it). It sets the `Level` dictionary's `Enable` and `Persist` to `Debug`
+under `DEFAULT-OPTIONS` for the subsystem `com.github.tonyyo11.jamf-reports-community`, the
+layout `man 5 os_log` documents, so debug and info messages are
 kept in the local log store. It does not set `Enable-Private-Data`: serials, host names and
 user names stay `<private>`. It is a user-scoped profile.
 
@@ -151,6 +150,6 @@ Not a preference, and no profile sets it.
 
 | Variable | What it does |
 |---|---|
-| `JRC_WORKSPACES_ROOT` | The workspaces folder, ahead of `workspacesRootPath`. Set it in the script or launchd job that runs the `jamf-reports` command when the workspaces are not in `~/Jamf-Reports`. A system or credentials location is refused, as for the key. |
+| `JRC_WORKSPACES_ROOT` | The workspaces folder, ahead of `workspacesRootPath`. Set it in a script or launchd job that must point the `jamf-reports` command at another folder than the app's setting. A system or credentials location is refused, as for the key. |
 
 See [Command Line](https://github.com/tonyyo11/jamf-reports-community/wiki/07-Command-Line).

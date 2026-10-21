@@ -20,6 +20,17 @@
 								-->
 
 								<!--
+									key:     AIPolicy
+									value:   string, "off" or "onDevice"; absent leaves AI to each workspace
+									"off" turns every AI feature off whatever config.yaml says.
+									"onDevice" allows AI, on-device Apple models only. Any other value
+									reads as "off". Settings shows the AI controls as set by your
+									organization.
+								-->
+								<key>AIPolicy</key>
+								<string>onDevice</string>
+
+								<!--
 									key:     checkForAppUpdates
 									value:   boolean, default true
 									Once a day, ask GitHub for a newer stable release and show a

@@ -2,41 +2,6 @@ import XCTest
 @testable import JamfReports
 
 final class DebugLoggingServiceTests: XCTestCase {
-    private func tempURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("jr-debuglog-\(UUID().uuidString).plist")
-    }
-
-    func test_absentFile_readsBothOff() {
-        XCTAssertEqual(DebugLoggingService.current(at: tempURL()), .off)
-    }
-
-    func test_roundTrip_persistVerboseOnly() throws {
-        let url = tempURL(); defer { try? FileManager.default.removeItem(at: url) }
-        try DebugLoggingService.apply(DebugLoggingState(persistVerbose: true, revealPrivate: false), at: url)
-        XCTAssertEqual(DebugLoggingService.current(at: url),
-                       DebugLoggingState(persistVerbose: true, revealPrivate: false))
-    }
-
-    func test_roundTrip_revealPrivate() throws {
-        let url = tempURL(); defer { try? FileManager.default.removeItem(at: url) }
-        try DebugLoggingService.apply(DebugLoggingState(persistVerbose: true, revealPrivate: true), at: url)
-        XCTAssertEqual(DebugLoggingService.current(at: url),
-                       DebugLoggingState(persistVerbose: true, revealPrivate: true))
-    }
-
-    func test_revealPrivateDefaultsOff_whenOnlyPersistWritten() throws {
-        let url = tempURL(); defer { try? FileManager.default.removeItem(at: url) }
-        try DebugLoggingService.apply(DebugLoggingState(persistVerbose: true, revealPrivate: false), at: url)
-        XCTAssertFalse(DebugLoggingService.current(at: url).revealPrivate)
-    }
-
-    func test_off_writesEmptyOptions() throws {
-        let url = tempURL(); defer { try? FileManager.default.removeItem(at: url) }
-        try DebugLoggingService.apply(.off, at: url)
-        XCTAssertEqual(DebugLoggingService.current(at: url), .off)
-    }
-
     // MARK: - Managed logging profile
 
     private func managedDefaults(
@@ -78,9 +43,19 @@ final class DebugLoggingServiceTests: XCTestCase {
         XCTAssertNil(DebugLoggingService.managed(defaults: nil))
     }
 
-    func test_managedLoggingText_namesEachSwitch() {
+    func test_managedLoggingText_namesEachSwitchOrNoProfile() {
         XCTAssertTrue(SettingsView.managedLoggingText(
             ManagedDebugLogging(persistVerbose: true, revealPrivate: nil))
-            .hasSuffix("verbose logs on, private values not set."))
+            .hasSuffix("verbose logs on, private data not set."))
+        XCTAssertEqual(SettingsView.managedLoggingText(nil),
+                       "No configuration profile sets logging for Jamf Reports.")
+    }
+
+    func test_oneMacCommands() {
+        XCTAssertEqual(DebugLoggingService.enableCommand,
+            "sudo log config --subsystem com.github.tonyyo11.jamf-reports-community "
+            + "--mode \"level:debug,persist:debug\"")
+        XCTAssertEqual(DebugLoggingService.resetCommand,
+            "sudo log config --subsystem com.github.tonyyo11.jamf-reports-community --reset")
     }
 }

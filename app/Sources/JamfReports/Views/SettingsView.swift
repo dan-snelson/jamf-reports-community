@@ -30,10 +30,8 @@ struct SettingsView: View {
     // the target dir isn't app-writable and the user must run the command.
     @State private var cliInstallMessage: String? = nil
     @State private var cliInstallCommand: String? = nil
-    // Debug logging (DebugLoggingService) — toggles apply on next launch.
-    @State private var debugState: DebugLoggingState = .off
+    // Debug logging (DebugLoggingService): what a configuration profile sets.
     @State private var managedLogging: ManagedDebugLogging?
-    @State private var loggingApplyMessage: String? = nil
     // AI Insights (macOS 27+, opt-in). Loaded/saved via AIConfigLoader/Writer,
     // not the Config-tab managed-key surface.
     @State private var aiConfig: AIConfig = AIConfig()
@@ -931,52 +929,29 @@ struct SettingsView: View {
         Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "Logging")
-                Text(
-                    "Control verbose diagnostics and view recent log entries. Changes to the "
-                    + "toggles apply after you quit and reopen JamfReports."
-                )
-                .font(.footnote)
-                .foregroundStyle(Theme.Text.tertiary(contrast))
-                .fixedSize(horizontal: false, vertical: true)
+                Text("View recent log entries and turn on verbose diagnostics.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
 
-                if let managedLogging {
-                    Text(Self.managedLoggingText(managedLogging))
-                        .font(.caption)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Toggle("Persist verbose logs", isOn: Binding(
-                    get: { managedLogging?.persistVerbose ?? debugState.persistVerbose },
-                    set: { debugState.persistVerbose = $0; applyDebugState() }))
-                    .disabled(managedLogging?.persistVerbose != nil)
-                Toggle("Reveal private values in logs (serials, hostnames, usernames)", isOn: Binding(
-                    get: { managedLogging?.revealPrivate ?? debugState.revealPrivate },
-                    set: { debugState.revealPrivate = $0; applyDebugState() }))
-                    .disabled(managedLogging?.revealPrivate != nil)
-                if managedLogging?.revealPrivate ?? debugState.revealPrivate {
-                    Text("⚠︎ Private values are written in full to the local log store on this Mac. "
-                        + "Leave off unless actively debugging.")
-                        .font(.caption)
-                        .foregroundStyle(Theme.Colors.warn)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let loggingApplyMessage {
-                    Text(loggingApplyMessage)
-                        .font(.caption)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(Self.managedLoggingText(managedLogging))
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
 
-                HStack(spacing: 8) {
-                    PNPButton(title: "Quit to apply", icon: "power", size: .sm) {
-                        NSApplication.shared.terminate(nil)
-                    }
-                    .help("Quit JamfReports so the logging toggles take effect on next launch.")
+                VStack(alignment: .leading, spacing: 6) {
                     PNPButton(title: "Reveal MDM profile", icon: "doc.badge.gearshape", size: .sm) {
                         revealDebugProfile()
                     }
                     .help("Reveal the bundled debug-logging .mobileconfig in Finder for Jamf deployment.")
+                    Text("Deploying it through MDM keeps debug and info messages; private values "
+                        + "stay hidden.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+
+                oneMacLoggingCommands
 
                 Divider().background(Theme.Hairline.standard)
                 LogViewerView()
@@ -987,29 +962,43 @@ struct SettingsView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Logging")
-        .onAppear {
-            debugState = DebugLoggingService.current()
-            managedLogging = DebugLoggingService.managed()
+        .onAppear { managedLogging = DebugLoggingService.managed() }
+    }
+
+    @ViewBuilder private var oneMacLoggingCommands: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Turn on verbose logs on this Mac").font(.caption.weight(.semibold))
+            loggingCommandRow(DebugLoggingService.enableCommand)
+            loggingCommandRow(DebugLoggingService.resetCommand)
+            Text("Needs an administrator and applies to this Mac. The reset command returns "
+                + "logging to the default.")
+                .font(.caption)
+                .foregroundStyle(Theme.Text.tertiary(contrast))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    /// Names what a deployed logging profile sets; the switches it sets are locked to match.
-    nonisolated static func managedLoggingText(_ managed: ManagedDebugLogging) -> String {
+    private func loggingCommandRow(_ command: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Mono(text: command, size: 11)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            PNPButton(title: "Copy", icon: "doc.on.doc", size: .sm) {
+                SystemActions.copyToClipboard(command)
+            }
+            .help("Copy the command to the clipboard.")
+        }
+    }
+
+    /// Names what a deployed logging profile sets for this app, or that none does.
+    nonisolated static func managedLoggingText(_ managed: ManagedDebugLogging?) -> String {
+        guard let managed else { return "No configuration profile sets logging for Jamf Reports." }
         func onOff(_ value: Bool?) -> String {
             value.map { $0 ? "on" : "off" } ?? "not set"
         }
-        return "Your organization's configuration profile sets logging for this app: "
+        return "A configuration profile sets logging for Jamf Reports: "
             + "verbose logs \(onOff(managed.persistVerbose)), "
-            + "private values \(onOff(managed.revealPrivate))."
-    }
-
-    private func applyDebugState() {
-        do {
-            try DebugLoggingService.apply(debugState)
-            loggingApplyMessage = "Saved — applies on next launch."
-        } catch {
-            loggingApplyMessage = "Couldn't write the logging config: \(error.localizedDescription)"
-        }
+            + "private data \(onOff(managed.revealPrivate))."
     }
 
     private func revealDebugProfile() {
@@ -1045,9 +1034,8 @@ struct SettingsView: View {
     /// Turns already-collected fleet data into plain-language insight cards on
     /// five screens. Off by default; requires macOS 27, where Apple's on-device
     /// Foundation Model generates it. Persists to this profile's `config.yaml`
-    /// (`ai:` block) via `AIConfigWriter`, scoped to just that key — the same
-    /// pattern as `DebugLoggingService`'s own plist, not the Config-tab's
-    /// managed-key round-trip.
+    /// (`ai:` block) via `AIConfigWriter`, scoped to just that key, not the
+    /// Config-tab's managed-key round-trip.
     private var aiInsightsCard: some View {
         Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {

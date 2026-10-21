@@ -14,6 +14,10 @@ versions in this repository map to git tags.
   and jailbreaks where Jamf Pro reports them. Macs and mobile devices are always counted apart,
   and a figure a product does not report is left out, not shown as 0. Alerts can watch the new
   figures. (#284)
+- A Jamf School collect now also reads the SOFA feed of current Apple OS releases, as a Jamf Pro
+  collect does, so a School workspace can say which Macs and mobile devices are on the current
+  OS. Add `sofa` to `jamf_cli.collect_skip` to leave it out on a network that must not reach
+  sofafeed.macadmins.io. (#284)
 - The Jamf School workbook has a Trends tab with one row per day, Macs and mobile devices in
   their own columns. The other School tabs are unchanged. (#284)
 - Jamf Protect now works with a Jamf School workspace (experimental): connect it from Data

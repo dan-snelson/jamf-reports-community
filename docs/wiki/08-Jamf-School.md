@@ -89,7 +89,8 @@ sheets come from collected School data.
 2. Collect, then generate the Jamf School workbook from the app. Its sheets come from the
    collected School data.
 3. Each collect that reads the devices saves a daily summary, so **Trends** builds history:
-   Macs and mobile devices are counted apart (managed, supervised, stale by last check-in), and
+   Macs and mobile devices are counted apart (managed, supervised, stale by last check-in, and
+   on the current OS against the SOFA feed each collect reads; `collect_skip: sofa` leaves it out), and
    the first run also fills earlier days from the device snapshots already saved. The workbook's
    **Trends** tab lists the same figures, one row per day. Jamf School does not report passcode,
    encryption or jailbreak state, so those mobile figures are not shown for a School workspace.

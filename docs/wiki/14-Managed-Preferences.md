@@ -1,0 +1,43 @@
+# Managed Preferences
+
+Jamf Reports keeps a few per-user settings in the preference domain `com.tonyyo.jamfreports`.
+You can set them on every Mac with a configuration profile, or on one Mac with
+`defaults write`. Everything about a workspace (folders, thresholds, notifications) is in its
+`config.yaml` instead; see [Configuration & Templates](https://github.com/tonyyo11/jamf-reports-community/wiki/04-Configuration-and-Templates).
+
+The full list of keys, the keys not to manage, and how to deploy and check them are in
+[`application_management/`](https://github.com/tonyyo11/jamf-reports-community/tree/main/application_management)
+in the repository, with example files ready to upload to Jamf Pro.
+
+## Keys you can manage
+
+| Key | Type | Default | Purpose |
+|---|---|---|---|
+| `checkForAppUpdates` | Boolean | `true` | Daily check for a newer stable release. Settings shows it as managed. |
+| `autoUpdateJamfCLI` | Boolean | `false` | Install jamf-cli updates at launch. |
+| `skipExpensiveCollections` | Boolean | `false` | Leave per-device commands out of collects the app runs while open. |
+| `workspacesRootPath` | String | `~/Jamf-Reports` | The folder that holds every workspace. Absolute path only. |
+| `defaultTrendRange` | String | `W4` | The range Overview and Trends open on. |
+| `hiddenTabs` | String | empty | Sidebar tabs to hide. |
+
+A managed value always takes effect. Only `checkForAppUpdates` is shown as managed in
+Settings; for the other keys the control stays enabled, and a change made there is not used.
+
+## In Jamf Pro
+
+Create a configuration profile with the **Application & Custom Settings** payload, choose
+**Upload**, set the preference domain to `com.tonyyo.jamfreports`, and upload one of the
+example `.plist` files. To turn off the update check on every Mac, upload
+`jamf-reports-disable-update-check.plist`.
+
+## The command-line tool
+
+The `jamf-reports` command, run through its symlink, reads a domain named `jamf-reports`,
+not the app's. Set `JRC_WORKSPACES_ROOT` in the script that runs it when the workspaces are
+not in `~/Jamf-Reports`. See [Command Line](https://github.com/tonyyo11/jamf-reports-community/wiki/07-Command-Line).
+
+## Verbose logging
+
+The bundled `JamfReports-Debug-Logging.mobileconfig` is a separate logging profile. See the
+logging section of the [`application_management` README](https://github.com/tonyyo11/jamf-reports-community/tree/main/application_management#logging-profile)
+and [Diagnostics & Troubleshooting](https://github.com/tonyyo11/jamf-reports-community/wiki/09-Diagnostics-and-Troubleshooting).

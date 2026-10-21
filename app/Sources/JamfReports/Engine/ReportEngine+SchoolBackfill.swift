@@ -41,9 +41,10 @@ extension ReportEngine {
     /// summary, from the day's newest snapshot that decodes, judged as of its own stamp. Never
     /// replaces a summary. Conflict copies and manifests are not candidates; snapshots that do
     /// not decode are counted in one `[warn]`. OS currency is left out: the cached SOFA feed is
-    /// today's, and an old version list judged against it would read as behind.
+    /// today's, and an old version list judged against it would read as behind. A snapshot
+    /// stamped on a day after `now`'s is skipped and counted in one `[warn]`.
     static func backfillSchoolSummaries(
-        dataDir: URL, summariesDir: URL, staleDays: Int,
+        dataDir: URL, summariesDir: URL, staleDays: Int, now: Date = Date(),
         onLine: @Sendable (CLIBridge.LogLine) -> Void
     ) -> (written: Int, writeFailures: Int) {
         let kind = SchoolFleetService.devicesKind
@@ -57,10 +58,16 @@ extension ReportEngine {
             }
             .sorted { $0.date > $1.date }
 
+        let today = SummaryJSONParser.dateFormatter.string(from: now)
         var daysSeen: Set<String> = []
-        var written = 0, writeFailures = 0, undecodable = 0
+        var written = 0, writeFailures = 0, undecodable = 0, futureDated = 0
         for file in files {
             let day = SummaryJSONParser.dateFormatter.string(from: file.date)
+            // yyyy-MM-dd orders as text; a future day would sit in Trends ahead of today.
+            if day > today {
+                futureDated += 1
+                continue
+            }
             if daysSeen.contains(day) { continue }
             let target = summariesDir.appendingPathComponent("summary_\(day).json")
             if FileManager.default.fileExists(atPath: target.path) {
@@ -93,6 +100,10 @@ extension ReportEngine {
             onLine(.init(timestamp: Date(), level: .warn,
                 text: "[warn] School history backfill skipped \(undecodable) "
                     + "school-devices snapshot(s) that could not be read"))
+        }
+        if futureDated > 0 {
+            onLine(.init(timestamp: Date(), level: .warn,
+                text: "[warn] skipped \(futureDated) future-dated school-devices snapshot(s)"))
         }
         return (written, writeFailures)
     }

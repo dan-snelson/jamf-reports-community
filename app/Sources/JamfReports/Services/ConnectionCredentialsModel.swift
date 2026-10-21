@@ -178,7 +178,10 @@ final class ConnectionCredentialsModel {
             runError = "Could not find jamf-cli. Install it from the sidebar's setup step."
             return
         }
-        let secret = clientSecret
+        // Moved, not copied: the stored value is empty from here and the local copy is wiped.
+        var secret = clientSecret
+        clientSecret = Data()
+        defer { secret.wipe() }
         let id = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         switch mode {
         case .addEnvironments:

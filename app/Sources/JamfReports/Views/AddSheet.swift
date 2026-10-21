@@ -68,6 +68,7 @@ struct AddSheet: View {
     @State private var message: String?
     @State private var errorText: String?
     @State private var showingProtectConnect = false
+    @State private var twinProbe: Task<AddSheetDiscovery, Never>?
 
     private var currentTakesProtect: Bool {
         AddSheetPlan.currentTakesProtect(
@@ -107,6 +108,7 @@ struct AddSheet: View {
                 .accessibilityHidden(true)
         }
         .task { await recheck() }
+        .onDisappear { twinProbe?.cancel() }
         .sheet(isPresented: $showingProtectConnect, onDismiss: { Task { await recheck() } }) {
             ProductConnectSheetView(profileSlug: workspace.profile)
         }
@@ -460,9 +462,15 @@ struct AddSheet: View {
                 currentAcceptsProtect: currentTakesProtect && found.currentProtect == nil,
                 requested: requested)
         }
-        let probed = await Task.detached {
+        twinProbe?.cancel()
+        let probe = Task.detached {
             AddSheetDiscovery.load(currentWorkspace: current, probeTwins: true)
-        }.value
+        }
+        twinProbe = probe
+        let probed = await withTaskCancellationHandler { await probe.value } onCancel: {
+            probe.cancel()
+        }
+        guard !probe.isCancelled else { return }
         discovery?.twinNotes = probed.twinNotes
     }
 

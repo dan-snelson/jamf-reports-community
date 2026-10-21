@@ -71,7 +71,8 @@ extension OnboardingFlow {
 
 extension Data {
     /// Zeroes the bytes in place, then empties the value. In place only while this is the one
-    /// reference to the buffer, so a secret is never copied into a second stored value.
+    /// reference to the buffer (a shared buffer is copied first, leaving the other holder's
+    /// bytes), so a secret is never copied into a second stored value.
     mutating func wipe() {
         resetBytes(in: startIndex..<endIndex)
         self = Data()

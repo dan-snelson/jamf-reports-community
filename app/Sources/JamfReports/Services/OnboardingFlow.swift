@@ -250,6 +250,10 @@ final class OnboardingFlow {
     @ObservationIgnored let profileLister: ProfileLister
     @ObservationIgnored let profileRemover: ProfileRemover
     @ObservationIgnored let workspaceTrasher: WorkspaceTrasher
+    /// The jamf-cli the Protect and School setups run, and the signature check before a secret
+    /// goes to it; a test points them at a stub.
+    @ObservationIgnored let binaryLocator: () -> URL?
+    @ObservationIgnored let binaryGate: (URL) throws -> Void
 
     /// Runs no subprocess: `@State` builds this during a view update, and a child-process wait
     /// there spins the main run loop into a nested layout that aborts AttributeGraph. The
@@ -260,12 +264,16 @@ final class OnboardingFlow {
         profileRemover: @escaping ProfileRemover = OnboardingFlow.removeJamfCLIProfile,
         workspaceTrasher: @escaping WorkspaceTrasher = {
             try ProfileService.trashLocalWorkspace(profile: $0)
-        }
+        },
+        binaryLocator: @escaping () -> URL? = { CLIBridge().locate("jamf-cli") },
+        binaryGate: @escaping (URL) throws -> Void = { try OnboardingFlow.signatureGate(binary: $0) }
     ) {
         self.installationProbe = installationProbe
         self.profileLister = profileLister
         self.profileRemover = profileRemover
         self.workspaceTrasher = workspaceTrasher
+        self.binaryLocator = binaryLocator
+        self.binaryGate = binaryGate
         if let pending = Self.pendingProductPath {
             productPath = pending
             Self.pendingProductPath = nil
@@ -609,16 +617,17 @@ final class OnboardingFlow {
             protectConnectionError = FlowError.invalidProfile.localizedDescription
             return
         }
-        guard let binary = CLIBridge().locate("jamf-cli") else {
+        guard let binary = binaryLocator() else {
             protectConnectionError = FlowError.missingJamfCLI.localizedDescription
             return
         }
         // The client secret goes to this binary, so it passes the same signature gate as
-        // the Jamf Pro paths.
+        // the Jamf Pro paths. A binary that fails it is not retried with the same secret.
         do {
-            try Self.signatureGate(binary: binary)
+            try binaryGate(binary)
         } catch {
             protectConnectionError = error.localizedDescription
+            clearProtectSecret()
             return
         }
         // S1: reject http:// URLs before any secret reaches the PTY.
@@ -661,6 +670,9 @@ final class OnboardingFlow {
             return
         }
 
+        // The checks read the saved profile, so the secret goes now rather than after them.
+        stdinData.resetBytes(in: 0..<stdinData.count)
+        clearProtectSecret()
         let defaultNote = await ProductSetupChecks.restoreDefault(
             previous: previousDefault, setUp: name, binary: binary)
         let checkNote: String?
@@ -703,22 +715,28 @@ final class OnboardingFlow {
             schoolConnectionError = FlowError.invalidProfile.localizedDescription
             return
         }
-        guard let binary = CLIBridge().locate("jamf-cli") else {
+        guard let binary = binaryLocator() else {
             schoolConnectionError = FlowError.missingJamfCLI.localizedDescription
             return
         }
         // The API key goes to this binary, so it passes the same signature gate as the
-        // Jamf Pro paths.
+        // Jamf Pro paths. A binary that fails it is not retried with the same secrets.
         do {
-            try Self.signatureGate(binary: binary)
+            try binaryGate(binary)
         } catch {
             schoolConnectionError = error.localizedDescription
+            clearSchoolSecrets()
             return
         }
         // S1: reject http:// URLs before any secret reaches the PTY.
         // Mirrors the Platform Gateway guard at registerPlatformGatewayProfile().
         guard isSchoolURLValid else {
             schoolConnectionError = FlowError.invalidJamfURL.localizedDescription
+            return
+        }
+        // With the switch on, a blank tenant ID would send the setup an empty prompt answer.
+        guard !schoolPlatformEnabled || isSchoolPlatformComplete else {
+            schoolConnectionError = FlowError.invalidScopeID.localizedDescription
             return
         }
 

@@ -216,6 +216,80 @@ final class SchoolSummaryTests: XCTestCase {
         XCTAssertEqual(store.points(metric: .managedDevices).map(\.value), [2])
     }
 
+    private func cacheSOFA() throws {
+        let sofa = dataDir.appendingPathComponent("sofa", isDirectory: true)
+        try FileManager.default.createDirectory(at: sofa, withIntermediateDirectories: true)
+        for name in ["macos_data_feed.json", "ios_data_feed.json"] {
+            try FileManager.default.copyItem(
+                at: TestFixtures.dir("sofa").appendingPathComponent(name),
+                to: sofa.appendingPathComponent(name))
+        }
+    }
+
+    /// Macs fill the Mac fields and everything else the `mobile` object: nothing is counted
+    /// across the two. School rows carry no passcode, data protection, Activation Lock or
+    /// jailbreak field, so those are absent, never 0.
+    func testAMixedFleetRecordsMacAndMobileFiguresApart() throws {
+        try writeDevices(fleet)
+        write()
+        let s = try summary()
+        XCTAssertEqual(s.totalDevices, 2)
+        XCTAssertEqual(s.staleCount, 1)
+        let mobile = try XCTUnwrap(s.mobile)
+        XCTAssertEqual(mobile.managed, 4, "the trashed iPad is left out")
+        XCTAssertEqual(mobile.unmanaged, 0)
+        XCTAssertEqual(mobile.supervised, .init(met: 2, of: 2), "the iPhone reports no flag")
+        XCTAssertEqual(mobile.stale, 1, "Cart iPad 02; the TV has no check-in")
+        XCTAssertNil(mobile.osCurrent, "no SOFA feed cached")
+        XCTAssertNil(s.osCurrentPct)
+        for absent in [mobile.passcode, mobile.dataProtection, mobile.activationLock] {
+            XCTAssertNil(absent)
+        }
+        XCTAssertNil(mobile.jailbroken)
+        XCTAssertNil(mobile.updateErrors)
+    }
+
+    /// Mac OS currency is the Pro definition against the macOS feed (an untracked major is not
+    /// current); mobile OS currency is over the iOS and iPadOS devices whose major the iOS feed
+    /// covers (27 is untracked, tvOS is never judged).
+    func testOSCurrencyIsJudgedPerTypeAgainstItsOwnFeed() throws {
+        try writeDevices(fleet)
+        try cacheSOFA()
+        write()
+        let s = try summary()
+        XCTAssertEqual(s.osCurrentPct, 50.0, "26.6.2 is current, 14.3 is a major SOFA drops")
+        XCTAssertEqual(s.mobile?.osCurrent, .init(met: 0, of: 1), "only iPadOS 18.1 is judged")
+    }
+
+    func testAMacOnlyFleetWritesNoMobileObject() throws {
+        try writeDevices("""
+        [{"name":"Lab Mac 01","serialNumber":"M1","os":"macOS 26.6.2","isManaged":true,
+          "isSupervised":true,"lastCheckin":"2026-10-18 09:00:00","inTrash":false}]
+        """)
+        write()
+        let s = try summary()
+        XCTAssertEqual(s.totalDevices, 1)
+        XCTAssertNil(s.mobileDeviceCount)
+        XCTAssertNil(s.mobile)
+    }
+
+    func testAMobileOnlyFleetWritesNoMacFigures() throws {
+        try writeDevices("""
+        [{"name":"Cart iPad 01","serialNumber":"I1","os":"iPadOS 18.1","isManaged":false,
+          "lastCheckin":"2026-10-18 09:00:00","inTrash":false}]
+        """)
+        try cacheSOFA()
+        write()
+        let s = try summary()
+        XCTAssertEqual(s.totalDevices, 0)
+        XCTAssertNil(s.staleCount)
+        XCTAssertNil(s.osCurrentPct)
+        XCTAssertEqual(s.mobile?.managed, 0)
+        XCTAssertEqual(s.mobile?.unmanaged, 1)
+        XCTAssertNil(s.mobile?.supervised, "supervision is counted over managed devices")
+        XCTAssertEqual(s.mobile?.stale, 0)
+    }
+
     @MainActor
     func testAJamfSchoolWorkspaceKeepsTrendsAndOffersSchoolMetrics() {
         XCTAssertTrue(Tab.schoolTabs.contains(.trends))

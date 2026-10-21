@@ -3,28 +3,41 @@ import Foundation
 extension ReportEngine {
 
     /// The day's summary for a Jamf School workspace, from its `school-devices` rows
-    /// (`SchoolFleetService`; devices in School's trash are already left out). Macs are
-    /// `totalDevices`, every other platform is `mobileDeviceCount` (nil when there is none, as
-    /// `mobileOnlySummary` records nothing for a fleet with no mobile devices). `staleCount`
-    /// counts the Macs whose check-in is more than `staleDays` ago, as the Pro summary does, and
-    /// is nil on a fleet with no Macs (as `mobileOnlySummary`): mobile staleness waits for the
-    /// mobile spec's M2 `mobile` object, so no mixed count is recorded. The Mac security
-    /// figures are School data it does not carry, so they stay nil. Nil when there are no devices.
+    /// (`SchoolFleetService`; devices in School's trash are already left out). Macs and mobile
+    /// devices are never counted together: Macs fill the Mac fields (`totalDevices`,
+    /// `staleCount`, `osCurrentPct`), every other platform but "Unknown" is `mobileDeviceCount`
+    /// and `mobile`, each nil when there is none of that type. Staleness is a check-in more than
+    /// `staleDays` ago. `osCurrentPct` is the Pro definition (`osCurrentPercent`) against
+    /// `sofaRows`' macOS feed and `mobile.osCurrent` against its iOS feed; no feed leaves them
+    /// out. School rows carry no other Mac security figure. Nil when there are no devices.
     static func schoolSummary(
         from snapshot: SchoolFleetService.Snapshot, date: String, staleDays: Int, now: Date,
+        sofaRows: [SOFAFeedService.OSFamilyRow] = [],
         collectionSources: [String: String]?, collectedByHost: String?
     ) -> DailySummary? {
         let macDevices = snapshot.devices.filter { $0.platform == "macOS" }
         let macs = macDevices.count
         let staleMacs = macDevices.filter { $0.isStale(atDays: staleDays, now: now) }.count
-        let mobile = snapshot.devices.filter { !["macOS", "Unknown"].contains($0.platform) }.count
-        guard macs + mobile > 0 else { return nil }
+        let mobileDevices = snapshot.devices.filter { !["macOS", "Unknown"].contains($0.platform) }
+        guard macs + mobileDevices.count > 0 else { return nil }
+        let macVersions = macDevices.map { String($0.os.drop { !$0.isNumber }) }
+        let osCurrent = osCurrentPercent(
+            macOSRows: sofaRows.filter { $0.platform == SOFAFeedService.platformLabels["macos"] },
+            osCounts: Dictionary(macVersions.map { ($0, 1) }, uniquingKeysWith: +),
+            totalDevices: macs)
+        let iOSRows = sofaRows.filter { $0.platform == SOFAFeedService.platformLabels["ios"] }
         return DailySummary(
             date: date, totalDevices: macs, fileVaultPct: nil, compliancePct: nil,
             staleCount: macs > 0 ? staleMacs : nil,
-            osCurrentPct: nil, crowdstrikePct: nil, patchPct: nil,
+            osCurrentPct: osCurrent.map { ($0 * 10).rounded() / 10 },
+            crowdstrikePct: nil, patchPct: nil,
             source: "jamf-cli", collectionSources: collectionSources,
-            mobileDeviceCount: mobile > 0 ? mobile : nil, collectedByHost: collectedByHost)
+            mobileDeviceCount: mobileDevices.isEmpty ? nil : mobileDevices.count,
+            collectedByHost: collectedByHost,
+            mobile: MobileSummary.build(
+                mobileDevices.map { MobileSummary.device($0) },
+                latestByMajor: SOFAFeedService.latestByMajor(iOSRows),
+                staleDays: staleDays, now: now))
     }
 
     /// Writes `summary_<day>.json` for a School collect that landed `school-devices`, replacing
@@ -41,7 +54,8 @@ extension ReportEngine {
         let date = SummaryJSONParser.dateFormatter.string(from: day)
         guard let summary = schoolSummary(
             from: SchoolFleetService.load(dataDir: dataDir), date: date, staleDays: staleDays,
-            now: day, collectionSources: [SchoolFleetService.devicesKind: "live"],
+            now: day, sofaRows: SOFAFeedService.load(dataDir: dataDir).rows,
+            collectionSources: [SchoolFleetService.devicesKind: "live"],
             collectedByHost: collectingHostLabel(dataDir: dataDir))
         else {
             let msg = "[warn] Jamf School returned 0 devices — summary not written"

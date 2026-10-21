@@ -87,6 +87,32 @@ final class SchoolHistoryBackfillTests: XCTestCase {
         XCTAssertTrue(lines.contains("[info] backfilled 3 days of Jamf School history"), "\(lines)")
     }
 
+    /// A backfilled day carries its mobile figures, but no OS currency for either type: the
+    /// cached feed is today's, and an old version list judged against it would read as behind.
+    func testABackfilledDayCarriesMobileFiguresAndNoOSCurrency() throws {
+        let sofa = dataDir.appendingPathComponent("sofa", isDirectory: true)
+        try FileManager.default.createDirectory(at: sofa, withIntermediateDirectories: true)
+        for name in ["macos_data_feed.json", "ios_data_feed.json"] {
+            try FileManager.default.copyItem(
+                at: TestFixtures.dir("sofa").appendingPathComponent(name),
+                to: sofa.appendingPathComponent(name))
+        }
+        let managed = """
+        {"name":"R","serialNumber":"R","os":"iPadOS 18.1","isManaged":true,"isSupervised":true,
+         "lastCheckin":"2026-09-01 09:00:00","inTrash":false}
+        """
+        try snapshot("[\(mac("A", checkin: "2026-10-02 09:00:00")),\(managed)]",
+                     file: "\(kind)_20261002T080000.json")
+        backfill()
+        let s = try summary("2026-10-02")
+        XCTAssertNil(s.osCurrentPct)
+        let mobile = try XCTUnwrap(s.mobile)
+        XCTAssertEqual(mobile.managed, 1)
+        XCTAssertEqual(mobile.supervised, .init(met: 1, of: 1))
+        XCTAssertEqual(mobile.stale, 0, "30 whole days is not more than 30, judged as of the stamp")
+        XCTAssertNil(mobile.osCurrent)
+    }
+
     func testTheDaysNewestSnapshotWins() throws {
         try snapshot("[\(mac("A", checkin: "2026-10-01 09:00:00"))]",
                      file: "\(kind)_20261001T060000.json")

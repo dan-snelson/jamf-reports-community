@@ -2326,6 +2326,29 @@ struct ReportEngine: Sendable {
         return error
     }
 
+    /// Fetches the SOFA feeds when the plan lists `sofa`, records the outcome in the state
+    /// store and logs it. A failed fetch is a `[warn]`, never `[partial]`: the cached feed
+    /// stays in use. Shared by the Jamf Pro and Jamf School collects.
+    static func fetchSOFAIfPlanned(
+        afterMatrix: [String], profile: String, dataDir: URL, refreshSOFA: SOFARefresh,
+        stateStore: StateFileStore?, onLine: @Sendable (CLIBridge.LogLine) -> Void
+    ) async -> Bool {
+        guard afterMatrix.contains(Self.sofaKind) else { return false }
+        onLine(.init(timestamp: Date(), level: .info,
+                     text: "[info] collecting sofa for \(profile)"))
+        let (sofaSnapshot, sofaWarnings) = await refreshSOFA(dataDir)
+        for w in sofaWarnings {
+            onLine(.init(timestamp: Date(), level: .warn, text: "[warn] \(w)"))
+        }
+        let succeeded = !sofaSnapshot.rows.isEmpty
+        stateStore?.record(succeeded ? .landed : .failed(exitCode: nil), report: "sofa", at: Date())
+        onLine(.init(timestamp: Date(), level: succeeded ? .ok : .warn,
+                     text: succeeded
+                        ? "[ok] sofa: feeds refreshed"
+                        : "[warn] sofa: no feed data — kept the previous cache"))
+        return succeeded
+    }
+
     /// The post-collect work that turns saved snapshots into something the
     /// dashboards read: the SOFA feeds, the merged patch release dates, and
     /// the day's summary. Reached only once the verdicts above have passed.
@@ -2353,23 +2376,9 @@ struct ReportEngine: Sendable {
         // them as "never landed" and reports them far behind schedule after
         // every successful collect, and self-remediation re-collects the whole
         // refresh tier hourly for nothing.
-        var sofaRefreshSucceeded = false
-        if afterMatrix.contains(Self.sofaKind) {
-            onLine(.init(timestamp: Date(), level: .info,
-                         text: "[info] collecting sofa for \(profile)"))
-            let (sofaSnapshot, sofaWarnings) = await refreshSOFA(dataDir)
-            for w in sofaWarnings {
-                onLine(.init(timestamp: Date(), level: .warn, text: "[warn] \(w)"))
-            }
-            sofaRefreshSucceeded = !sofaSnapshot.rows.isEmpty
-            stateStore?.record(
-                sofaRefreshSucceeded ? .landed : .failed(exitCode: nil), report: "sofa", at: Date()
-            )
-            onLine(.init(timestamp: Date(), level: sofaRefreshSucceeded ? .ok : .warn,
-                         text: sofaRefreshSucceeded
-                            ? "[ok] sofa: feeds refreshed"
-                            : "[warn] sofa: no feed data — kept the previous cache"))
-        }
+        let sofaRefreshSucceeded = await fetchSOFAIfPlanned(
+            afterMatrix: afterMatrix, profile: profile, dataDir: dataDir,
+            refreshSOFA: refreshSOFA, stateStore: stateStore, onLine: onLine)
 
         // Patch release dates: collect per-title definitions after patch-status.
         // Gated on the "patch-release-dates" kind being in the requested tiers
@@ -3415,6 +3424,7 @@ struct ReportEngine: Sendable {
         tiers: Set<CollectionTier> = Set(CollectionTier.allCases),
         force: Bool = false,
         locateJamfCLI: @Sendable () -> URL? = { ExecutableLocator.locate("jamf-cli") },
+        refreshSOFA: SOFARefresh = defaultSOFARefresh,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async throws {
         guard let bin = locateJamfCLI() else {
@@ -3440,8 +3450,20 @@ struct ReportEngine: Sendable {
             platformFieldsMissing: resolved.map { !$0.hasTenantID } ?? false) {
             stateStore?.lastRun(report: $0)
         }
-        for line in collectPlanLines(profile: profile, fixedPlan: plan) {
+        let collectSkip = Self.collectSkipKinds(schoolCollectSkip(profile: profile))
+        let afterMatrix = Self.sourcesAfterMatrix(tiers: tiers, collectSkip: collectSkip)
+            .filter { $0 == sofaKind }
+        let afterMatrixSkipped = Self.skippedAfterMatrix(tiers: tiers, collectSkip: collectSkip)
+            .filter { $0 == sofaKind }
+        for line in collectPlanLines(
+            profile: profile, fixedPlan: plan, afterMatrix: afterMatrix,
+            afterMatrixSkipped: afterMatrixSkipped) {
             onLine(.init(timestamp: Date(), level: .info, text: line))
+        }
+        for kind in afterMatrixSkipped {
+            onLine(.init(
+                timestamp: Date(), level: .info,
+                text: "[skip] \(kind): \(CollectSkipReason.collectSkip.skipDetail ?? "")"))
         }
         // Same gate as the Pro loop.
         let quiet = JamfCLIInstaller.installedVersion(at: bin).map {
@@ -3520,10 +3542,23 @@ struct ReportEngine: Sendable {
             onLine(.init(timestamp: Date(), level: .fail, text: msg))
             throw ReportEngineError.collectDead(profile: profile, failedCount: failedCount)
         }
+        // Before the summary, so the same run's OS currency can read the feed. Past the outage
+        // guard, as in the Pro path: a dead tenant fetches nothing.
+        _ = await fetchSOFAIfPlanned(
+            afterMatrix: afterMatrix, profile: profile, dataDir: dataDir,
+            refreshSOFA: refreshSOFA, stateStore: stateStore, onLine: onLine)
         writeSchoolSummaryAfterCollect(
             profile: profile, dataDir: dataDir, workspacePaths: workspacePaths,
             landedKinds: schoolSaved, onLine: onLine)
         reportUnlanded(unlanded, attempted: commands.count, onLine: onLine)
+    }
+
+    /// `jamf_cli.collect_skip` as typed; empty when config.yaml is absent or will not load
+    /// (`schoolStaleDays` already warns about the latter).
+    private static func schoolCollectSkip(profile: String) -> [String] {
+        ProfileService.workspaceURL(for: profile)
+            .flatMap { try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml")) }?
+            .jamfCli?.collectSkip ?? []
     }
 
     /// `thresholds.stale_device_days` for a School summary; 30 when config.yaml will not load,

@@ -590,11 +590,14 @@ extension WorkspaceStore {
         let protectCollected = protectProfile.map {
             protectPinAllows(profile) && protectResolved($0)?.protectRefusal(profile: $0) == nil
         } ?? false
-        // A Jamf School workspace runs `schoolCollect`, which lands none of the Jamf Pro kinds and
-        // records no per-kind state, so judging it by them only raised alarms (2.10). Protect
-        // follows a School collect as it follows a Pro one (2.11), so its kinds still count.
+        // A Jamf School workspace runs `schoolCollect`, which lands none of the Jamf Pro kinds,
+        // so judging it by them only raised alarms (2.10). Protect follows a School collect as
+        // it follows a Pro one (2.11), so its kinds still count, and so does `sofa`, which a
+        // School collect fetches as a Pro one does unless `collect_skip` lists it.
         if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
-            return protectCollected ? DataFreshnessHealth.protectKinds : []
+            let skipped = ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip)
+            return (skipped.contains(ReportEngine.sofaKind) ? [] : [ReportEngine.sofaKind])
+                + (protectCollected ? DataFreshnessHealth.protectKinds : [])
         }
         return expectedKinds(
             skipExpensive: UserDefaults.standard.bool(forKey: "skipExpensiveCollections"),

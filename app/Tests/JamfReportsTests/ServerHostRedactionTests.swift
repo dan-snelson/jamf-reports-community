@@ -178,4 +178,17 @@ final class ServerHostRedactionTests: XCTestCase {
         XCTAssertFalse(shared.contains("school.example.net"), "got: \(shared)")
         XCTAssertFalse(shared.contains("3f2b8c1e"), "got: \(shared)")
     }
+
+    func testSharedLogRedactsTheProfileName() {
+        let text = "[collect] Contoso: patch-status failed; keychain:jamf-cli/Contoso/api-key"
+        let shared = LogRedactor.redactedForSharing(
+            text, profile: "Contoso", scopeIDs: { _ in [] }, serverHosts: { _ in [] })
+        XCTAssertFalse(shared.contains("Contoso"), "got: \(shared)")
+        XCTAssertTrue(shared.contains("patch-status failed"), "got: \(shared)")
+        let plain = "[collect] patch-status failed"
+        XCTAssertEqual(LogRedactor.redactedForSharing(
+            plain, profile: "Contoso", scopeIDs: { _ in [] }, serverHosts: { _ in [] }), plain)
+        XCTAssertEqual(LogRedactor.redactedForSharing(
+            text, profile: nil, scopeIDs: { _ in [] }, serverHosts: { _ in [] }), text)
+    }
 }

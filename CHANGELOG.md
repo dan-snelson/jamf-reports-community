@@ -70,6 +70,9 @@ versions in this repository map to git tags.
 
 ### Changed
 
+- **Add workspace or product…** now says when a Jamf Pro login reaches the same server as a
+  Platform API workspace you already have (or the other way round), as adopting existing
+  profiles does, so one fleet is not set up twice. (#284)
 - Jamf Reports now needs jamf-cli 1.29.0 or later to collect or back up, on every run, not
   only for full support. An older jamf-cli stops the run with a message saying to update it;
   Settings says the same. (#226)
@@ -315,6 +318,8 @@ versions in this repository map to git tags.
 
 ### Security
 
+- Client secrets and API keys typed during setup are now wiped from memory when setup ends,
+  fails, starts over or is closed, instead of staying in the app's memory. (#284)
 - Shared logs and diagnostic bundles now also remove the Jamf Protect tenant's host, and the
   Logging export removes the host and tenant IDs of every workspace, not only the active one. (#284)
 - Files the app reads from a workspace that others can write to are now opened so that a folder

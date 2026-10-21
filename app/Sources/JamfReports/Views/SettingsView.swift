@@ -32,6 +32,7 @@ struct SettingsView: View {
     @State private var cliInstallCommand: String? = nil
     // Debug logging (DebugLoggingService) — toggles apply on next launch.
     @State private var debugState: DebugLoggingState = .off
+    @State private var managedLogging: ManagedDebugLogging?
     @State private var loggingApplyMessage: String? = nil
     // AI Insights (macOS 27+, opt-in). Loaded/saved via AIConfigLoader/Writer,
     // not the Config-tab managed-key surface.
@@ -938,13 +939,21 @@ struct SettingsView: View {
                 .foregroundStyle(Theme.Text.tertiary(contrast))
                 .fixedSize(horizontal: false, vertical: true)
 
+                if let managedLogging {
+                    Text(Self.managedLoggingText(managedLogging))
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Toggle("Persist verbose logs", isOn: Binding(
-                    get: { debugState.persistVerbose },
+                    get: { managedLogging?.persistVerbose ?? debugState.persistVerbose },
                     set: { debugState.persistVerbose = $0; applyDebugState() }))
+                    .disabled(managedLogging?.persistVerbose != nil)
                 Toggle("Reveal private values in logs (serials, hostnames, usernames)", isOn: Binding(
-                    get: { debugState.revealPrivate },
+                    get: { managedLogging?.revealPrivate ?? debugState.revealPrivate },
                     set: { debugState.revealPrivate = $0; applyDebugState() }))
-                if debugState.revealPrivate {
+                    .disabled(managedLogging?.revealPrivate != nil)
+                if managedLogging?.revealPrivate ?? debugState.revealPrivate {
                     Text("⚠︎ Private values are written in full to the local log store on this Mac. "
                         + "Leave off unless actively debugging.")
                         .font(.caption)
@@ -978,7 +987,20 @@ struct SettingsView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Logging")
-        .onAppear { debugState = DebugLoggingService.current() }
+        .onAppear {
+            debugState = DebugLoggingService.current()
+            managedLogging = DebugLoggingService.managed()
+        }
+    }
+
+    /// Names what a deployed logging profile sets; the switches it sets are locked to match.
+    nonisolated static func managedLoggingText(_ managed: ManagedDebugLogging) -> String {
+        func onOff(_ value: Bool?) -> String {
+            value.map { $0 ? "on" : "off" } ?? "not set"
+        }
+        return "Your organization's configuration profile sets logging for this app: "
+            + "verbose logs \(onOff(managed.persistVerbose)), "
+            + "private values \(onOff(managed.revealPrivate))."
     }
 
     private func applyDebugState() {

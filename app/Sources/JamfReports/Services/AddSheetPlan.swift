@@ -140,7 +140,9 @@ struct AddSheetDiscovery: Sendable {
     /// `AddSheetPlan.twinNotes` for the unassigned profiles.
     var twinNotes: [String: String] = [:]
 
-    static func load(currentWorkspace: String?) -> AddSheetDiscovery {
+    /// `probeTwins` asks Jamf Pro for a Platform profile's server when no URL is stored; the
+    /// sheet loads without it first, so a slow answer never holds the list.
+    static func load(currentWorkspace: String?, probeTwins: Bool = false) -> AddSheetDiscovery {
         let root = ProfileService.workspacesRoot()
         let currentProtect = currentWorkspace.flatMap {
             ConnectedProducts.read(profile: $0, under: root).protectProfile
@@ -168,7 +170,10 @@ struct AddSheetDiscovery: Sendable {
         let free = Set(unassigned.filter { $0.use == .newWorkspace }.map(\.name))
         let twinNotes = AddSheetPlan.twinNotes(
             unassigned: listed.filter { free.contains($0.name) }, workspaces: listedWorkspaces,
-            learn: { store.jamfProURL(profile: $0) ?? PlatformTwin.learnJamfProURL(profile: $0) })
+            learn: {
+                store.jamfProURL(profile: $0)
+                    ?? (probeTwins ? PlatformTwin.learnJamfProURL(profile: $0) : nil)
+            })
         return AddSheetDiscovery(
             unassigned: unassigned, currentProtect: currentProtect, twinNotes: twinNotes)
     }

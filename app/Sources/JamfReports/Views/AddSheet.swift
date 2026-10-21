@@ -454,11 +454,16 @@ struct AddSheet: View {
         let current = currentTakesProtect ? workspace.profile : nil
         let found = await Task.detached { AddSheetDiscovery.load(currentWorkspace: current) }.value
         discovery = found
-        guard !choiceTouched else { return }
-        choice = AddSheetPlan.preselection(
-            unassigned: found.unassigned ?? [],
-            currentAcceptsProtect: currentTakesProtect && found.currentProtect == nil,
-            requested: requested)
+        if !choiceTouched {
+            choice = AddSheetPlan.preselection(
+                unassigned: found.unassigned ?? [],
+                currentAcceptsProtect: currentTakesProtect && found.currentProtect == nil,
+                requested: requested)
+        }
+        let probed = await Task.detached {
+            AddSheetDiscovery.load(currentWorkspace: current, probeTwins: true)
+        }.value
+        discovery?.twinNotes = probed.twinNotes
     }
 
     /// Sets up a workspace for a profile jamf-cli already has: the setup the first launch runs

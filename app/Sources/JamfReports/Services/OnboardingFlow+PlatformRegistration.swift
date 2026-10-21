@@ -9,7 +9,7 @@ extension OnboardingFlow {
     /// of the same name.
     static func registerPlatformProfile(
         binary: URL, profile: String, gatewayURL: String, scope: PlatformScope, scopeID: String,
-        clientID: String, clientSecret: String
+        clientID: String, clientSecret: Data
     ) async throws {
         var stdinData = platformGatewayStdin(clientID: clientID, clientSecret: clientSecret)
         defer { stdinData.resetBytes(in: 0..<stdinData.count) }
@@ -29,16 +29,27 @@ extension OnboardingFlow {
     }
 
     nonisolated static func redactedPlatformOutput(
-        _ text: String, clientID: String, clientSecret: String
+        _ text: String, clientID: String, clientSecret: Data
     ) -> String {
-        var redacted = text
-        if !clientSecret.isEmpty {
-            redacted = redacted.replacingOccurrences(of: clientSecret, with: "[redacted]")
-        }
+        var redacted = redacting(clientSecret, in: text)
         if clientID.count >= 8 {
             redacted = redacted.replacingOccurrences(of: clientID, with: "[redacted]")
         }
         return redacted
+    }
+
+    /// `text` with every occurrence of the secret's bytes replaced, matched as UTF-8 so the
+    /// secret never becomes a String.
+    nonisolated static func redacting(_ secret: Data, in text: String) -> String {
+        guard !secret.isEmpty else { return text }
+        var bytes = Data(text.utf8)
+        let mark = Data("[redacted]".utf8)
+        var start = bytes.startIndex
+        while let found = bytes.range(of: secret, in: start..<bytes.endIndex) {
+            bytes.replaceSubrange(found, with: mark)
+            start = found.lowerBound + mark.count
+        }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     /// A workspace for a profile: the folders and the minimal config.yaml, confirmed on this Mac
@@ -55,6 +66,15 @@ extension OnboardingFlow {
         try ScaffoldService.writeMinimalConfig(to: config, profile: profile)
         SharedConfigPin.confirmWrittenConfig(at: config, profile: profile)
         return true
+    }
+}
+
+extension Data {
+    /// Zeroes the bytes in place, then empties the value. In place only while this is the one
+    /// reference to the buffer, so a secret is never copied into a second stored value.
+    mutating func wipe() {
+        resetBytes(in: startIndex..<endIndex)
+        self = Data()
     }
 }
 

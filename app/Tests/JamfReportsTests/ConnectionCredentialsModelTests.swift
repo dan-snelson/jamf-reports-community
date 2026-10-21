@@ -136,7 +136,7 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         XCTAssertEqual(registrations.count, 1)
         XCTAssertEqual(registrations[0].gatewayURL, "https://eu.api.jamfcloud.com")
         XCTAssertEqual(registrations[0].scope, .environment)
-        XCTAssertEqual(registrations[0].clientSecret, "s3cret-value")
+        XCTAssertEqual(registrations[0].clientSecret, Data("s3cret-value".utf8))
     }
 
     func testNoJamfProAddsNothingAndPointsAtJamfSchool() async throws {
@@ -329,7 +329,7 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         h.model.secretFieldHasText = true
         await h.model.run()
 
-        XCTAssertEqual(h.model.clientSecret, "")
+        XCTAssertTrue(h.model.clientSecret.isEmpty)
         XCTAssertFalse(h.model.secretFieldHasText)
         XCTAssertFalse(h.model.canRun)
     }
@@ -338,7 +338,7 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         let h = try harness(mode: .addEnvironments, failRegistration: ["acme-staging"])
         fill(h.model, ids: "env-stage Staging")
         await h.model.run()
-        XCTAssertEqual(h.model.clientSecret, "")
+        XCTAssertTrue(h.model.clientSecret.isEmpty)
     }
 
     func testClosingTheSheetClearsATypedSecret() throws {
@@ -346,8 +346,16 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         fill(h.model, ids: "env-stage Staging")
         h.model.secretFieldHasText = true
         h.model.close()
-        XCTAssertEqual(h.model.clientSecret, "")
+        XCTAssertTrue(h.model.clientSecret.isEmpty)
         XCTAssertFalse(h.model.secretFieldHasText)
+    }
+
+    func testClosingTheSheetZeroesTheStoredSecret() throws {
+        let h = try harness(mode: .addEnvironments)
+        XCTAssertTrue(try secretBufferIsZeroed(store: { h.model.setSecret($0) }, clear: {
+            h.model.close()
+        }))
+        XCTAssertTrue(h.model.clientSecret.isEmpty)
     }
 
     func testARunNeedsASecretAndAKnownRegion() throws {
@@ -386,7 +394,7 @@ final class ConnectionCredentialsModelTests: XCTestCase {
         guard case .skipped = h.model.rows[2].outcome else { return XCTFail("expected a skip") }
         XCTAssertFalse(h.model.rows[1].leavesProfileRegistered)
         XCTAssertEqual(members(h).first { $0.profile == "acme-prod" }?.product, .pro)
-        XCTAssertEqual(h.model.clientSecret, "")
+        XCTAssertTrue(h.model.clientSecret.isEmpty)
     }
 
     /// A stored ID that could read as a flag, or holds other characters, is never sent to jamf-cli.

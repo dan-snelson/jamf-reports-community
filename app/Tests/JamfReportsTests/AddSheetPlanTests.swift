@@ -152,4 +152,45 @@ final class AddSheetPlanTests: XCTestCase {
         XCTAssertTrue(detected.runsProtect)
         XCTAssertEqual(AddSheetDiscovery.load(currentWorkspace: "campus").currentProtect, "prot")
     }
+
+    // MARK: - Same Jamf Pro as a workspace
+
+    private func login(_ name: String, auth: String, url: String) -> JamfCLIProfile {
+        JamfCLIProfile(name: name, url: url, schedules: 0, status: .idle, authMethod: auth,
+                       product: .pro)
+    }
+
+    private let gateway = "https://us.api.jamfcloud.com"
+
+    func testAnOAuth2ProfileBesideAPlatformWorkspaceIsNoted() {
+        let notes = AddSheetPlan.twinNotes(
+            unassigned: [login("direct", auth: "oauth2", url: "https://acme.jamfcloud.com")],
+            workspaces: [login("gw", auth: "platform", url: gateway)],
+            learn: { $0 == "gw" ? "https://ACME.jamfcloud.com" : nil })
+        XCTAssertEqual(notes.keys.sorted(), ["direct"])
+        XCTAssertEqual(notes["direct"], "Same Jamf Pro as gw, which has a workspace. A second "
+            + "workspace collects the fleet twice, so history is split and fleet totals count "
+            + "it twice. Set it up only to collect it anyway.")
+    }
+
+    func testAPlatformProfileBesideAnOAuth2WorkspaceIsNoted() {
+        let notes = AddSheetPlan.twinNotes(
+            unassigned: [login("gw", auth: "platform", url: gateway)],
+            workspaces: [login("direct", auth: "oauth2", url: "acme.jamfcloud.com")],
+            learn: { _ in "https://acme.jamfcloud.com" })
+        XCTAssertTrue(notes["gw"]?.hasPrefix("Same Jamf Pro as direct,") == true)
+    }
+
+    func testAFailedProbeAnotherHostOrNoWorkspaceNotesNothing() {
+        let direct = login("direct", auth: "oauth2", url: "https://acme.jamfcloud.com")
+        let gw = login("gw", auth: "platform", url: gateway)
+        XCTAssertEqual(AddSheetPlan.twinNotes(
+            unassigned: [direct], workspaces: [gw], learn: { _ in nil }), [:])
+        XCTAssertEqual(AddSheetPlan.twinNotes(
+            unassigned: [direct], workspaces: [gw],
+            learn: { _ in "https://other.jamfcloud.com" }), [:])
+        XCTAssertEqual(AddSheetPlan.twinNotes(
+            unassigned: [direct, gw], workspaces: [],
+            learn: { _ in "https://acme.jamfcloud.com" }), [:])
+    }
 }

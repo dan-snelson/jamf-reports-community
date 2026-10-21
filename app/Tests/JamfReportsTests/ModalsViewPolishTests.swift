@@ -77,21 +77,21 @@ final class ModalsViewPolishTests: XCTestCase {
         let flow = OnboardingFlow()
         let secret = "my-oauth-secret"
         flow.setClientSecret(Data(secret.utf8))
-        XCTAssertEqual(flow.clientSecret, secret)
+        XCTAssertEqual(flow.clientSecret, Data(secret.utf8))
     }
 
     func testSetClientSecretWithEmptyDataWritesEmpty() {
         let flow = OnboardingFlow()
         flow.setClientSecret(Data())
-        // Empty data → no valid UTF-8 string; fallback is ""
-        XCTAssertEqual(flow.clientSecret, "")
+        // Empty data stays empty.
+        XCTAssertTrue(flow.clientSecret.isEmpty)
     }
 
     func testSetClientSecretOverwritesPreviousValue() {
         let flow = OnboardingFlow()
         flow.setClientSecret(Data("first".utf8))
         flow.setClientSecret(Data("second".utf8))
-        XCTAssertEqual(flow.clientSecret, "second")
+        XCTAssertEqual(flow.clientSecret, Data("second".utf8))
     }
 
     // MARK: - GenerateSheet template picker round-trip

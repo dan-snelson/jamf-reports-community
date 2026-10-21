@@ -90,6 +90,28 @@ final class BoundedReadsTests: XCTestCase {
         XCTAssertEqual(outcome, true, "a FIFO must be refused without blocking")
     }
 
+    func testAHardLinkIsRefusedAndLoggedOnlyWhenNotFollowingLinks() throws {
+        let dir = root.appendingPathComponent("links", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let plain = dir.appendingPathComponent("plain.json")
+        try Data("[1]".utf8).write(to: plain)
+        XCTAssertEqual(try BoundedFile.read(plain, limit: 10, followSymlinks: false),
+                       Data("[1]".utf8))
+
+        let original = dir.appendingPathComponent("original.json")
+        try Data("[2]".utf8).write(to: original)
+        let second = dir.appendingPathComponent("second.json")
+        try fm.linkItem(at: original, to: second)
+        XCTAssertThrowsError(try BoundedFile.read(second, limit: 10, followSymlinks: false)) {
+            XCTAssertEqual($0 as? BoundedFile.Failure, .unreadable(EMLINK))
+        }
+        XCTAssertThrowsError(
+            try BoundedFile.read(second, limit: 10, followSymlinks: false, inside: root))
+        XCTAssertNil(BoundedFile.stateData(original))
+        XCTAssertTrue(logged("second.json not read: it has 2 hard links"))
+        XCTAssertEqual(try BoundedFile.read(second, limit: 10), Data("[2]".utf8))
+    }
+
     // MARK: - BoundedFile.read inside a root
 
     /// `jamf-cli-data/computers` swapped for a link to a folder outside the workspace after the

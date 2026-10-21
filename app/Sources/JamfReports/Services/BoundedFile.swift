@@ -24,7 +24,8 @@ enum BoundedFile {
     }
 
     /// At most `limit` bytes of the regular file at `url`. With `followSymlinks` false a link at
-    /// the final path component is refused (`unreadable(ELOOP)`) instead of opened. With `root`,
+    /// the final path component is refused (`unreadable(ELOOP)`) instead of opened, and a file
+    /// with more than one hard link is refused (`unreadable(EMLINK)`) and logged. With `root`,
     /// `url` must sit below it: a link anywhere below `root` is refused too when not following,
     /// and the opened file's real path must be inside `root`'s, else `unreadable(ELOOP)`.
     static func read(
@@ -85,6 +86,14 @@ enum BoundedFile {
         guard (info.st_mode & S_IFMT) == S_IFREG else {
             close(descriptor)
             throw Failure.notRegular
+        }
+        // A second hard link is a way in that O_NOFOLLOW cannot see; logged, never silent.
+        guard followSymlinks || info.st_nlink <= 1 else {
+            close(descriptor)
+            AppLogger.event(.collect, .error,
+                "\(ConfigSchema.displayText(url.lastPathComponent)) not read: it has "
+                    + "\(info.st_nlink) hard links")
+            throw Failure.unreadable(EMLINK)
         }
         return descriptor
     }

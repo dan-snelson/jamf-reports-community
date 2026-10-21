@@ -46,6 +46,9 @@ struct OnboardingView: View {
         // The jamf-cli probe waits on child processes, so it starts here and runs off the main
         // actor, never from `OnboardingFlow.init()` while this view is being built.
         .task { await flow.refreshJamfCLIStatus() }
+        // The flow goes with the view (the Add sheet starting a new onboarding, a tab switch),
+        // so its typed secrets are wiped first.
+        .onDisappear { [flow] in flow.clearAllSecrets() }
         .confirmationDialog(
             "Start over?", isPresented: $confirmingStartOver, titleVisibility: .visible
         ) {

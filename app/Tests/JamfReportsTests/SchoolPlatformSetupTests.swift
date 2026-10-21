@@ -206,6 +206,18 @@ final class SchoolPlatformSetupTests: XCTestCase {
                        .undecided(reason: "jamf-cli did not start"))
     }
 
+    func testUndecidedReasonIsRedactedAndCapped() {
+        let noisy = "dial tcp 10.20.30.40:443 to acme.api.jamfcloud.com for admin@example.org "
+            + String(repeating: "x", count: 300)
+        guard case .undecided(let reason) = SchoolPlatformCheck.verdict(
+            failure(1, noisy), profile: "Albion") else { return XCTFail("not undecided") }
+        for leak in ["10.20.30.40", "jamfcloud", "acme", "admin@example.org"] {
+            XCTAssertFalse(reason.contains(leak), "\(leak) in: \(reason)")
+        }
+        XCTAssertTrue(reason.hasPrefix("exit 1: dial tcp"), reason)
+        XCTAssertLessThanOrEqual(reason.count, "exit 1: ".count + 200)
+    }
+
     func testRunPassesTheArgumentsToTheRunner() async {
         let seen = SeenArguments()
         let verdict = await SchoolPlatformCheck.run(profile: "Albion") { arguments in

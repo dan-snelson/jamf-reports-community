@@ -88,6 +88,32 @@ enum AddSheetPlan {
         }
     }
 
+    /// The line under an unassigned profile that reaches the same Jamf Pro as a profile that
+    /// already has a workspace, keyed by the unassigned profile's name: an oauth2 profile beside
+    /// a platform workspace, or a platform profile beside an oauth2 one. Adoption's rule
+    /// (`PlatformTwin`); `learn` gives a platform profile's Jamf Pro URL, and nil finds nothing.
+    static func twinNotes(
+        unassigned: [JamfCLIProfile], workspaces: [JamfCLIProfile], learn: (String) -> String?
+    ) -> [String: String] {
+        var notes: [String: String] = [:]
+        for profile in unassigned {
+            let other: String?
+            if profile.auth?.isPlatform == true {
+                other = PlatformTwin.twins(
+                    ofPlatformProfile: profile, among: workspaces, learn: learn)?.twins.first?.name
+            } else {
+                other = workspaces.first {
+                    PlatformTwin.twins(ofPlatformProfile: $0, among: [profile], learn: learn) != nil
+                }?.name
+            }
+            guard let other else { continue }
+            notes[profile.name] = "Same Jamf Pro as \(other), which has a workspace. A second "
+                + "workspace collects the fleet twice, so history is split and fleet totals count "
+                + "it twice. Set it up only to collect it anyway."
+        }
+        return notes
+    }
+
     /// The choice the sheet opens on; the user can always change it. A product asked for by
     /// the caller, or an unassigned MDM login (the current workspace already has one), opens
     /// New workspace; an unassigned Protect login opens Add to current while the current
@@ -111,6 +137,8 @@ struct AddSheetDiscovery: Sendable {
     var unassigned: [AddSheetPlan.UnassignedProfile]?
     /// The Protect profile the current workspace's config.yaml names, if any.
     var currentProtect: String?
+    /// `AddSheetPlan.twinNotes` for the unassigned profiles.
+    var twinNotes: [String: String] = [:]
 
     static func load(currentWorkspace: String?) -> AddSheetDiscovery {
         let root = ProfileService.workspacesRoot()
@@ -122,11 +150,10 @@ struct AddSheetDiscovery: Sendable {
         }
         let names = listed.map(\.name)
         // A Protect or Security Cloud login's own folder (made by 2.9.0) is not a workspace.
-        let workspaces = listed
-            .filter {
-                !$0.product.isNeverAWorkspace && ProfileService.hasWorkspace($0.name, under: root)
-            }
-            .map(\.name)
+        let listedWorkspaces = listed.filter {
+            !$0.product.isNeverAWorkspace && ProfileService.hasWorkspace($0.name, under: root)
+        }
+        let workspaces = listedWorkspaces.map(\.name)
             + ProfileService.localOnlyWorkspaces(under: root, cliNames: names)
         var paired = Set<String>()
         for workspace in workspaces {
@@ -137,6 +164,12 @@ struct AddSheetDiscovery: Sendable {
         let unassigned = AddSheetPlan.unassigned(
             profiles: listed, workspaces: workspaces, paired: paired,
             unusable: ProfileService.unusableProfiles(in: names).mapValues(\.explanation))
-        return AddSheetDiscovery(unassigned: unassigned, currentProtect: currentProtect)
+        let store = ConnectionStore()
+        let free = Set(unassigned.filter { $0.use == .newWorkspace }.map(\.name))
+        let twinNotes = AddSheetPlan.twinNotes(
+            unassigned: listed.filter { free.contains($0.name) }, workspaces: listedWorkspaces,
+            learn: { store.jamfProURL(profile: $0) ?? PlatformTwin.learnJamfProURL(profile: $0) })
+        return AddSheetDiscovery(
+            unassigned: unassigned, currentProtect: currentProtect, twinNotes: twinNotes)
     }
 }

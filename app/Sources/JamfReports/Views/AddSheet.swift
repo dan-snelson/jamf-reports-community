@@ -370,8 +370,11 @@ struct AddSheet: View {
     private func rowDetail(_ row: AddSheetPlan.UnassignedProfile) -> some View {
         if case .unavailable(let reason) = row.use {
             note(reason)
-        } else if row.name == adoptingName, let flow = adoptFlow {
-            adoptStatus(flow.statuses[row.name] ?? .pending, flow: flow)
+        } else {
+            if let twin = discovery?.twinNotes[row.name] { note(twin) }
+            if row.name == adoptingName, let flow = adoptFlow {
+                adoptStatus(flow.statuses[row.name] ?? .pending, flow: flow)
+            }
         }
     }
 

@@ -121,7 +121,7 @@ final class DiagnosticRedactor {
         self.hostnameURLRE = Self.mustCompile(
             #"(https?://)([a-z0-9][a-z0-9\-\.]{1,253}\.[a-z]{2,63})\b"#, [.caseInsensitive])
         self.hostnameBareRE = Self.mustCompile(
-            #"\b([a-z0-9][a-z0-9\-]{0,62}\.(?:jamfcloud\.com|jamfcloud\.io))\b"#,
+            #"\b((?:[a-z0-9][a-z0-9\-]{0,62}\.)+jamfcloud\.(?:com|io))\b"#,
             [.caseInsensitive])
         self.emailRE = Self.mustCompile(
             #"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"#)
@@ -165,18 +165,19 @@ final class DiagnosticRedactor {
         // Before the serial pattern, which would otherwise cut a UUID's last segment out of it.
         out = redactScopeIDs(in: out)
         if redactHostnames {
+            // The profile's own server, which the patterns below miss when it is on-prem and
+            // written without a scheme (`jss.example.org:8443`). First, so a seeded literal
+            // wins over the generic host patterns.
+            if let serverHostRegex {
+                out = replaceMatches(serverHostRegex, in: out) { g in
+                    self.placeholder("host", (g[0] ?? "").lowercased())
+                }
+            }
             out = replaceMatches(hostnameURLRE, in: out) { g in
                 (g[1] ?? "") + self.placeholder("host", g[2] ?? "")
             }
             out = replaceMatches(hostnameBareRE, in: out) { g in
                 self.placeholder("host", g[0] ?? "")
-            }
-            // The profile's own server, which the patterns above miss when it is on-prem and
-            // written without a scheme (`jss.example.org:8443`).
-            if let serverHostRegex {
-                out = replaceMatches(serverHostRegex, in: out) { g in
-                    self.placeholder("host", (g[0] ?? "").lowercased())
-                }
             }
         }
         // After the hosts: a profile named after a label of its server (`jamf`, for

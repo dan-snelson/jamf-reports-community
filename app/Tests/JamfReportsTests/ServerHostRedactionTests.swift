@@ -46,6 +46,26 @@ final class ServerHostRedactionTests: XCTestCase {
         XCTAssertTrue(r.redactText("myjss.example.org.test").contains("myjss.example.org.test"))
     }
 
+    /// A multi-label Jamf Cloud host (`acme.protect.jamfcloud.com`) leaves no tenant label.
+    func testMultiLabelJamfCloudHostLeavesNoResidue() {
+        let r = DiagnosticRedactor()
+        for text in ["protect alerts failed at acme.protect.jamfcloud.com",
+                     "GET https://acme.protect.jamfcloud.com/api/alerts failed"] {
+            let out = r.redactText(text)
+            XCTAssertFalse(out.lowercased().contains("jamfcloud"), "got: \(out)")
+            XCTAssertFalse(out.contains("acme"), "got: \(out)")
+            XCTAssertTrue(out.contains("host-"), "got: \(out)")
+        }
+        XCTAssertTrue(r.redactText("jamfcloud.com docs and v1.2.3").contains("v1.2.3"))
+    }
+
+    func testSeededServerHostWinsOverTheGenericHostPattern() {
+        let r = DiagnosticRedactor()
+        r.seedServerHosts(["acme.protect.jamfcloud.com"])
+        let out = r.redactText("failed at acme.protect.jamfcloud.com")
+        XCTAssertFalse(out.contains("jamfcloud"), "got: \(out)")
+    }
+
     func testHostIsLeftAloneWhenHostnameRedactionIsOff() {
         let r = DiagnosticRedactor(redactHostnames: false)
         r.seedServerHosts(["jss.example.org"])

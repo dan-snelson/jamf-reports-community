@@ -9,12 +9,14 @@ import Foundation
 /// Sheet plan mirrors Python's `SchoolDashboard.sheet_plan()`:
 ///   School Overview, Device Groups, Users, Classes, Apps, Profiles,
 ///   Locations, DEP Devices, iBeacons, Blueprints,
-///   Device Inventory, OS Versions, Device Status, Stale Devices, then the Protect tabs.
+///   Device Inventory, OS Versions, Device Status, Stale Devices, Trends, then the Protect tabs.
 struct SchoolDashboard: Sendable {
 
     let config: ReportConfig
     let dataDir: URL
     let workbook: Workbook
+    /// The profile's daily summaries, for the Trends tab.
+    var summaries: [DailySummary] = []
 
     private var staleThreshold: Int { config.thresholds?.resolvedStaleDays ?? 30 }
 
@@ -58,7 +60,7 @@ struct SchoolDashboard: Sendable {
     static let sheetNames = [
         "School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles", "Locations",
         "DEP Devices", "iBeacons", "Blueprints", "Device Inventory", "OS Versions",
-        "Device Status", "Stale Devices",
+        "Device Status", "Stale Devices", "Trends",
     ] + CoreDashboard.protectSheetNames
 
     /// The School tabs in their default order, then the Jamf Pro workbook's Protect tabs, which
@@ -79,6 +81,7 @@ struct SchoolDashboard: Sendable {
             ("OS Versions", writeSchoolOSVersions),
             ("Device Status", writeSchoolDeviceStatus),
             ("Stale Devices", writeSchoolStaleDevices),
+            ("Trends", writeSchoolTrends),
         ]
         return school
             + CoreDashboard(config: config, dataDir: dataDir, workbook: workbook).protectSheetPlan
@@ -494,6 +497,69 @@ struct SchoolDashboard: Sendable {
             ws.write(days, row: row, col: 3, format: .red)
             row += 1
         }
+    }
+
+    // MARK: - Trends (from the daily summaries)
+
+    /// One row per daily summary, newest first. Macs and mobile devices are never counted
+    /// together, and a figure the day did not record for that type is a blank cell, never 0.
+    /// Numbers are numbers, so Excel and Power BI chart the columns as they are.
+    func writeSchoolTrends() throws {
+        guard !summaries.isEmpty else {
+            throw SchoolDashboardError.noCachedData(names: ["summaries"])
+        }
+        let ws = workbook.addSheet("Trends")
+        ws.setColumnWidth(0, 0, 14)
+        ws.setColumnWidth(1, 10, 18)
+        var row = ws.writeSheetHeader(
+            title: "Trends",
+            subtitle: "Generated: \(ISO8601DateFormatter().string(from: Date()))",
+            ncols: Self.trendColumns.count)
+        for (col, title) in Self.trendColumns.enumerated() {
+            ws.write(title, row: row, col: col, format: .header)
+        }
+        ws.freezePane(row: row + 1, col: 1)
+        row += 1
+        for summary in summaries.sorted(by: { $0.date > $1.date }) {
+            for (col, value) in Self.trendCells(summary).enumerated() {
+                switch value {
+                case .count(let n): ws.write(n, row: row, col: col, format: .int)
+                case .share(let fraction): ws.write(fraction, row: row, col: col, format: .pct)
+                case .text(let text): ws.write(text, row: row, col: col, format: .cell)
+                case nil: ws.writeBlank(row: row, col: col, format: .cell)
+                }
+            }
+            row += 1
+        }
+    }
+
+    static let trendColumns = [
+        "Date", "Macs", "Stale Macs", "Macs on current macOS %",
+        "Mobile devices", "Managed mobile devices", "Stale mobile devices",
+        "Supervised mobile devices", "Mobile devices reporting supervision",
+        "Supervised mobile devices %", "Mobile devices on current OS %",
+    ]
+
+    enum TrendCell: Equatable { case count(Int), share(Double), text(String) }
+
+    /// A summary's Trends row in `trendColumns` order; nil is a blank cell. A share is a
+    /// fraction (0.75) under the percent format. A day with no Macs leaves the Mac columns blank.
+    static func trendCells(_ s: DailySummary) -> [TrendCell?] {
+        let hasMacs = s.totalDevices > 0
+        let mobile = s.mobile
+        return [
+            .text(s.date),
+            hasMacs ? .count(s.totalDevices) : nil,
+            hasMacs ? s.staleCount.map(TrendCell.count) : nil,
+            hasMacs ? s.osCurrentPct.map { .share($0 / 100) } : nil,
+            s.mobileDeviceCount.map(TrendCell.count),
+            mobile.map { .count($0.managed) },
+            mobile?.stale.map(TrendCell.count),
+            mobile?.supervised.map { .count($0.met) },
+            mobile?.supervised.map { .count($0.of) },
+            mobile?.supervised?.pct.map { .share($0 / 100) },
+            mobile?.osCurrent?.pct.map { .share($0 / 100) },
+        ]
     }
 
     // MARK: - Private helpers

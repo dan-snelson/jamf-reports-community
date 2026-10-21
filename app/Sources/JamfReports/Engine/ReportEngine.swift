@@ -3682,6 +3682,7 @@ struct ReportEngine: Sendable {
         config: ReportConfig,
         dataDir: URL,
         outputURL: URL,
+        profile: String? = nil,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) async throws -> [SheetFailure] {
         // PR-10 / threat-model T-11: strict-mode pre-flight applies to School
@@ -3691,7 +3692,11 @@ struct ReportEngine: Sendable {
         try preflightStrictManifestCheck(config: config, dataDir: dataDir)
         let accent = (config.branding ?? BrandingConfig()).sanitizedAccentColor
         let workbook = Workbook(accentColor: accent)
-        let core = SchoolDashboard(config: config, dataDir: dataDir, workbook: workbook)
+        // The profile's daily summaries feed the Trends tab; none leaves it out.
+        let summaries = profile.flatMap { try? WorkspacePaths.summariesDir(for: $0) }
+            .map(SummaryJSONParser.parseDirectory) ?? []
+        let core = SchoolDashboard(
+            config: config, dataDir: dataDir, workbook: workbook, summaries: summaries)
         let sheets = sheetSettings(config, tabs: core.sheetPlan.map(\.name), onLine: onLine)
         let (_, schoolFailures) = core.writeAll(sheets: sheets)
 

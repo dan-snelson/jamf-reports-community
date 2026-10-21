@@ -42,9 +42,11 @@ JRC_WORKSPACES_ROOT="$HOME/Library/CloudStorage/OneDrive-Contoso/Team/Jamf Repor
   jamf-reports check --profile prod
 ```
 
-Set it in the script or launchd job that calls the CLI. Scheduled runs the app
-creates carry it automatically; a cron job or script you wrote yourself does not,
-and without it the CLI reads the default `~/Jamf-Reports` and reports an empty
+Set it in the script or launchd job that calls the CLI. The app's own scheduled
+runs read the Workspace location setting themselves and need nothing. A command run
+through the `jamf-reports` link does not see that setting (see
+[Managed Preferences](https://github.com/tonyyo11/jamf-reports-community/wiki/14-Managed-Preferences)),
+so without the variable it reads the default `~/Jamf-Reports` and reports an empty
 workspace rather than failing.
 
 `--profile` takes the jamf-cli profile name exactly as jamf-cli spells it. Quote a

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Where `~/Jamf-Reports/` actually lives.
 ///
@@ -68,9 +69,11 @@ enum WorkspaceRootStore {
     /// 2. In DEBUG, a test process reading the standard preferences gets a temporary
     ///    folder of its own, as `AppSupport` does, so a test that sets no root never
     ///    writes the real one, whatever `JRC_WORKSPACES_ROOT` holds.
-    /// 3. `JRC_WORKSPACES_ROOT` — explicit, used by headless runs.
-    /// 4. The stored preference.
-    /// 5. `~/Jamf-Reports`.
+    /// 3. A root a configuration profile sets, ahead of the variable below so a shell cannot
+    ///    steer a managed Mac elsewhere.
+    /// 4. `JRC_WORKSPACES_ROOT` — explicit, used by headless runs.
+    /// 5. The stored preference.
+    /// 6. `~/Jamf-Reports`.
     ///
     /// A stored path that has become unusable (share unmounted, folder deleted)
     /// is **not** silently swapped for the default: doing so would start a
@@ -92,6 +95,15 @@ enum WorkspaceRootStore {
         }
         #endif
 
+        if ManagedPreference.isForced(defaultsKey, defaults: defaults),
+           let managed = defaults.string(forKey: defaultsKey),
+           !managed.trimmingCharacters(in: .whitespaces).isEmpty {
+            if let ignored = environment[environmentKey], !ignored.isEmpty {
+                noteEnvironmentIgnored()
+            }
+            return refusingSensitive(URL(fileURLWithPath: managed, isDirectory: true))
+        }
+
         if let path = environment[environmentKey], !path.isEmpty {
             return refusingSensitive(URL(fileURLWithPath: path, isDirectory: true))
         }
@@ -102,6 +114,18 @@ enum WorkspaceRootStore {
         }
 
         return defaultRoot
+    }
+
+    private static let environmentIgnoredLogged = OSAllocatedUnfairLock(initialState: false)
+
+    private static func noteEnvironmentIgnored() {
+        guard environmentIgnoredLogged.withLock({ logged in
+            defer { logged = true }
+            return !logged
+        }) else { return }
+        AppLogger.platform.notice(
+            "\(environmentKey, privacy: .public) ignored: a configuration profile sets the root"
+        )
     }
 
     /// Re-check the one validation rule that must hold on every read.

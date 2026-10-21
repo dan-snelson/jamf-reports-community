@@ -165,6 +165,6 @@ Not a preference, and no profile sets it.
 
 | Variable | What it does |
 |---|---|
-| `JRC_WORKSPACES_ROOT` | The workspaces folder, ahead of `workspacesRootPath`. Set it in a script or launchd job that must point the `jamf-reports` command at another folder than the app's setting. A system or credentials location is refused, as for the key. |
+| `JRC_WORKSPACES_ROOT` | The workspaces folder, ahead of a `workspacesRootPath` the user set, but not ahead of one a profile manages: the profile's value wins and the app logs that the variable was ignored. Set it in a script or launchd job that must point the `jamf-reports` command at another folder than the app's setting. A system or credentials location is refused, as for the key. |
 
 See [Command Line](https://github.com/tonyyo11/jamf-reports-community/wiki/07-Command-Line).

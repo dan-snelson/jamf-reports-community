@@ -78,7 +78,8 @@ extension TrendStore {
     private nonisolated static func decodedAgentCounts(
         at url: URL, agents: [SecurityAgentConfig]
     ) -> [String: Int] {
-        guard let data = try? Data(contentsOf: url) else { return [:] }
+        guard let data = BoundedFile.readLogged(
+            url, limit: BoundedFile.inventoryLimit, category: .report) else { return [:] }
         let decoded = EAResultRow.decodeSnapshot(data)
         guard let rows = decoded.rows, decoded.reason == "array" || decoded.reason == "envelope"
         else { return [:] }

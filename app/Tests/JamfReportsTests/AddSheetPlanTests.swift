@@ -193,4 +193,19 @@ final class AddSheetPlanTests: XCTestCase {
             unassigned: [direct, gw], workspaces: [],
             learn: { _ in "https://acme.jamfcloud.com" }), [:])
     }
+
+    func testEachProfileIsProbedOnce() {
+        let direct = login("direct", auth: "oauth2", url: "https://acme.jamfcloud.com")
+        let other = login("other", auth: "oauth2", url: "https://b.jamfcloud.com")
+        let gw = login("gw", auth: "platform", url: gateway)
+        let gw2 = login("gw2", auth: "platform", url: gateway)
+        var asked: [String] = []
+        _ = AddSheetPlan.twinNotes(
+            unassigned: [direct, other, gw2], workspaces: [gw, direct],
+            learn: { asked.append($0); return nil })
+        XCTAssertEqual(asked.sorted(), asked.sorted().reduce(into: [String]()) {
+            if !$0.contains($1) { $0.append($1) }
+        }, "a profile was probed twice: \(asked)")
+        XCTAssertFalse(asked.isEmpty)
+    }
 }

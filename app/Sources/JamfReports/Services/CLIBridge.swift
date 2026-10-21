@@ -768,6 +768,7 @@ final class CLIBridge {
                 config: config,
                 dataDir: dataDir,
                 outputURL: outputURL,
+                profile: profile,
                 onLine: onLine
             )
             if failures.isEmpty {

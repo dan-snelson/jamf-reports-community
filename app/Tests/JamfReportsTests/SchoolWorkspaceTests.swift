@@ -97,11 +97,16 @@ final class SchoolWorkspaceTests: XCTestCase {
 
     // MARK: - Health expectations
 
-    func testASchoolWorkspaceExpectsNoJamfProKinds() throws {
+    func testASchoolWorkspaceExpectsOnlySOFAFromTheJamfProKinds() throws {
         let workspace = tempRoot.appendingPathComponent("campus", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         try Data("school_cli:\n  enabled: true\n  profile: \"campus\"\n".utf8)
             .write(to: workspace.appendingPathComponent("config.yaml"))
+        XCTAssertEqual(
+            WorkspaceStore.expectedKinds(profile: "campus", jamfCLIVersion: "1.33.0", auth: nil),
+            ["sofa"])
+        try Data("school_cli:\n  enabled: true\n  profile: \"campus\"\njamf_cli:\n  collect_skip: [sofa]\n"
+            .utf8).write(to: workspace.appendingPathComponent("config.yaml"))
         XCTAssertEqual(
             WorkspaceStore.expectedKinds(profile: "campus", jamfCLIVersion: "1.33.0", auth: nil),
             [])
@@ -134,9 +139,9 @@ final class SchoolWorkspaceTests: XCTestCase {
                                                product: product) },
                 protectPinAllows: { _ in pinAllows })
         }
-        XCTAssertEqual(expected(.protect), DataFreshnessHealth.protectKinds)
-        XCTAssertEqual(expected(.school), [], "a protect.profile of another product is skipped")
-        XCTAssertEqual(expected(.protect, pinAllows: false), [])
+        XCTAssertEqual(expected(.protect), ["sofa"] + DataFreshnessHealth.protectKinds)
+        XCTAssertEqual(expected(.school), ["sofa"], "a protect.profile of another product is skipped")
+        XCTAssertEqual(expected(.protect, pinAllows: false), ["sofa"])
     }
 
     // MARK: - Generate

@@ -70,6 +70,17 @@ versions in this repository map to git tags.
   a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
 - The workbook's Compliance Rules sheet has a Rule ID column at the end; the other columns are
   unchanged. (#284)
+- Trends now follows mobile devices as well as Macs, on Jamf Pro and Jamf School workspaces:
+  managed, supervised, stale and on-current-OS mobile devices, plus passcode, data protection
+  and jailbreaks where Jamf Pro reports them. Macs and mobile devices are always counted apart,
+  and a figure a product does not report is left out, not shown as 0. Alerts can watch the new
+  figures. (#284)
+- A Jamf School collect now also reads the SOFA feed of current Apple OS releases, as a Jamf Pro
+  collect does, so a School workspace can say which Macs and mobile devices are on the current
+  OS. Add `sofa` to `jamf_cli.collect_skip` to leave it out on a network that must not reach
+  sofafeed.macadmins.io. (#284)
+- The Jamf School workbook has a Trends tab with one row per day, Macs and mobile devices in
+  their own columns. The other School tabs are unchanged. (#284)
 
 ### Changed
 
@@ -133,6 +144,9 @@ versions in this repository map to git tags.
 - A backup whose Jamf Protect part failed is kept only until a newer backup's Protect part
   completes, so a Protect failure that repeats no longer stops old backups from being removed.
   (#284)
+- **Add workspace or product…** now says when a Jamf Pro login reaches the same server as a
+  Platform API workspace you already have (or the other way round), as adopting existing
+  profiles does, so one fleet is not set up twice. (#284)
 
 ### Fixed
 
@@ -369,6 +383,8 @@ versions in this repository map to git tags.
 - A diagnostic bundle now replaces the workspace (profile) name with a placeholder in every
   file and in the file names, the zip's own name included, since the name is often the
   organisation's. A name as short as two characters is replaced too.
+- Client secrets and API keys typed during setup are now wiped from memory when setup ends,
+  fails, starts over or is closed, instead of staying in the app's memory. (#284)
 
 ## [2.10.1] - 2026-10-17
 

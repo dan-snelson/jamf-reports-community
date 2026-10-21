@@ -449,7 +449,7 @@ final class AgentCoverageTests: XCTestCase {
             generation: generation)
         XCTAssertEqual(store.values(metric: .agent("Scanner")), [])
 
-        await store.backfillAgentCoverage(profile: profile)
+        await store.backfillHistory(profile: profile)
 
         XCTAssertEqual(store.values(metric: .agent("Scanner")), [100.0])
         XCTAssertEqual(store.values(metric: .edrAgent), [70.0])

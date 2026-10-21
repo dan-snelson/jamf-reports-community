@@ -31,7 +31,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     func test_authenticate_noSecretNoHasText_blocksAdvance() {
         let flow = makeValidOAuth2Flow()
         flow.secretFieldHasText = false
-        flow.clientSecret = ""
+        flow.clientSecret = Data()
         XCTAssertFalse(
             flow.canAdvance,
             "canAdvance must be false when both clientSecret and secretFieldHasText are empty"
@@ -43,7 +43,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     func test_authenticate_finalizedSecret_enablesAdvance() {
         let flow = makeValidOAuth2Flow()
         flow.secretFieldHasText = false
-        flow.clientSecret = "finalized-secret"
+        flow.clientSecret = Data("finalized-secret".utf8)
         XCTAssertTrue(
             flow.canAdvance,
             "canAdvance must be true when clientSecret is non-empty (finalized)"
@@ -64,7 +64,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     func test_platformGateway_noSecretNoHasText_blocksAdvance() {
         let flow = makeValidPlatformGatewayFlow()
         flow.platformSecretFieldHasText = false
-        flow.platformClientSecret = ""
+        flow.platformClientSecret = Data()
         XCTAssertFalse(
             flow.canAdvance,
             "Platform Gateway: canAdvance must be false with no secret and no has-text"
@@ -132,7 +132,8 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     }
 
     func test_oAuth2Stdin_format() {
-        let data = OnboardingFlow.proOAuth2Stdin(clientID: "myid", clientSecret: "mysecret")
+        let data = OnboardingFlow.proOAuth2Stdin(
+            clientID: "myid", clientSecret: Data("mysecret".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertEqual(s, "myid\nmysecret\n", "stdin must be clientID\\nclientSecret\\n")
     }
@@ -225,7 +226,8 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     }
 
     func test_platformGatewayStdin_format() {
-        let data = OnboardingFlow.platformGatewayStdin(clientID: "cid", clientSecret: "csec")
+        let data = OnboardingFlow.platformGatewayStdin(
+            clientID: "cid", clientSecret: Data("csec".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertEqual(s, "cid\ncsec\n", "Platform stdin must be clientID\\nclientSecret\\n")
     }
@@ -243,7 +245,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     }
 
     func test_protectStdin_format() {
-        let data = OnboardingFlow.protectStdin(clientID: "pid", clientSecret: "psec")
+        let data = OnboardingFlow.protectStdin(clientID: "pid", clientSecret: Data("psec".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertEqual(s, "pid\npsec\n", "Protect stdin must be clientID\\nclientSecret\\n")
     }
@@ -260,7 +262,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     }
 
     func test_schoolStdin_includesDefensiveTrailingN() {
-        let data = OnboardingFlow.schoolStdin(networkID: "net123", apiKey: "apikey456")
+        let data = OnboardingFlow.schoolStdin(networkID: "net123", apiKey: Data("apikey456".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertEqual(
             s, "net123\napikey456\nn\n",
@@ -272,7 +274,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
 
     func test_secretNotLeakedInPlatformError() {
         let flow = OnboardingFlow()
-        flow.platformClientSecret = "super-secret-123"
+        flow.platformClientSecret = Data("super-secret-123".utf8)
         flow.platformClientID = "client-id-very-long"
         // clearPlatformSecrets is private; simulate that the secret is in a
         // PTY result. We test via the fact that argument builders do NOT embed
@@ -588,7 +590,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.schoolURL = "https://org.jamfcloud.com"
         flow.schoolNetworkID = ""
-        flow.schoolAPIKey = "apikey"
+        flow.schoolAPIKey = Data("apikey".utf8)
         XCTAssertFalse(flow.canAttemptSchoolConnect, "missing Network ID must block the connect attempt")
     }
 
@@ -596,7 +598,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.schoolURL = "https://org.jamfcloud.com"
         flow.schoolNetworkID = "net123"
-        flow.schoolAPIKey = ""
+        flow.schoolAPIKey = Data()
         flow.schoolAPIKeyFieldHasText = false
         XCTAssertFalse(flow.canAttemptSchoolConnect, "missing API key must block the connect attempt")
     }
@@ -746,7 +748,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         flow.profileName = "testprofile"
         flow.jamfURL = "https://example.jamfcloud.com"
         flow.clientID = "some-client-id"
-        flow.clientSecret = ""
+        flow.clientSecret = Data()
         flow.secretFieldHasText = false
         flow.isRegisteringProfile = false
         return flow
@@ -809,7 +811,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         flow.platformScope = .environment
         flow.platformScopeID = "my-env"
         flow.platformClientID = "platform-client-id"
-        flow.platformClientSecret = ""
+        flow.platformClientSecret = Data()
         flow.platformSecretFieldHasText = false
         flow.isRegisteringProfile = false
         return flow

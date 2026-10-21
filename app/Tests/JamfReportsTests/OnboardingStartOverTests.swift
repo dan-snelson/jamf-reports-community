@@ -124,14 +124,14 @@ final class OnboardingStartOverTests: XCTestCase {
         let flow = try makeFlow()
         OnboardingFlow.pendingProductPath = .school
         OnboardingFlow.pendingProConnectionType = .platformGateway
-        flow.platformClientSecret = "secret"
+        flow.platformClientSecret = Data("secret".utf8)
 
         let problems = await flow.startOver()
 
         XCTAssertEqual(problems, [])
         XCTAssertNil(OnboardingFlow.pendingProductPath)
         XCTAssertNil(OnboardingFlow.pendingProConnectionType)
-        XCTAssertEqual(flow.platformClientSecret, "")
+        XCTAssertTrue(flow.platformClientSecret.isEmpty)
     }
 
     func testStartOverRemovesTheProfileItsConnectionRecordAndTheFolder() async throws {

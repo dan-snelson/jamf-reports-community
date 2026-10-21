@@ -138,7 +138,8 @@ final class OnboardingFlow {
     var profileName = ""
     var jamfURL = ""
     var clientID = ""
-    var clientSecret = ""
+    // Not observed, so a clear zeroes the stored bytes in place; the has-text Bool drives the UI.
+    @ObservationIgnored var clientSecret = Data()
     /// True when the secure field has keystrokes but `clientSecret` is not yet finalized.
     var secretFieldHasText = false
 
@@ -172,7 +173,7 @@ final class OnboardingFlow {
     var platformScope: PlatformScope = .environment
     var platformScopeID = ""
     var platformClientID = ""
-    var platformClientSecret = ""
+    @ObservationIgnored var platformClientSecret = Data()
     var platformSecretFieldHasText = false
 
     // MARK: - Jamf Protect fields
@@ -180,7 +181,7 @@ final class OnboardingFlow {
     var protectEnabled = false
     var protectURL = ""
     var protectClientID = ""
-    var protectClientSecret = ""
+    @ObservationIgnored var protectClientSecret = Data()
     var protectSecretFieldHasText = false
     var protectProfileName = ""
     var isConnectingProtect = false
@@ -193,7 +194,7 @@ final class OnboardingFlow {
 
     var schoolURL = ""
     var schoolNetworkID = ""
-    var schoolAPIKey = ""
+    @ObservationIgnored var schoolAPIKey = Data()
     var schoolAPIKeyFieldHasText = false
     var schoolProfileName = ""
     var isConnectingSchool = false
@@ -207,7 +208,7 @@ final class OnboardingFlow {
     var schoolPlatformRegion: GatewayRegion = .us
     var schoolPlatformTenantID = ""
     var schoolPlatformClientID = ""
-    var schoolPlatformClientSecret = ""
+    @ObservationIgnored var schoolPlatformClientSecret = Data()
     var schoolPlatformSecretFieldHasText = false
     /// The blueprints check after a setup that sent Platform fields; nil otherwise.
     var schoolPlatformCheck: SchoolPlatformCheck.Verdict?
@@ -829,17 +830,13 @@ final class OnboardingFlow {
 
     /// stdin bytes for OAuth2 profile registration (clientID\nclientSecret\n).
     ///
-    /// Bytes are appended directly to avoid creating a temporary String that holds
-    /// the secret in plaintext. The returned Data is wiped via `resetBytes` in the
-    /// caller's `defer`. Residual COW limitation: the `clientSecret` String property
-    /// itself may survive in a CoW-shared buffer after `clearClientSecret()`; the
-    /// authoritative zero of the actually-transmitted bytes is the `stdinData.resetBytes`
-    /// defer in `registerOAuth2Profile`.
-    static func proOAuth2Stdin(clientID: String, clientSecret: String) -> Data {
+    /// The secret's bytes are copied straight in, never through a String. The caller wipes the
+    /// returned Data and its own copy of the secret in a `defer`.
+    static func proOAuth2Stdin(clientID: String, clientSecret: Data) -> Data {
         var data = Data()
         data.append(contentsOf: clientID.utf8)
         data.append(0x0A)
-        data.append(contentsOf: clientSecret.utf8)
+        data.append(clientSecret)
         data.append(0x0A)
         return data
     }
@@ -861,12 +858,12 @@ final class OnboardingFlow {
 
     /// stdin bytes for Platform Gateway profile registration (clientID\nclientSecret\n).
     ///
-    /// See `proOAuth2Stdin` for the COW residual-limitation note that applies equally here.
-    static func platformGatewayStdin(clientID: String, clientSecret: String) -> Data {
+    /// Built and wiped as `proOAuth2Stdin` is.
+    static func platformGatewayStdin(clientID: String, clientSecret: Data) -> Data {
         var data = Data()
         data.append(contentsOf: clientID.utf8)
         data.append(0x0A)
-        data.append(contentsOf: clientSecret.utf8)
+        data.append(clientSecret)
         data.append(0x0A)
         return data
     }
@@ -881,12 +878,12 @@ final class OnboardingFlow {
 
     /// stdin bytes for Protect setup (clientID\nclientSecret\n).
     ///
-    /// See `proOAuth2Stdin` for the COW residual-limitation note that applies equally here.
-    static func protectStdin(clientID: String, clientSecret: String) -> Data {
+    /// Built and wiped as `proOAuth2Stdin` is.
+    static func protectStdin(clientID: String, clientSecret: Data) -> Data {
         var data = Data()
         data.append(contentsOf: clientID.utf8)
         data.append(0x0A)
-        data.append(contentsOf: clientSecret.utf8)
+        data.append(clientSecret)
         data.append(0x0A)
         return data
     }
@@ -903,26 +900,28 @@ final class OnboardingFlow {
     /// "Configure Platform API access for blueprints?" answered `n`, or `y` followed by the
     /// region number, tenant ID, client ID and client secret.
     ///
-    /// See `proOAuth2Stdin` for the COW residual-limitation note that applies equally here.
+    /// Built and wiped as `proOAuth2Stdin` is.
     static func schoolStdin(
-        networkID: String, apiKey: String,
+        networkID: String, apiKey: Data,
         platform: (region: GatewayRegion, tenantID: String, clientID: String,
-                   clientSecret: String)? = nil
+                   clientSecret: Data)? = nil
     ) -> Data {
         var data = Data()
-        for line in [networkID, apiKey] {
-            data.append(contentsOf: line.utf8)
-            data.append(0x0A)
-        }
+        data.append(contentsOf: networkID.utf8)
+        data.append(0x0A)
+        data.append(apiKey)
+        data.append(0x0A)
         guard let platform else {
             data.append(contentsOf: "n\n".utf8)
             return data
         }
         data.append(contentsOf: "y\n\(platform.region.setupChoice)\n".utf8)
-        for line in [platform.tenantID, platform.clientID, platform.clientSecret] {
+        for line in [platform.tenantID, platform.clientID] {
             data.append(contentsOf: line.utf8)
             data.append(0x0A)
         }
+        data.append(platform.clientSecret)
+        data.append(0x0A)
         return data
     }
 
@@ -1236,80 +1235,58 @@ final class OnboardingFlow {
     /// P9-A-07: Accept finalized credential bytes from `SecureSecretField`.
     ///
     /// The field calls this once on focus-loss or Return, passing UTF-8 bytes
-    /// read directly from `NSSecureTextField.stringValue`. The public
-    /// `clientSecret` property is updated only at finalization — not on every
-    /// keystroke — minimizing the window during which `@Observable` diffing can
-    /// snapshot the in-progress string.
+    /// read directly from `NSSecureTextField.stringValue`, and the bytes are kept as handed
+    /// over. A value already held is zeroed first.
     func setClientSecret(_ data: Data) {
-        clientSecret = String(data: data, encoding: .utf8) ?? ""
+        clientSecret.wipe()
+        clientSecret = data
     }
 
     private func clearClientSecret() {
-        let count = clientSecret.count
-        if count > 0 {
-            clientSecret = String(repeating: "\0", count: count)
-        }
-        clientSecret.removeAll(keepingCapacity: false)
-        clientSecret = ""
+        clientSecret.wipe()
         secretFieldHasText = false
     }
 
     // MARK: - Platform Gateway credential management
 
     func setPlatformClientSecret(_ data: Data) {
-        platformClientSecret = String(data: data, encoding: .utf8) ?? ""
+        platformClientSecret.wipe()
+        platformClientSecret = data
     }
 
     private func clearPlatformSecrets() {
-        let count = platformClientSecret.count
-        if count > 0 {
-            platformClientSecret = String(repeating: "\0", count: count)
-        }
-        platformClientSecret.removeAll(keepingCapacity: false)
-        platformClientSecret = ""
+        platformClientSecret.wipe()
         platformSecretFieldHasText = false
     }
 
     // MARK: - Protect credential management
 
     func setProtectClientSecret(_ data: Data) {
-        protectClientSecret = String(data: data, encoding: .utf8) ?? ""
+        protectClientSecret.wipe()
+        protectClientSecret = data
     }
 
     private func clearProtectSecret() {
-        let count = protectClientSecret.count
-        if count > 0 {
-            protectClientSecret = String(repeating: "\0", count: count)
-        }
-        protectClientSecret.removeAll(keepingCapacity: false)
-        protectClientSecret = ""
+        protectClientSecret.wipe()
         protectSecretFieldHasText = false
     }
 
     // MARK: - School credential management
 
     func setSchoolAPIKey(_ data: Data) {
-        schoolAPIKey = String(data: data, encoding: .utf8) ?? ""
+        schoolAPIKey.wipe()
+        schoolAPIKey = data
     }
 
     func setSchoolPlatformClientSecret(_ data: Data) {
-        schoolPlatformClientSecret = String(data: data, encoding: .utf8) ?? ""
+        schoolPlatformClientSecret.wipe()
+        schoolPlatformClientSecret = data
     }
 
     func clearSchoolSecrets() {
-        let count = schoolAPIKey.count
-        if count > 0 {
-            schoolAPIKey = String(repeating: "\0", count: count)
-        }
-        schoolAPIKey.removeAll(keepingCapacity: false)
-        schoolAPIKey = ""
+        schoolAPIKey.wipe()
         schoolAPIKeyFieldHasText = false
-        let secretCount = schoolPlatformClientSecret.count
-        if secretCount > 0 {
-            schoolPlatformClientSecret = String(repeating: "\0", count: secretCount)
-        }
-        schoolPlatformClientSecret.removeAll(keepingCapacity: false)
-        schoolPlatformClientSecret = ""
+        schoolPlatformClientSecret.wipe()
         schoolPlatformSecretFieldHasText = false
     }
 
@@ -1376,10 +1353,7 @@ final class OnboardingFlow {
     // MARK: - Per-product redaction helpers
 
     private func protectRedactedOutput(_ text: String) -> String {
-        var redacted = text
-        if !protectClientSecret.isEmpty {
-            redacted = redacted.replacingOccurrences(of: protectClientSecret, with: "[redacted]")
-        }
+        var redacted = Self.redacting(protectClientSecret, in: text)
         let id = protectClientID.trimmed
         if id.count >= 8 {
             redacted = redacted.replacingOccurrences(of: id, with: "[redacted]")
@@ -1388,10 +1362,8 @@ final class OnboardingFlow {
     }
 
     func schoolRedactedOutput(_ text: String) -> String {
-        var redacted = text
-        for secret in [schoolAPIKey, schoolPlatformClientSecret] where !secret.isEmpty {
-            redacted = redacted.replacingOccurrences(of: secret, with: "[redacted]")
-        }
+        var redacted = Self.redacting(
+            schoolPlatformClientSecret, in: Self.redacting(schoolAPIKey, in: text))
         let ids = [(schoolNetworkID.trimmed, 4), (schoolPlatformTenantID.trimmed, 4),
                    (schoolPlatformClientID.trimmed, 8)]
         for (id, minimum) in ids where id.count >= minimum {
@@ -1401,10 +1373,7 @@ final class OnboardingFlow {
     }
 
     private func redactedCredentialOutput(_ text: String) -> String {
-        var redacted = text
-        if !clientSecret.isEmpty {
-            redacted = redacted.replacingOccurrences(of: clientSecret, with: "[redacted]")
-        }
+        var redacted = Self.redacting(clientSecret, in: text)
         let trimmedClientID = clientID.trimmed
         if trimmedClientID.count >= 8 {
             redacted = redacted.replacingOccurrences(of: trimmedClientID, with: "[redacted]")

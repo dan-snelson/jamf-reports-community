@@ -40,7 +40,8 @@ extension ReportEngine {
     /// `schoolBackfillMaxDays` days with a snapshot) that has a `school-devices` snapshot and no
     /// summary, from the day's newest snapshot that decodes, judged as of its own stamp. Never
     /// replaces a summary. Conflict copies and manifests are not candidates; snapshots that do
-    /// not decode are counted in one `[warn]`.
+    /// not decode are counted in one `[warn]`. OS currency is left out: the cached SOFA feed is
+    /// today's, and an old version list judged against it would read as behind.
     static func backfillSchoolSummaries(
         dataDir: URL, summariesDir: URL, staleDays: Int,
         onLine: @Sendable (CLIBridge.LogLine) -> Void

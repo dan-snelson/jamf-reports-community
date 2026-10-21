@@ -179,11 +179,11 @@ final class WorkspaceStore {
         }
     }
 
-    /// Every metric a score card or the Trends picker can show for this workspace; a Jamf School
-    /// workspace has only the device counts its summary measures.
+    /// Every metric the Trends picker can show for this workspace; a Jamf School workspace has
+    /// only what its summary measures. Trends offers a mobile metric only where a day carries it.
     var availableMetrics: [TrendSeries.Metric] {
         isSchoolWorkspace ? TrendSeries.Metric.schoolMetrics
-            : TrendSeries.Metric.allCases + agentMetrics
+            : TrendSeries.Metric.allCases + TrendSeries.Metric.mobileMetrics + agentMetrics
     }
 
     /// Whether the Overview shows `metric` as a score card: an agent metric needs its agent

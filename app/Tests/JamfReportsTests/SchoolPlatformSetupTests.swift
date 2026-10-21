@@ -21,16 +21,17 @@ final class SchoolPlatformSetupTests: XCTestCase {
     // MARK: - stdin
 
     func testSchoolStdinWithoutPlatformAnswersNo() {
-        XCTAssertEqual(text(OnboardingFlow.schoolStdin(networkID: "net", apiKey: "key")),
-                       "net\nkey\nn\n")
+        XCTAssertEqual(
+            text(OnboardingFlow.schoolStdin(networkID: "net", apiKey: Data("key".utf8))),
+            "net\nkey\nn\n")
     }
 
     func testSchoolStdinWithPlatformAnswersEveryPromptInOrder() {
         let expected: [GatewayRegion: String] = [.us: "1", .eu: "2", .apac: "3"]
         for region in GatewayRegion.allCases {
             let data = OnboardingFlow.schoolStdin(
-                networkID: "net", apiKey: "key",
-                platform: (region, "tenant-1", "client-1", "s3cr3t"))
+                networkID: "net", apiKey: Data("key".utf8),
+                platform: (region, "tenant-1", "client-1", Data("s3cr3t".utf8)))
             XCTAssertEqual(text(data),
                            "net\nkey\ny\n\(expected[region] ?? "?")\ntenant-1\nclient-1\ns3cr3t\n")
         }
@@ -39,11 +40,11 @@ final class SchoolPlatformSetupTests: XCTestCase {
     func testFlowStdinFollowsTheSwitch() {
         let flow = OnboardingFlow()
         flow.schoolNetworkID = " net "
-        flow.schoolAPIKey = "key"
+        flow.schoolAPIKey = Data("key".utf8)
         flow.schoolPlatformRegion = .eu
         flow.schoolPlatformTenantID = " tenant-1 "
         flow.schoolPlatformClientID = "client-1"
-        flow.schoolPlatformClientSecret = "s3cr3t"
+        flow.schoolPlatformClientSecret = Data("s3cr3t".utf8)
         XCTAssertEqual(text(flow.schoolSetupStdin()), "net\nkey\nn\n")
         flow.schoolPlatformEnabled = true
         XCTAssertEqual(text(flow.schoolSetupStdin()),
@@ -55,10 +56,10 @@ final class SchoolPlatformSetupTests: XCTestCase {
     func testRedactionRemovesEveryCredential() {
         let flow = OnboardingFlow()
         flow.schoolNetworkID = "network-4242"
-        flow.schoolAPIKey = "api-key-value"
+        flow.schoolAPIKey = Data("api-key-value".utf8)
         flow.schoolPlatformTenantID = "tenant-abcdef"
         flow.schoolPlatformClientID = "client-id-12345"
-        flow.schoolPlatformClientSecret = "client-secret-xyz"
+        flow.schoolPlatformClientSecret = Data("client-secret-xyz".utf8)
         let output = flow.schoolRedactedOutput(
             "network-4242 api-key-value tenant-abcdef client-id-12345 client-secret-xyz")
         for value in ["network-4242", "api-key-value", "tenant-abcdef", "client-id-12345",
@@ -69,13 +70,13 @@ final class SchoolPlatformSetupTests: XCTestCase {
 
     func testClearingWipesBothSchoolSecrets() {
         let flow = OnboardingFlow()
-        flow.schoolAPIKey = "api-key-value"
+        flow.schoolAPIKey = Data("api-key-value".utf8)
         flow.schoolAPIKeyFieldHasText = true
-        flow.schoolPlatformClientSecret = "client-secret-xyz"
+        flow.schoolPlatformClientSecret = Data("client-secret-xyz".utf8)
         flow.schoolPlatformSecretFieldHasText = true
         flow.clearSchoolSecrets()
-        XCTAssertEqual(flow.schoolAPIKey, "")
-        XCTAssertEqual(flow.schoolPlatformClientSecret, "")
+        XCTAssertTrue(flow.schoolAPIKey.isEmpty)
+        XCTAssertTrue(flow.schoolPlatformClientSecret.isEmpty)
         XCTAssertFalse(flow.schoolAPIKeyFieldHasText)
         XCTAssertFalse(flow.schoolPlatformSecretFieldHasText)
     }
@@ -84,22 +85,22 @@ final class SchoolPlatformSetupTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.productPath = .school
         flow.currentStep = .schoolConnect
-        flow.schoolPlatformClientSecret = "client-secret-xyz"
+        flow.schoolPlatformClientSecret = Data("client-secret-xyz".utf8)
         flow.previousStep()
-        XCTAssertEqual(flow.schoolPlatformClientSecret, "")
+        XCTAssertTrue(flow.schoolPlatformClientSecret.isEmpty)
     }
 
     func testConnectNeedsThePlatformFieldsOnlyWithTheSwitchOn() {
         let flow = OnboardingFlow()
         flow.schoolURL = "https://school.jamfcloud.com"
         flow.schoolNetworkID = "net"
-        flow.schoolAPIKey = "key"
+        flow.schoolAPIKey = Data("key".utf8)
         XCTAssertTrue(flow.canAttemptSchoolConnect)
         flow.schoolPlatformEnabled = true
         XCTAssertFalse(flow.canAttemptSchoolConnect)
         flow.schoolPlatformTenantID = "-bad"
         flow.schoolPlatformClientID = "client"
-        flow.schoolPlatformClientSecret = "secret"
+        flow.schoolPlatformClientSecret = Data("secret".utf8)
         XCTAssertFalse(flow.canAttemptSchoolConnect, "a tenant ID read as a flag")
         flow.schoolPlatformTenantID = "tenant-1"
         XCTAssertTrue(flow.canAttemptSchoolConnect)
@@ -126,7 +127,7 @@ final class SchoolPlatformSetupTests: XCTestCase {
             flow, profile: "Albion", url: "https://albion.jamfcloud.com",
             platform: row, opensPlatform: false)
         flow.schoolNetworkID = "net"
-        flow.schoolAPIKey = "key"
+        flow.schoolAPIKey = Data("key".utf8)
         XCTAssertTrue(text(flow.schoolSetupStdin()).hasPrefix("net\nkey\ny\n"))
         XCTAssertFalse(ReauthenticateSheet.canVerifySchool(
             isBusy: false, urlValid: true, networkID: "net", hasKey: true,

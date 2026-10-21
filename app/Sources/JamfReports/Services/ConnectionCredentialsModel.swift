@@ -19,7 +19,7 @@ final class ConnectionCredentialsModel {
         let scope: OnboardingFlow.PlatformScope
         let scopeID: String
         let clientID: String
-        let clientSecret: String
+        let clientSecret: Data
     }
 
     /// Everything outside the model: jamf-cli, the file system and the store. Tests inject all
@@ -94,7 +94,8 @@ final class ConnectionCredentialsModel {
     var clientID = ""
     var idsText = ""
     var secretFieldHasText = false
-    private(set) var clientSecret = ""
+    // Not observed, so a clear zeroes the stored bytes in place; the has-text Bool drives Run.
+    @ObservationIgnored private(set) var clientSecret = Data()
     private(set) var rows: [Row] = []
     private(set) var isRunning = false
     private(set) var hasRun = false
@@ -124,15 +125,13 @@ final class ConnectionCredentialsModel {
     // MARK: - Secret
 
     func setSecret(_ data: Data) {
-        clientSecret = String(data: data, encoding: .utf8) ?? ""
+        clientSecret.wipe()
+        clientSecret = data
     }
 
     /// Overwrites the secret before dropping it; the field's own copy is cleared by the sheet.
     func clearSecret() {
-        let count = clientSecret.count
-        if count > 0 { clientSecret = String(repeating: "\0", count: count) }
-        clientSecret.removeAll(keepingCapacity: false)
-        clientSecret = ""
+        clientSecret.wipe()
         secretFieldHasText = false
     }
 
@@ -191,7 +190,7 @@ final class ConnectionCredentialsModel {
     }
 
     private func addEnvironments(
-        _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: String
+        _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: Data
     ) async {
         for planned in plan {
             let label = planned.entry.label
@@ -215,7 +214,7 @@ final class ConnectionCredentialsModel {
     }
 
     private func updateAll(
-        _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: String
+        _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: Data
     ) async {
         for member in connection.members {
             // connections.json is a plain file; its ID goes to jamf-cli as a flag value.

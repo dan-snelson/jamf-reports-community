@@ -370,8 +370,11 @@ struct AddSheet: View {
     private func rowDetail(_ row: AddSheetPlan.UnassignedProfile) -> some View {
         if case .unavailable(let reason) = row.use {
             note(reason)
-        } else if row.name == adoptingName, let flow = adoptFlow {
-            adoptStatus(flow.statuses[row.name] ?? .pending, flow: flow)
+        } else {
+            if let twin = discovery?.twinNotes[row.name] { note(twin) }
+            if row.name == adoptingName, let flow = adoptFlow {
+                adoptStatus(flow.statuses[row.name] ?? .pending, flow: flow)
+            }
         }
     }
 
@@ -451,11 +454,16 @@ struct AddSheet: View {
         let current = currentTakesProtect ? workspace.profile : nil
         let found = await Task.detached { AddSheetDiscovery.load(currentWorkspace: current) }.value
         discovery = found
-        guard !choiceTouched else { return }
-        choice = AddSheetPlan.preselection(
-            unassigned: found.unassigned ?? [],
-            currentAcceptsProtect: currentTakesProtect && found.currentProtect == nil,
-            requested: requested)
+        if !choiceTouched {
+            choice = AddSheetPlan.preselection(
+                unassigned: found.unassigned ?? [],
+                currentAcceptsProtect: currentTakesProtect && found.currentProtect == nil,
+                requested: requested)
+        }
+        let probed = await Task.detached {
+            AddSheetDiscovery.load(currentWorkspace: current, probeTwins: true)
+        }.value
+        discovery?.twinNotes = probed.twinNotes
     }
 
     /// Sets up a workspace for a profile jamf-cli already has: the setup the first launch runs

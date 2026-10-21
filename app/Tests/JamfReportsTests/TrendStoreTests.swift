@@ -545,7 +545,7 @@ final class TrendStoreTests: XCTestCase {
 
         let series = store.managedDeviceSeries()
 
-        let computers = try? XCTUnwrap(series.first { $0.label == "Computers" })
+        let computers = try? XCTUnwrap(series.first { $0.label == "Macs" })
         XCTAssertEqual(computers?.points.map(\.value), [100, 110, 120])
 
         let mobile = try? XCTUnwrap(series.first { $0.label == "Mobile devices" })
@@ -567,7 +567,7 @@ final class TrendStoreTests: XCTestCase {
 
         let series = store.managedDeviceSeries()
 
-        XCTAssertEqual(series.map(\.label), ["Computers"])
+        XCTAssertEqual(series.map(\.label), ["Macs"])
     }
 
     func testManagedDeviceSeriesEmptyWhenNoSummaries() {

@@ -143,6 +143,10 @@ versions in this repository map to git tags.
   make. (#284)
 - The bundled debug-logging profile now uses the layout macOS reads, and Settings › Logging
   shows when a profile sets logging for the app. (#284)
+- Settings › Logging's two switches are gone: they wrote a per-user file macOS does not read,
+  so they never changed what was logged. The panel now shows the profile's settings, the
+  bundled profile, and the `sudo log config` commands an administrator can run on one Mac.
+  (#284)
 - Connecting Jamf Protect or Jamf School no longer changes jamf-cli's default profile: jamf-cli's
   setup makes the new profile the default, and the app now puts the previous one back. (#284)
 - Connecting Jamf Protect or Jamf School now tries the credentials with one read before the

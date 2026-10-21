@@ -314,7 +314,10 @@ struct TrendsView: View {
         }
         .onChange(of: range) { _, newValue in
             selectedDate = nil
-            defaultTrendRangeRaw = newValue.rawValue
+            // A managed default stays as the profile sets it; the picker changes this view only.
+            if !ManagedPreference.isForced("defaultTrendRange") {
+                defaultTrendRangeRaw = newValue.rawValue
+            }
             // Range change only re-filters cached data — no disk read.
             if !workspaceStore.demoMode {
                 withAnimation(.snappy) { trendStore.setRange(newValue) }

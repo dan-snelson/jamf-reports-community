@@ -13,6 +13,7 @@ struct SettingsView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast
     @AppStorage("autoUpdateJamfCLI") private var autoUpdate = false
+    private var autoUpdateManaged: Bool { ManagedPreference.isForced("autoUpdateJamfCLI") }
     @State private var bridge = CLIBridge()
     @State private var experimentalFeatures = ExperimentalFeatureService()
     @State private var experimentalExpanded = false
@@ -137,9 +138,9 @@ struct SettingsView: View {
                 Divider().background(Theme.Hairline.standard)
                 settingsRow(
                     label: "Auto-update jamf-cli",
-                    sub: "Check on launch",
+                    sub: autoUpdateManaged ? ManagedPreference.note : "Check on launch",
                     trailing: AnyView(PNPToggle(isOn: $autoUpdate)
-                        .disabled(workspace.demoMode)
+                        .disabled(workspace.demoMode || autoUpdateManaged)
                         .help(workspace.demoMode ? DemoData.liveOnlyHelp : ""))
                 )
                 Divider().background(Theme.Hairline.standard)
@@ -164,6 +165,10 @@ struct SettingsView: View {
 
     private nonisolated static func providerLabel(_ name: String) -> String {
         "On \(name) — multi-Mac coordination turns on automatically. Run Check on the Config screen reports who else writes here."
+    }
+
+    private var workspaceRootManaged: Bool {
+        ManagedPreference.isForced(WorkspaceRootStore.defaultsKey)
     }
 
     private var workspaceLocationCard: some View {
@@ -192,13 +197,20 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if workspaceRootManaged {
+                    Text(ManagedPreference.note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                }
+
                 HStack(spacing: 8) {
                     PNPButton(title: "Choose folder…", icon: "folder", size: .sm) {
                         chooseWorkspaceRoot()
                     }
-                    .disabled(workspace.demoMode)
+                    .disabled(workspace.demoMode || workspaceRootManaged)
                     .help(workspace.demoMode
                           ? DemoData.liveOnlyHelp
+                          : workspaceRootManaged ? ManagedPreference.note
                           : "Pick the folder that holds your Jamf Reports workspaces.")
                     .accessibilityHint("Opens a folder picker for the workspace location.")
 
@@ -206,7 +218,9 @@ struct SettingsView: View {
                         PNPButton(title: "Use default", icon: "arrow.uturn.backward", size: .sm) {
                             applyWorkspaceRoot(nil)
                         }
-                        .help("Go back to ~/Jamf-Reports on this Mac.")
+                        .disabled(workspaceRootManaged)
+                        .help(workspaceRootManaged
+                              ? ManagedPreference.note : "Go back to ~/Jamf-Reports on this Mac.")
                     }
                 }
 
@@ -625,7 +639,7 @@ struct SettingsView: View {
                 settingsRow(
                     label: "Check for updates",
                     sub: updates.isForcedByProfile
-                        ? "Set by your organization's configuration profile"
+                        ? ManagedPreference.note
                         : "Once a day, stable releases only. Nothing is downloaded or installed.",
                     trailing: AnyView(PNPToggle(isOn: Binding(
                         get: { updates.isEnabled }, set: { updates.setEnabled($0) }
@@ -762,14 +776,17 @@ struct SettingsView: View {
                 SectionHeader(title: "Data & Charts")
                 settingsRow(
                     label: "Default trend range",
-                    sub: "Applies to Overview and Trends until you change the picker in-view.",
+                    sub: trendRangeManaged ? ManagedPreference.note
+                        : "Applies to Overview and Trends until you change the picker in-view.",
                     trailing: AnyView(trendRangePicker)
                 )
                 Divider().background(Theme.Hairline.standard)
                 settingsRow(
                     label: "Skip expensive collections",
-                    sub: skipExpensiveCollectionsSubtitle,
-                    trailing: AnyView(PNPToggle(isOn: $skipExpensiveCollections))
+                    sub: skipExpensiveManaged
+                        ? ManagedPreference.note : skipExpensiveCollectionsSubtitle,
+                    trailing: AnyView(PNPToggle(isOn: $skipExpensiveCollections)
+                        .disabled(skipExpensiveManaged))
                 )
             }
         }
@@ -788,7 +805,14 @@ struct SettingsView: View {
         .labelsHidden()
         .pickerStyle(.menu)
         .frame(width: 130)
+        .disabled(trendRangeManaged)
     }
+
+    private var trendRangeManaged: Bool { ManagedPreference.isForced("defaultTrendRange") }
+    private var skipExpensiveManaged: Bool {
+        ManagedPreference.isForced("skipExpensiveCollections")
+    }
+    private var hiddenTabsManaged: Bool { ManagedPreference.isForced("hiddenTabs") }
 
     /// The app is also the `jamf-reports` command-line tool (one binary, installed from the
     /// Command-line tool card above); jamf-cli, which supplies the data, is separate.
@@ -1202,10 +1226,13 @@ struct SettingsView: View {
                         v.showAll()
                         hiddenTabsRaw = v.serialize()
                     }
-                    .help("Restore every hidden tab to the sidebar.")
+                    .disabled(hiddenTabsManaged)
+                    .help(hiddenTabsManaged
+                          ? ManagedPreference.note : "Restore every hidden tab to the sidebar.")
                 }
-                Text("Hide dashboards you don't use. Core tabs (Overview, Computers, Data Sources, "
-                     + "Settings) cannot be hidden.")
+                Text(hiddenTabsManaged ? ManagedPreference.note
+                     : "Hide dashboards you don't use. Core tabs (Overview, Computers, Data "
+                     + "Sources, Settings) cannot be hidden.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                 ForEach(
@@ -1275,6 +1302,7 @@ struct SettingsView: View {
                 ),
                 label: "\(tab.label) visibility"
             )
+            .disabled(hiddenTabsManaged)
         }
         .padding(.vertical, 2)
     }

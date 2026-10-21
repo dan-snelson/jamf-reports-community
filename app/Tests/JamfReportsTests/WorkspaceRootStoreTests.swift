@@ -108,6 +108,21 @@ final class WorkspaceRootStoreTests: XCTestCase {
         XCTAssertFalse(WorkspaceRootStore.isCustomised(defaults: defaults))
     }
 
+    /// A root a configuration profile sets cannot be changed or cleared, and nothing is written
+    /// or created: the call says so instead of reporting a change macOS would ignore.
+    func testManagedRootRefusesSetAndUseDefault() throws {
+        let forced = try XCTUnwrap(ForcedDefaults(
+            suiteName: suiteName, forced: [WorkspaceRootStore.defaultsKey]))
+        let fresh = scratch.appendingPathComponent("never-created", isDirectory: true)
+        for url in [fresh, nil] {
+            XCTAssertThrowsError(try WorkspaceRootStore.set(url, defaults: forced)) {
+                XCTAssertTrue($0.localizedDescription.contains("configuration profile"))
+            }
+        }
+        XCTAssertNil(defaults.string(forKey: WorkspaceRootStore.defaultsKey))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fresh.path))
+    }
+
     /// A share that has unmounted must NOT silently fall back to `~/Jamf-Reports`:
     /// that would start a second, empty history beside the real one and look
     /// like total data loss. The path stays as configured and the Config Doctor
@@ -342,4 +357,16 @@ final class WorkspaceRootStoreTests: XCTestCase {
         try WorkspaceRootStore.set(scratch, defaults: defaults)
         XCTAssertTrue(WorkspaceRootStore.isCustomised(defaults: defaults))
     }
+}
+
+/// Stands in for a configuration profile: `objectIsForced` is all `ManagedPreference` reads.
+final class ForcedDefaults: UserDefaults {
+    private let forced: Set<String>
+
+    init?(suiteName: String, forced: Set<String>) {
+        self.forced = forced
+        super.init(suiteName: suiteName)
+    }
+
+    override func objectIsForced(forKey key: String) -> Bool { forced.contains(key) }
 }

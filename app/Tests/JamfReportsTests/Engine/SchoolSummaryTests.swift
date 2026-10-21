@@ -211,14 +211,18 @@ final class SchoolSummaryTests: XCTestCase {
         }
     }
 
-    func testIPadOnlyDayHeadlinesTheMobileCount() throws {
+    /// Managed Computers counts Macs only, so an iPad-only day is counted by the mobile metric.
+    func testIPadOnlyDayIsCountedAsMobileNotAsComputers() throws {
         try writeDevices("""
-        [{"name":"Cart iPad 01","serialNumber":"I1","os":"iPadOS 27.0.1","inTrash":false},
-         {"name":"Cart iPad 02","serialNumber":"I2","os":"iPadOS 27.0.1","inTrash":false}]
+        [{"name":"Cart iPad 01","serialNumber":"I1","os":"iPadOS 27.0.1","isManaged":true,
+          "inTrash":false},
+         {"name":"Cart iPad 02","serialNumber":"I2","os":"iPadOS 27.0.1","isManaged":true,
+          "inTrash":false}]
         """)
         write()
         let store = TrendStore(summaries: [try summary()], range: .all)
-        XCTAssertEqual(store.points(metric: .managedDevices).map(\.value), [2])
+        XCTAssertTrue(store.points(metric: .managedDevices).isEmpty)
+        XCTAssertEqual(store.points(metric: .mobileManaged).map(\.value), [2])
     }
 
     private func cacheSOFA() throws {

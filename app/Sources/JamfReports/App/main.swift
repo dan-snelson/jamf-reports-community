@@ -931,6 +931,16 @@ func runIncludedCLI(_ arguments: [String]) async {
 
 // MARK: - Entry point
 
+// Run through the `jamf-reports` link, re-exec the bundled executable (same pid, arguments and
+// streams) so every preference read, `--scheduled-run` and the CLI included, uses the app's domain.
+if let realPath = CLIInstaller.relaunchPath(
+    bundleIdentifier: Bundle.main.bundleIdentifier, executablePath: Bundle.main.executablePath) {
+    var argv: [UnsafeMutablePointer<CChar>?] = CommandLine.arguments.map { strdup($0) } + [nil]
+    execv(realPath, &argv)
+    fputs("[warn] could not run \(realPath): \(String(cString: strerror(errno))); "
+        + "preferences are read from the jamf-reports domain\n", stderr)
+}
+
 // Install uncaught-exception handler before any UI or CLI work. Crash logs land at
 // ~/Library/Logs/JamfReports/crash_<timestamp>.log.
 CrashReporter.install()

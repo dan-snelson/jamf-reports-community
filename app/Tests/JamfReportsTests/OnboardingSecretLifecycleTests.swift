@@ -98,4 +98,15 @@ final class OnboardingSecretLifecycleTests: XCTestCase {
         await flow.registerProtectProfile()
         XCTAssertEqual(flow.protectClientSecret, Data("protect-secret".utf8))
     }
+
+    func test_schoolPlatformOnWithBlankTenantStopsBeforeTheBinary() async throws {
+        let flow = makeFlow(binary: try stub())
+        fillSchool(flow)
+        flow.schoolPlatformEnabled = true
+        flow.schoolPlatformTenantID = ""
+        await flow.registerSchoolProfile()
+        XCTAssertEqual(flow.schoolConnectionError, OnboardingFlow.scopeIDProblemText)
+        XCTAssertEqual(calls(), 0)
+        XCTAssertEqual(flow.schoolAPIKey, Data("school-key".utf8))
+    }
 }

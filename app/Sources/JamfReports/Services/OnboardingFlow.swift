@@ -734,6 +734,11 @@ final class OnboardingFlow {
             schoolConnectionError = FlowError.invalidJamfURL.localizedDescription
             return
         }
+        // With the switch on, a blank tenant ID would send the setup an empty prompt answer.
+        guard !schoolPlatformEnabled || isSchoolPlatformComplete else {
+            schoolConnectionError = FlowError.invalidScopeID.localizedDescription
+            return
+        }
 
         isConnectingSchool = true
         defer { isConnectingSchool = false }

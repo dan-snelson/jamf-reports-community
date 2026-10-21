@@ -2057,9 +2057,10 @@ final class CLIBridge {
             onLine(.init(timestamp: Date(), level: .fail,
                          text: "[error] " + Self.explainExit(exit, operation: "Backup")))
             // The unfinished Jamf Pro files are never kept; an empty staging folder lets
-            // Protect still back up below.
+            // Protect still back up below. Not intermediate, so a name planted after the
+            // removal fails the create and goes to the discard below.
             let cleared = (try? fm.removeItem(at: validatedTemp)) != nil
-                && (try? fm.createDirectory(at: validatedTemp, withIntermediateDirectories: true,
+                && (try? fm.createDirectory(at: validatedTemp, withIntermediateDirectories: false,
                                             attributes: [.posixPermissions: 0o700])) != nil
             guard cleared else {
                 discardStaging(validatedTemp, onLine: onLine)

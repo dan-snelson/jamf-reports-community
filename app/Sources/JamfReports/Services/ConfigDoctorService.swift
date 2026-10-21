@@ -1051,7 +1051,7 @@ extension ConfigDoctorService {
                     + "folder you own."
             )]
         case .ok:
-            guard inputs.rootIsCustom else { return [] }
+            guard inputs.rootIsCustom else { return ownershipUncheckedRows(inputs) }
             let provider = inputs.providerOf(inputs.workspaceRoot)
             let where_ = provider.map { "on \($0.displayName)" } ?? "at a custom location"
             return [DoctorRow(
@@ -1060,8 +1060,25 @@ extension ConfigDoctorService {
                 title: "Workspace is \(where_)",
                 detail: "Profiles, history and reports are read from and written to \(path).",
                 hint: nil
-            )]
+            )] + ownershipUncheckedRows(inputs)
         }
+    }
+
+    /// The owner and permission checks are skipped on network and File Provider volumes, which
+    /// report modes that say nothing about who can write, so say so instead of staying silent.
+    private static func ownershipUncheckedRows(_ inputs: CloudStorageInputs) -> [DoctorRow] {
+        let path = inputs.workspaceRoot.path
+        guard WorkspaceRootStore.skipsOwnershipChecks(path) else { return [] }
+        return [DoctorRow(
+            id: "cloud.root_ownership_unchecked",
+            severity: .warn,
+            title: "Workspace folder ownership is not checked on this volume",
+            detail: "\(path) is on a network or synced volume, where the app cannot read who "
+                + "owns the folder or who can write to it. Device inventory and run logs "
+                + "kept here are exposed to any account that can write it.",
+            hint: "Make sure other accounts cannot write this folder, on the share or in the "
+                + "provider's sharing settings."
+        )]
     }
 
     // MARK: Workspace shape

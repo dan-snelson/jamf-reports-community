@@ -44,6 +44,13 @@ profile", and the app never writes that key itself.
   accounts. Config Doctor (Health Audit › Config Doctor) reports a folder that is missing,
   read-only, in a system or credentials location, or open to other accounts.
 - A system or credentials location is refused and the default `~/Jamf-Reports` is used.
+- Under `/Volumes` and `~/Library/CloudStorage` the app does not check who owns the folder
+  or who can write to it, because network and File Provider volumes report owners and modes
+  that say nothing about access. Make sure other accounts cannot write it. Config Doctor
+  shows a warning (`cloud.root_ownership_unchecked`) for such a folder.
+- A profile with System scope gives every account on the Mac the same root. The example
+  `.mobileconfig` uses User scope; use System scope only when every account should share
+  one folder.
 - Existing workspaces are not moved. Copy them to the new folder yourself.
 - With the key managed, Settings › Workspace location's Choose folder and Use default are
   locked, and the app refuses to change the folder.
@@ -158,6 +165,6 @@ Not a preference, and no profile sets it.
 
 | Variable | What it does |
 |---|---|
-| `JRC_WORKSPACES_ROOT` | The workspaces folder, ahead of `workspacesRootPath`. Set it in a script or launchd job that must point the `jamf-reports` command at another folder than the app's setting. A system or credentials location is refused, as for the key. |
+| `JRC_WORKSPACES_ROOT` | The workspaces folder, ahead of a `workspacesRootPath` the user set, but not ahead of one a profile manages: the profile's value wins and the app logs that the variable was ignored. Set it in a script or launchd job that must point the `jamf-reports` command at another folder than the app's setting. A system or credentials location is refused, as for the key. |
 
 See [Command Line](https://github.com/tonyyo11/jamf-reports-community/wiki/07-Command-Line).

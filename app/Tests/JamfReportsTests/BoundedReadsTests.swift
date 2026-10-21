@@ -90,6 +90,28 @@ final class BoundedReadsTests: XCTestCase {
         XCTAssertEqual(outcome, true, "a FIFO must be refused without blocking")
     }
 
+    func testAHardLinkIsRefusedAndLoggedOnlyWhenNotFollowingLinks() throws {
+        let dir = root.appendingPathComponent("links", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let plain = dir.appendingPathComponent("plain.json")
+        try Data("[1]".utf8).write(to: plain)
+        XCTAssertEqual(try BoundedFile.read(plain, limit: 10, followSymlinks: false),
+                       Data("[1]".utf8))
+
+        let original = dir.appendingPathComponent("original.json")
+        try Data("[2]".utf8).write(to: original)
+        let second = dir.appendingPathComponent("second.json")
+        try fm.linkItem(at: original, to: second)
+        XCTAssertThrowsError(try BoundedFile.read(second, limit: 10, followSymlinks: false)) {
+            XCTAssertEqual($0 as? BoundedFile.Failure, .unreadable(EMLINK))
+        }
+        XCTAssertThrowsError(
+            try BoundedFile.read(second, limit: 10, followSymlinks: false, inside: root))
+        XCTAssertNil(BoundedFile.stateData(original))
+        XCTAssertTrue(logged("second.json not read: it has 2 hard links"))
+        XCTAssertEqual(try BoundedFile.read(second, limit: 10), Data("[2]".utf8))
+    }
+
     // MARK: - BoundedFile.read inside a root
 
     /// `jamf-cli-data/computers` swapped for a link to a folder outside the workspace after the
@@ -464,6 +486,34 @@ final class BoundedReadsTests: XCTestCase {
         XCTAssertEqual(threw, true)
         let candidates = within { CollectedEACandidates.load(dataDir: dataDir, tracked: []) }
         XCTAssertEqual(candidates?.isEmpty, true)
+    }
+
+    private func logged(_ text: String) -> Bool {
+        LogBuffer.shared.snapshot(minLevel: .debug, limit: 2000).contains { $0.message == text }
+    }
+
+    func testAFIFOAtTheSOFACacheReturnsQuicklyWithAWarning() throws {
+        let dataDir = root.appendingPathComponent("sofa-data", isDirectory: true)
+        try fifo(at: dataDir.appendingPathComponent("sofa/macos_data_feed.json"))
+        let snapshot = try XCTUnwrap(within { SOFAFeedService.load(dataDir: dataDir) })
+        XCTAssertEqual(snapshot.warnings, ["Could not decode SOFA cache for macos"])
+        XCTAssertTrue(logged("macos_data_feed.json not read: not a regular file"))
+    }
+
+    func testAMobileListFIFOOrOversizeFileIsNotReadAndIsLogged() throws {
+        let pipe = root.appendingPathComponent("mobile/list.json")
+        try fifo(at: pipe)
+        let snapshot = within {
+            MobileFleetService.load(listURL: pipe, inventoryURL: nil, profilesURL: nil)
+        }
+        XCTAssertNotNil(snapshot)
+        XCTAssertTrue(logged("list.json not read: not a regular file"))
+
+        let big = root.appendingPathComponent("mobile/big.json")
+        try Data("[]".utf8).write(to: big)
+        XCTAssertNil(BoundedFile.readLogged(big, limit: 1, category: .collect))
+        XCTAssertTrue(logged("big.json not read: over 0 MB"))
+        XCTAssertEqual(BoundedFile.readLogged(big, limit: 2, category: .collect), Data("[]".utf8))
     }
 
     // MARK: - Daily summaries, run-in-progress probe, backup and snapshot manifests

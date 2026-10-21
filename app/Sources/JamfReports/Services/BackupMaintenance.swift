@@ -169,8 +169,18 @@ enum BackupMaintenance {
                 let proFailed = BackupProductResult.pro(inBackup: url)?.state == .failed
                 defer { if protect?.isComplete == true { newerProtectComplete = true } }
                 if newerProtectComplete {
-                    if proFailed { superseded.append(url) }
-                    return !proFailed
+                    guard proFailed else { return true }
+                    // A manifest edited to say failed must not get a Jamf Pro backup removed.
+                    guard holdsOnlyProtectPart(url) else {
+                        onLine?(.init(
+                            timestamp: Date(), level: .warn,
+                            text: "[warn] backup \(url.lastPathComponent): manifest says the "
+                                + "Jamf Pro part failed but the folder holds Jamf Pro files — kept"
+                        ))
+                        return false
+                    }
+                    superseded.append(url)
+                    return false
                 }
                 guard protect?.keepsBackupFromPruning == true || proFailed else { return true }
                 held += 1
@@ -199,6 +209,14 @@ enum BackupMaintenance {
                 ))
             }
         }
+    }
+
+    /// Whether `backup` holds only what a failed Jamf Pro part leaves: `protect/`, the manifest
+    /// and dotfiles (`.jrc-host`). A folder that cannot be listed does not.
+    static func holdsOnlyProtectPart(_ backup: URL) -> Bool {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: backup.path)
+        else { return false }
+        return names.allSatisfy { $0 == "protect" || $0 == "manifest.json" || $0.hasPrefix(".") }
     }
 
     /// Post-success housekeeping run by both the `jamf-reports backup` command

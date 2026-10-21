@@ -24,7 +24,8 @@ enum BoundedFile {
     }
 
     /// At most `limit` bytes of the regular file at `url`. With `followSymlinks` false a link at
-    /// the final path component is refused (`unreadable(ELOOP)`) instead of opened. With `root`,
+    /// the final path component is refused (`unreadable(ELOOP)`) instead of opened, and a file
+    /// with more than one hard link is refused (`unreadable(EMLINK)`) and logged. With `root`,
     /// `url` must sit below it: a link anywhere below `root` is refused too when not following,
     /// and the opened file's real path must be inside `root`'s, else `unreadable(ELOOP)`.
     static func read(
@@ -86,6 +87,14 @@ enum BoundedFile {
             close(descriptor)
             throw Failure.notRegular
         }
+        // A second hard link is a way in that O_NOFOLLOW cannot see; logged, never silent.
+        guard followSymlinks || info.st_nlink <= 1 else {
+            close(descriptor)
+            AppLogger.event(.collect, .error,
+                "\(ConfigSchema.displayText(url.lastPathComponent)) not read: it has "
+                    + "\(info.st_nlink) hard links")
+            throw Failure.unreadable(EMLINK)
+        }
         return descriptor
     }
 
@@ -131,6 +140,25 @@ enum BoundedFile {
 
     /// Largest cached `pro audit` or group-tools snapshot read for the Audit screen.
     static let snapshotLimit = 64 * 1024 * 1024
+
+    /// Largest inventory snapshot (`mobile-devices-list`): a large district's list passes 64 MB.
+    static let inventoryLimit = 256 * 1024 * 1024
+
+    /// `read` following links, or nil. A file over `limit` or not a regular file is logged by
+    /// name, so a snapshot left unread is never silent; other failures are the caller's to log.
+    static func readLogged(_ url: URL, limit: Int, category: AppLogger.Category) -> Data? {
+        do {
+            return try read(url, limit: limit)
+        } catch let failure as Failure where failure == .tooLarge || failure == .notRegular {
+            let name = ConfigSchema.displayText(url.lastPathComponent)
+            let detail = failure == .tooLarge
+                ? "over \(limit / 1_048_576) MB" : failure.localizedDescription
+            AppLogger.event(category, .error, "\(name) not read: \(detail)")
+            return nil
+        } catch {
+            return nil
+        }
+    }
 
     /// Largest cached single-device record.
     static let deviceDetailLimit = 16 * 1024 * 1024

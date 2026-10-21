@@ -137,10 +137,18 @@ layout `man 5 os_log` documents, so debug and info messages are
 kept in the local log store. It does not set `Enable-Private-Data`: serials, host names and
 user names stay `<private>`. It is a user-scoped profile.
 
-The Settings › Logging switches do not use a profile. They write
-`~/Library/Preferences/Logging/Subsystems/com.github.tonyyo11.jamf-reports-community.plist`
-for the signed-in user, and they show only what that file holds, not a deployed profile.
-Changes apply the next time the app starts.
+Settings › Logging shows whether a configuration profile sets logging for the app and what it
+sets. For one Mac without a profile, an administrator can run:
+
+```sh
+sudo log config --subsystem com.github.tonyyo11.jamf-reports-community --mode "level:debug,persist:debug"
+sudo log config --subsystem com.github.tonyyo11.jamf-reports-community --reset
+```
+
+The first keeps debug and info messages for Jamf Reports; the second returns it to the default.
+Settings › Logging shows both commands with a Copy button. Earlier builds had two switches
+that wrote `~/Library/Preferences/Logging/Subsystems/`, a folder macOS does not read for
+logging settings; they are gone, and a file they left there can be deleted.
 
 See [Diagnostics & Troubleshooting](https://github.com/tonyyo11/jamf-reports-community/wiki/09-Diagnostics-and-Troubleshooting).
 

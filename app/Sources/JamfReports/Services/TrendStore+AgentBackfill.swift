@@ -1,7 +1,7 @@
 import Foundation
 
 /// Per-agent history for days the app recorded before it wrote `securityAgentCoverage`,
-/// rebuilt from the dated `ea-results` snapshots the way `loadMobileCountBackfill` rebuilds
+/// rebuilt from the dated `ea-results` snapshots the way `resolvingMobile` rebuilds
 /// mobile counts. It is a second phase after the Trends and Overview load, because one
 /// production snapshot is about 13 MB: decoding one takes about 0.5 s in a debug build (about
 /// 0.1 s of it the coverage pass), so every day with a snapshot would hold the first paint for

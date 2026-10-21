@@ -9,6 +9,9 @@ versions in this repository map to git tags.
 
 ### Added
 
+- A configuration profile can now turn AI off or limit it to on-device models with the
+  `AIPolicy` key (`off` or `onDevice`), whatever each workspace's config.yaml says. See
+  `application_management/` for every key an organization can manage. (#284)
 - Jamf Protect now works with a Jamf School workspace (experimental): connect it from Data
   Sources and Protect is collected after each School collect, gets its own Jamf Protect screen,
   matches Protect computers to Jamf School Macs, and adds its tabs to the School workbook. It is
@@ -133,6 +136,13 @@ versions in this repository map to git tags.
 
 ### Fixed
 
+- The `jamf-reports` command run through its `/usr/local/bin` link now reads the app's
+  settings and configuration profiles, including the workspace location. (#284)
+- Every setting a configuration profile manages is now locked in the app and says so, and
+  the app no longer writes over it; Workspace location no longer reports a change it cannot
+  make. (#284)
+- The bundled debug-logging profile now uses the layout macOS reads, and Settings › Logging
+  shows when a profile sets logging for the app. (#284)
 - Connecting Jamf Protect or Jamf School no longer changes jamf-cli's default profile: jamf-cli's
   setup makes the new profile the default, and the app now puts the previous one back. (#284)
 - Connecting Jamf Protect or Jamf School now tries the credentials with one read before the

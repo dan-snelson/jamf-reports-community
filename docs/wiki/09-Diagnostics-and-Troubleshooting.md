@@ -30,21 +30,23 @@ Every action logs through the unified `os.Logger` under subsystem
 `collect`, `report`, `auth`, `schedule`, `webhook`, `platform`, `ui` — so you can filter
 to the area you care about in Console.app or the in-app viewer.
 
-**Settings → Logging** controls verbosity and shows recent entries:
+**Settings → Logging** shows how logging is set for the app and recent entries:
 
-- **Persist verbose logs** — keeps `debug`/`info` entries in the local log store (off by
-  default; the OS otherwise persists only `notice` and above). Interpolated values stay
-  redacted as `<private>`.
-- **Reveal private values in logs** — writes serials, hostnames, and usernames in full to
-  the **local** store on this Mac. Off by default and warned; leave it off on managed or
-  government Macs.
-- **Log viewer** — a snapshot of this session's entries, filterable by minimum level, time
-  window, and free-text search. **Export** writes a redacted copy regardless of the reveal
-  toggle.
+- **Configuration profile** — whether a profile sets logging for Jamf Reports, and whether it
+  keeps verbose (`debug`/`info`) entries and private values. Without one, the OS keeps only
+  `notice` and above, and interpolated values stay `<private>`.
 - **Reveal MDM profile** — reveals the bundled `JamfReports-Debug-Logging.mobileconfig`
-  (persist-verbose only; never `Enable-Private-Data`) for org-wide deployment via Jamf.
+  (keeps verbose entries; never `Enable-Private-Data`) for deployment through Jamf.
+- **One Mac** — a copyable command for an administrator:
+  `sudo log config --subsystem com.github.tonyyo11.jamf-reports-community --mode "level:debug,persist:debug"`,
+  and `--reset` in place of `--mode …` to return to the default.
+- **Log viewer** — a snapshot of this session's entries, filterable by minimum level, time
+  window, and free-text search. **Export** writes a redacted copy.
 
-Toggle changes take effect at the **next launch** — quit and reopen the app. To watch logs
+Earlier builds had **Persist verbose logs** and **Reveal private values** switches. They wrote a
+per-user file macOS does not read for logging settings, so they are gone.
+
+To watch logs
 live in Terminal:
 
 ```bash

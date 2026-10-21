@@ -194,11 +194,16 @@ final class SchoolSummaryTests: XCTestCase {
         write()
         let store = TrendStore(summaries: [try summary()], range: .all)
 
-        XCTAssertEqual(TrendSeries.Metric.schoolMetrics, [.managedDevices, .stale])
-        for metric in TrendSeries.Metric.schoolMetrics {
+        XCTAssertEqual(TrendSeries.Metric.schoolMetrics, [
+            .managedDevices, .stale, .osCurrent,
+            .mobileManaged, .mobileSupervised, .mobileStale, .mobileOSCurrent,
+        ])
+        // OS currency needs a cached SOFA feed, which this workspace has not.
+        for metric in TrendSeries.Metric.schoolMetrics where ![.osCurrent, .mobileOSCurrent]
+            .contains(metric) {
             XCTAssertFalse(store.points(metric: metric).isEmpty, "\(metric.rawValue)")
         }
-        let others = TrendSeries.Metric.allCases.filter {
+        let others = (TrendSeries.Metric.allCases + TrendSeries.Metric.mobileMetrics).filter {
             !TrendSeries.Metric.schoolMetrics.contains($0) && $0 != .activeDevices
         }
         for metric in others {

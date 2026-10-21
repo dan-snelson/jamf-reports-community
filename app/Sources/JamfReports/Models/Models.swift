@@ -1065,6 +1065,9 @@ struct TrendSeries: Identifiable, Sendable {
         /// `securityAgentCoverage`. The agent the score counts as EDR is `.edrAgent`, so a
         /// workspace offers `.agent` only for the others. Its raw value is `agent:<name>`.
         case agent(String)
+        /// The summary's `mobile` figures (mobile spec 4.1), counted apart from Macs.
+        case mobileManaged, mobileOSCurrent, mobilePasscode, mobileSupervised,
+             mobileDataProtection, mobileStale, mobileJailbroken
 
         /// Every metric that does not depend on the workspace, in their original order. The
         /// agent metrics come from `security_agents`, so they are not listed here.
@@ -1074,10 +1077,22 @@ struct TrendSeries: Identifiable, Sendable {
             .gatekeeper,
         ]
 
-        /// What a Jamf School summary can measure: device counts and the Mac stale count (the
-        /// Trends screen offers `.stale` only once a summary has Macs). Every other metric reads
-        /// a Mac security figure School does not carry.
-        static let schoolMetrics: [Metric] = [.managedDevices, .stale]
+        /// The mobile metrics, offered only where a summary carries them, so they are not in
+        /// `allCases` (whose list the Overview's score cards also offer).
+        static let mobileMetrics: [Metric] = [
+            .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+            .mobileDataProtection, .mobileStale, .mobileJailbroken,
+        ]
+
+        /// What a Jamf School summary can measure: device counts, the Mac stale count and OS
+        /// currency, and the mobile figures School rows carry (the Trends screen offers each only
+        /// once a summary has it). Every other metric reads a figure School does not carry.
+        static let schoolMetrics: [Metric] = [
+            .managedDevices, .stale, .osCurrent,
+            .mobileManaged, .mobileSupervised, .mobileStale, .mobileOSCurrent,
+        ]
+
+        var isMobile: Bool { Self.mobileMetrics.contains(self) }
 
         static let agentPrefix = "agent:"
 
@@ -1100,6 +1115,13 @@ struct TrendSeries: Identifiable, Sendable {
             case .firewall: return "firewall"
             case .gatekeeper: return "gatekeeper"
             case .agent(let name): return Self.agentPrefix + Self.encoded(name)
+            case .mobileManaged: return "mobileManaged"
+            case .mobileOSCurrent: return "mobileOSCurrent"
+            case .mobilePasscode: return "mobilePasscode"
+            case .mobileSupervised: return "mobileSupervised"
+            case .mobileDataProtection: return "mobileDataProtection"
+            case .mobileStale: return "mobileStale"
+            case .mobileJailbroken: return "mobileJailbroken"
             }
         }
 
@@ -1112,7 +1134,8 @@ struct TrendSeries: Identifiable, Sendable {
                 self = .agent(name)
                 return
             }
-            guard let match = Self.allCases.first(where: { $0.rawValue == rawValue }) else {
+            guard let match = (Self.allCases + Self.mobileMetrics)
+                .first(where: { $0.rawValue == rawValue }) else {
                 return nil
             }
             self = match
@@ -1146,6 +1169,13 @@ struct TrendSeries: Identifiable, Sendable {
             case .firewall:      return "Firewall Enabled"
             case .gatekeeper:    return "Gatekeeper Enabled"
             case .agent(let name): return "\(name) coverage"
+            case .mobileManaged: return "Managed mobile devices"
+            case .mobileOSCurrent: return "Mobile devices on current OS"
+            case .mobilePasscode: return "Mobile passcode compliant"
+            case .mobileSupervised: return "Supervised mobile devices"
+            case .mobileDataProtection: return "Mobile data protection"
+            case .mobileStale: return "Stale mobile devices"
+            case .mobileJailbroken: return "Jailbroken mobile devices"
             }
         }
 
@@ -1160,7 +1190,8 @@ struct TrendSeries: Identifiable, Sendable {
         }
         var unit: String {
             switch self {
-            case .stale, .activeDevices, .mscpBandTrend, .managedDevices: return ""
+            case .stale, .activeDevices, .mscpBandTrend, .managedDevices, .mobileManaged,
+                 .mobileStale, .mobileJailbroken: return ""
             default: return "%"
             }
         }
@@ -1170,15 +1201,19 @@ struct TrendSeries: Identifiable, Sendable {
         /// needs a decision here. Read by the Trends colours and the AI trend input alike.
         var polarity: FleetInsightInput.Polarity {
             switch self {
-            case .stale: .lowerIsBetter
-            case .activeDevices, .mscpBandTrend, .managedDevices: .neutral
+            case .stale, .mobileStale, .mobileJailbroken: .lowerIsBetter
+            case .activeDevices, .mscpBandTrend, .managedDevices, .mobileManaged: .neutral
             case .stability, .compliance, .fileVault, .osCurrent, .edrAgent, .agent, .patch,
-                 .securityScore, .sip, .firewall, .gatekeeper: .higherIsBetter
+                 .securityScore, .sip, .firewall, .gatekeeper, .mobileOSCurrent, .mobilePasscode,
+                 .mobileSupervised, .mobileDataProtection: .higherIsBetter
             }
         }
         var minY: Double {
             switch self {
-            case .activeDevices, .mscpBandTrend, .managedDevices: return 0
+            case .activeDevices, .mscpBandTrend, .managedDevices, .mobileManaged, .mobileStale,
+                 .mobileJailbroken: return 0
+            case .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+                 .mobileDataProtection: return 50
             case .stability:     return 40
             case .compliance:    return 40
             case .fileVault, .sip, .firewall, .gatekeeper: return 60
@@ -1192,8 +1227,9 @@ struct TrendSeries: Identifiable, Sendable {
         }
         var maxY: Double {
             switch self {
-            case .activeDevices, .managedDevices: return 1000
-            case .stale:         return 60
+            case .activeDevices, .managedDevices, .mobileManaged: return 1000
+            case .stale, .mobileStale: return 60
+            case .mobileJailbroken: return 10
             case .mscpBandTrend: return 500  // Per-band device count max
             default:             return 100
             }
@@ -1215,6 +1251,13 @@ struct TrendSeries: Identifiable, Sendable {
             case .firewall:      return 0x5E5CE6
             case .gatekeeper:    return 0xAC8E68
             case .agent(let name): return Self.agentColor(name)
+            case .mobileManaged: return 0x9B59B6  // Matches the Mobile devices series line
+            case .mobileOSCurrent: return 0x0A84FF
+            case .mobilePasscode: return 0x30D158
+            case .mobileSupervised: return 0x5E5CE6
+            case .mobileDataProtection: return 0x64D2FF
+            case .mobileStale: return 0xFF9F0A
+            case .mobileJailbroken: return 0xFF453A
             }
         }
 

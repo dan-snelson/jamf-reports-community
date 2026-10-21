@@ -244,6 +244,9 @@ enum WorkspaceRootStore {
         defaults: UserDefaults = .standard,
         fileManager: FileManager = .default
     ) throws -> URL {
+        guard !ManagedPreference.isForced(defaultsKey, defaults: defaults) else {
+            throw RootError.managed
+        }
         guard let url else {
             defaults.removeObject(forKey: defaultsKey)
             return defaultRoot
@@ -271,9 +274,13 @@ enum WorkspaceRootStore {
 
     enum RootError: Error, LocalizedError {
         case rejected(Validation)
+        case managed
 
         var errorDescription: String? {
             switch self {
+            case .managed:
+                return "The workspace location is set by your organization's configuration "
+                    + "profile, so it cannot be changed here."
             case .rejected(let validation):
                 return validation.message ?? "That folder cannot be used as a workspace root."
             }

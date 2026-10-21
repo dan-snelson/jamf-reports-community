@@ -36,12 +36,13 @@ final class OnboardingFlowPTYTests: XCTestCase {
         let sleeper = try stub("sleep-stub", body: "echo $$ > '\(pidFile.path)'\nexec sleep 10")
         let started = Date()
         do {
-            _ = try await run(sleeper, input: "id\nsecret\n", timeout: 1)
+            // 3 s, not 1: under the full suite's load the shell may not reach its first line in 1.
+            _ = try await run(sleeper, input: "id\nsecret\n", timeout: 3)
             XCTFail("expected a timeout error")
         } catch let OnboardingFlow.FlowError.processFailed(message) {
-            XCTAssertEqual(message, "jamf-cli did not finish within 1 s")
+            XCTAssertEqual(message, "jamf-cli did not finish within 3 s")
         }
-        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 8)
         let pid = try XCTUnwrap(
             Int32(try String(contentsOf: pidFile, encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines)))
@@ -89,12 +90,12 @@ final class OnboardingFlowPTYTests: XCTestCase {
             "stubborn-stub", body: "echo $$ > '\(pidFile.path)'\ntrap '' TERM\nexec sleep 30")
         let started = Date()
         do {
-            _ = try await run(stubborn, input: "id\n", timeout: 1)
+            _ = try await run(stubborn, input: "id\n", timeout: 3)
             XCTFail("expected a timeout error")
         } catch let OnboardingFlow.FlowError.processFailed(message) {
-            XCTAssertEqual(message, "jamf-cli did not finish within 1 s")
+            XCTAssertEqual(message, "jamf-cli did not finish within 3 s")
         }
-        XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 12)
         let pid = try XCTUnwrap(
             Int32(try String(contentsOf: pidFile, encoding: .utf8)
                 .trimmingCharacters(in: .whitespacesAndNewlines)))

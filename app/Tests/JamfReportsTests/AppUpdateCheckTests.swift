@@ -50,6 +50,15 @@ final class AppUpdateCheckTests: XCTestCase {
         AppUpdateModel(defaults: defaults, currentVersion: current, fetch: github.fetch)
     }
 
+    func testAProfileForcedSwitchIsShownAsManaged() throws {
+        let forced = try XCTUnwrap(ForcedDefaults(
+            suiteName: suite, forced: [AppUpdateCheck.enabledKey]))
+        let github = FakeGitHub(.success(Data()))
+        XCTAssertTrue(AppUpdateModel(defaults: forced, currentVersion: "2.10.0",
+                                     fetch: github.fetch).isForcedByProfile)
+        XCTAssertFalse(model(current: "2.10.0", github: github).isForcedByProfile)
+    }
+
     // MARK: - Stable releases only
 
     func testAStableReleaseIsRead() throws {

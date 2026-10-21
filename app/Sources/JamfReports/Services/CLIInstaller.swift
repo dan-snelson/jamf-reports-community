@@ -31,6 +31,19 @@ enum CLIInstaller {
         Bundle.main.executableURL?.resolvingSymlinksInPath()
     }
 
+    /// The real executable to run instead when this process started through the link: then
+    /// `Bundle.main` has no identifier and `UserDefaults.standard` reads a `jamf-reports` domain,
+    /// missing the app's preferences and configuration profiles. Nil for a bundled launch, a
+    /// `swift run` binary (it resolves outside any `.app`) and a path that is not a link.
+    static func relaunchPath(bundleIdentifier: String?, executablePath: String?) -> String? {
+        guard bundleIdentifier == nil, let executablePath,
+              let resolved = realpath(executablePath, nil) else { return nil }
+        defer { free(resolved) }
+        let path = String(cString: resolved)
+        guard path != executablePath, path.contains(".app/Contents/MacOS/") else { return nil }
+        return path
+    }
+
     /// The command to run in a terminal when the app cannot write `targetDir` itself. Each
     /// path is single-quoted: inside double quotes a shell still runs `$(…)` and backticks.
     static func manualCommand(source: URL, targetDir: URL) -> String {

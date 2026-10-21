@@ -9,17 +9,9 @@ versions in this repository map to git tags.
 
 ### Added
 
-- Trends now follows mobile devices as well as Macs, on Jamf Pro and Jamf School workspaces:
-  managed, supervised, stale and on-current-OS mobile devices, plus passcode, data protection
-  and jailbreaks where Jamf Pro reports them. Macs and mobile devices are always counted apart,
-  and a figure a product does not report is left out, not shown as 0. Alerts can watch the new
-  figures. (#284)
-- A Jamf School collect now also reads the SOFA feed of current Apple OS releases, as a Jamf Pro
-  collect does, so a School workspace can say which Macs and mobile devices are on the current
-  OS. Add `sofa` to `jamf_cli.collect_skip` to leave it out on a network that must not reach
-  sofafeed.macadmins.io. (#284)
-- The Jamf School workbook has a Trends tab with one row per day, Macs and mobile devices in
-  their own columns. The other School tabs are unchanged. (#284)
+- A configuration profile can now turn AI off or limit it to on-device models with the
+  `AIPolicy` key (`off` or `onDevice`), whatever each workspace's config.yaml says. See
+  `application_management/` for every key an organization can manage. (#284)
 - Jamf Protect now works with a Jamf School workspace (experimental): connect it from Data
   Sources and Protect is collected after each School collect, gets its own Jamf Protect screen,
   matches Protect computers to Jamf School Macs, and adds its tabs to the School workbook. It is
@@ -78,12 +70,20 @@ versions in this repository map to git tags.
   a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
 - The workbook's Compliance Rules sheet has a Rule ID column at the end; the other columns are
   unchanged. (#284)
+- Trends now follows mobile devices as well as Macs, on Jamf Pro and Jamf School workspaces:
+  managed, supervised, stale and on-current-OS mobile devices, plus passcode, data protection
+  and jailbreaks where Jamf Pro reports them. Macs and mobile devices are always counted apart,
+  and a figure a product does not report is left out, not shown as 0. Alerts can watch the new
+  figures. (#284)
+- A Jamf School collect now also reads the SOFA feed of current Apple OS releases, as a Jamf Pro
+  collect does, so a School workspace can say which Macs and mobile devices are on the current
+  OS. Add `sofa` to `jamf_cli.collect_skip` to leave it out on a network that must not reach
+  sofafeed.macadmins.io. (#284)
+- The Jamf School workbook has a Trends tab with one row per day, Macs and mobile devices in
+  their own columns. The other School tabs are unchanged. (#284)
 
 ### Changed
 
-- **Add workspace or product…** now says when a Jamf Pro login reaches the same server as a
-  Platform API workspace you already have (or the other way round), as adopting existing
-  profiles does, so one fleet is not set up twice. (#284)
 - Jamf Reports now needs jamf-cli 1.29.0 or later to collect or back up, on every run, not
   only for full support. An older jamf-cli stops the run with a message saying to update it;
   Settings says the same. (#226)
@@ -144,9 +144,23 @@ versions in this repository map to git tags.
 - A backup whose Jamf Protect part failed is kept only until a newer backup's Protect part
   completes, so a Protect failure that repeats no longer stops old backups from being removed.
   (#284)
+- **Add workspace or product…** now says when a Jamf Pro login reaches the same server as a
+  Platform API workspace you already have (or the other way round), as adopting existing
+  profiles does, so one fleet is not set up twice. (#284)
 
 ### Fixed
 
+- The `jamf-reports` command run through its `/usr/local/bin` link now reads the app's
+  settings and configuration profiles, including the workspace location. (#284)
+- Every setting a configuration profile manages is now locked in the app and says so, and
+  the app no longer writes over it; Workspace location no longer reports a change it cannot
+  make. (#284)
+- The bundled debug-logging profile now uses the layout macOS reads, and Settings › Logging
+  shows when a profile sets logging for the app. (#284)
+- Settings › Logging's two switches are gone: they wrote a per-user file macOS does not read,
+  so they never changed what was logged. The panel now shows the profile's settings, the
+  bundled profile, and the `sudo log config` commands an administrator can run on one Mac.
+  (#284)
 - Connecting Jamf Protect or Jamf School no longer changes jamf-cli's default profile: jamf-cli's
   setup makes the new profile the default, and the app now puts the previous one back. (#284)
 - Connecting Jamf Protect or Jamf School now tries the credentials with one read before the
@@ -329,8 +343,6 @@ versions in this repository map to git tags.
 
 ### Security
 
-- Client secrets and API keys typed during setup are now wiped from memory when setup ends,
-  fails, starts over or is closed, instead of staying in the app's memory. (#284)
 - Shared logs and diagnostic bundles now also remove the Jamf Protect tenant's host, and the
   Logging export removes the host and tenant IDs of every workspace, not only the active one. (#284)
 - Files the app reads from a workspace that others can write to are now opened so that a folder
@@ -371,6 +383,8 @@ versions in this repository map to git tags.
 - A diagnostic bundle now replaces the workspace (profile) name with a placeholder in every
   file and in the file names, the zip's own name included, since the name is often the
   organisation's. A name as short as two characters is replaced too.
+- Client secrets and API keys typed during setup are now wiped from memory when setup ends,
+  fails, starts over or is closed, instead of staying in the app's memory. (#284)
 
 ## [2.10.1] - 2026-10-17
 

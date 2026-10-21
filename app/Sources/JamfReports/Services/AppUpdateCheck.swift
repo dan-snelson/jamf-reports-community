@@ -237,7 +237,7 @@ final class AppUpdateModel {
 
     /// Whether a configuration profile sets the switch, so Settings shows it as managed.
     var isForcedByProfile: Bool {
-        defaults.objectIsForced(forKey: AppUpdateCheck.enabledKey)
+        ManagedPreference.isForced(AppUpdateCheck.enabledKey, defaults: defaults)
     }
 
     /// The release the banner offers: newer, not skipped, and the check still on.

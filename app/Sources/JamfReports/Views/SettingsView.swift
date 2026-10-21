@@ -13,6 +13,7 @@ struct SettingsView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast
     @AppStorage("autoUpdateJamfCLI") private var autoUpdate = false
+    private var autoUpdateManaged: Bool { ManagedPreference.isForced("autoUpdateJamfCLI") }
     @State private var bridge = CLIBridge()
     @State private var experimentalFeatures = ExperimentalFeatureService()
     @State private var experimentalExpanded = false
@@ -29,9 +30,8 @@ struct SettingsView: View {
     // the target dir isn't app-writable and the user must run the command.
     @State private var cliInstallMessage: String? = nil
     @State private var cliInstallCommand: String? = nil
-    // Debug logging (DebugLoggingService) — toggles apply on next launch.
-    @State private var debugState: DebugLoggingState = .off
-    @State private var loggingApplyMessage: String? = nil
+    // Debug logging (DebugLoggingService): what a configuration profile sets.
+    @State private var managedLogging: ManagedDebugLogging?
     // AI Insights (macOS 27+, opt-in). Loaded/saved via AIConfigLoader/Writer,
     // not the Config-tab managed-key surface.
     @State private var aiConfig: AIConfig = AIConfig()
@@ -137,9 +137,9 @@ struct SettingsView: View {
                 Divider().background(Theme.Hairline.standard)
                 settingsRow(
                     label: "Auto-update jamf-cli",
-                    sub: "Check on launch",
+                    sub: autoUpdateManaged ? ManagedPreference.note : "Check on launch",
                     trailing: AnyView(PNPToggle(isOn: $autoUpdate)
-                        .disabled(workspace.demoMode)
+                        .disabled(workspace.demoMode || autoUpdateManaged)
                         .help(workspace.demoMode ? DemoData.liveOnlyHelp : ""))
                 )
                 Divider().background(Theme.Hairline.standard)
@@ -164,6 +164,10 @@ struct SettingsView: View {
 
     private nonisolated static func providerLabel(_ name: String) -> String {
         "On \(name) — multi-Mac coordination turns on automatically. Run Check on the Config screen reports who else writes here."
+    }
+
+    private var workspaceRootManaged: Bool {
+        ManagedPreference.isForced(WorkspaceRootStore.defaultsKey)
     }
 
     private var workspaceLocationCard: some View {
@@ -192,13 +196,20 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
 
+                if workspaceRootManaged {
+                    Text(ManagedPreference.note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                }
+
                 HStack(spacing: 8) {
                     PNPButton(title: "Choose folder…", icon: "folder", size: .sm) {
                         chooseWorkspaceRoot()
                     }
-                    .disabled(workspace.demoMode)
+                    .disabled(workspace.demoMode || workspaceRootManaged)
                     .help(workspace.demoMode
                           ? DemoData.liveOnlyHelp
+                          : workspaceRootManaged ? ManagedPreference.note
                           : "Pick the folder that holds your Jamf Reports workspaces.")
                     .accessibilityHint("Opens a folder picker for the workspace location.")
 
@@ -206,7 +217,9 @@ struct SettingsView: View {
                         PNPButton(title: "Use default", icon: "arrow.uturn.backward", size: .sm) {
                             applyWorkspaceRoot(nil)
                         }
-                        .help("Go back to ~/Jamf-Reports on this Mac.")
+                        .disabled(workspaceRootManaged)
+                        .help(workspaceRootManaged
+                              ? ManagedPreference.note : "Go back to ~/Jamf-Reports on this Mac.")
                     }
                 }
 
@@ -625,7 +638,7 @@ struct SettingsView: View {
                 settingsRow(
                     label: "Check for updates",
                     sub: updates.isForcedByProfile
-                        ? "Set by your organization's configuration profile"
+                        ? ManagedPreference.note
                         : "Once a day, stable releases only. Nothing is downloaded or installed.",
                     trailing: AnyView(PNPToggle(isOn: Binding(
                         get: { updates.isEnabled }, set: { updates.setEnabled($0) }
@@ -762,14 +775,17 @@ struct SettingsView: View {
                 SectionHeader(title: "Data & Charts")
                 settingsRow(
                     label: "Default trend range",
-                    sub: "Applies to Overview and Trends until you change the picker in-view.",
+                    sub: trendRangeManaged ? ManagedPreference.note
+                        : "Applies to Overview and Trends until you change the picker in-view.",
                     trailing: AnyView(trendRangePicker)
                 )
                 Divider().background(Theme.Hairline.standard)
                 settingsRow(
                     label: "Skip expensive collections",
-                    sub: skipExpensiveCollectionsSubtitle,
-                    trailing: AnyView(PNPToggle(isOn: $skipExpensiveCollections))
+                    sub: skipExpensiveManaged
+                        ? ManagedPreference.note : skipExpensiveCollectionsSubtitle,
+                    trailing: AnyView(PNPToggle(isOn: $skipExpensiveCollections)
+                        .disabled(skipExpensiveManaged))
                 )
             }
         }
@@ -788,7 +804,14 @@ struct SettingsView: View {
         .labelsHidden()
         .pickerStyle(.menu)
         .frame(width: 130)
+        .disabled(trendRangeManaged)
     }
+
+    private var trendRangeManaged: Bool { ManagedPreference.isForced("defaultTrendRange") }
+    private var skipExpensiveManaged: Bool {
+        ManagedPreference.isForced("skipExpensiveCollections")
+    }
+    private var hiddenTabsManaged: Bool { ManagedPreference.isForced("hiddenTabs") }
 
     /// The app is also the `jamf-reports` command-line tool (one binary, installed from the
     /// Command-line tool card above); jamf-cli, which supplies the data, is separate.
@@ -906,44 +929,29 @@ struct SettingsView: View {
         Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "Logging")
-                Text(
-                    "Control verbose diagnostics and view recent log entries. Changes to the "
-                    + "toggles apply after you quit and reopen JamfReports."
-                )
-                .font(.footnote)
-                .foregroundStyle(Theme.Text.tertiary(contrast))
-                .fixedSize(horizontal: false, vertical: true)
+                Text("View recent log entries and turn on verbose diagnostics.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Toggle("Persist verbose logs", isOn: Binding(
-                    get: { debugState.persistVerbose },
-                    set: { debugState.persistVerbose = $0; applyDebugState() }))
-                Toggle("Reveal private values in logs (serials, hostnames, usernames)", isOn: Binding(
-                    get: { debugState.revealPrivate },
-                    set: { debugState.revealPrivate = $0; applyDebugState() }))
-                if debugState.revealPrivate {
-                    Text("⚠︎ Private values are written in full to the local log store on this Mac. "
-                        + "Leave off unless actively debugging.")
-                        .font(.caption)
-                        .foregroundStyle(Theme.Colors.warn)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let loggingApplyMessage {
-                    Text(loggingApplyMessage)
+                Text(Self.managedLoggingText(managedLogging))
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    PNPButton(title: "Reveal MDM profile", icon: "doc.badge.gearshape", size: .sm) {
+                        revealDebugProfile()
+                    }
+                    .help("Reveal the bundled debug-logging .mobileconfig in Finder for Jamf deployment.")
+                    Text("Deploying it through MDM keeps debug and info messages; private values "
+                        + "stay hidden.")
                         .font(.caption)
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                HStack(spacing: 8) {
-                    PNPButton(title: "Quit to apply", icon: "power", size: .sm) {
-                        NSApplication.shared.terminate(nil)
-                    }
-                    .help("Quit JamfReports so the logging toggles take effect on next launch.")
-                    PNPButton(title: "Reveal MDM profile", icon: "doc.badge.gearshape", size: .sm) {
-                        revealDebugProfile()
-                    }
-                    .help("Reveal the bundled debug-logging .mobileconfig in Finder for Jamf deployment.")
-                }
+                oneMacLoggingCommands
 
                 Divider().background(Theme.Hairline.standard)
                 LogViewerView()
@@ -954,16 +962,43 @@ struct SettingsView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Logging")
-        .onAppear { debugState = DebugLoggingService.current() }
+        .onAppear { managedLogging = DebugLoggingService.managed() }
     }
 
-    private func applyDebugState() {
-        do {
-            try DebugLoggingService.apply(debugState)
-            loggingApplyMessage = "Saved — applies on next launch."
-        } catch {
-            loggingApplyMessage = "Couldn't write the logging config: \(error.localizedDescription)"
+    @ViewBuilder private var oneMacLoggingCommands: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Turn on verbose logs on this Mac").font(.caption.weight(.semibold))
+            loggingCommandRow(DebugLoggingService.enableCommand)
+            loggingCommandRow(DebugLoggingService.resetCommand)
+            Text("Needs an administrator and applies to this Mac. The reset command returns "
+                + "logging to the default.")
+                .font(.caption)
+                .foregroundStyle(Theme.Text.tertiary(contrast))
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func loggingCommandRow(_ command: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Mono(text: command, size: 11)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            PNPButton(title: "Copy", icon: "doc.on.doc", size: .sm) {
+                SystemActions.copyToClipboard(command)
+            }
+            .help("Copy the command to the clipboard.")
+        }
+    }
+
+    /// Names what a deployed logging profile sets for this app, or that none does.
+    nonisolated static func managedLoggingText(_ managed: ManagedDebugLogging?) -> String {
+        guard let managed else { return "No configuration profile sets logging for Jamf Reports." }
+        func onOff(_ value: Bool?) -> String {
+            value.map { $0 ? "on" : "off" } ?? "not set"
+        }
+        return "A configuration profile sets logging for Jamf Reports: "
+            + "verbose logs \(onOff(managed.persistVerbose)), "
+            + "private data \(onOff(managed.revealPrivate))."
     }
 
     private func revealDebugProfile() {
@@ -999,9 +1034,8 @@ struct SettingsView: View {
     /// Turns already-collected fleet data into plain-language insight cards on
     /// five screens. Off by default; requires macOS 27, where Apple's on-device
     /// Foundation Model generates it. Persists to this profile's `config.yaml`
-    /// (`ai:` block) via `AIConfigWriter`, scoped to just that key — the same
-    /// pattern as `DebugLoggingService`'s own plist, not the Config-tab's
-    /// managed-key round-trip.
+    /// (`ai:` block) via `AIConfigWriter`, scoped to just that key, not the
+    /// Config-tab's managed-key round-trip.
     private var aiInsightsCard: some View {
         Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1015,7 +1049,7 @@ struct SettingsView: View {
                 Toggle("Enable AI insights", isOn: Binding(
                     get: { aiConfig.isEnabled },
                     set: { aiConfig.enabled = $0; saveAIConfig() }))
-                    .disabled(workspace.demoMode)
+                    .disabled(workspace.demoMode || AIPolicy.locksSettings())
                     .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
 
                 if aiConfig.isEnabled {
@@ -1033,9 +1067,16 @@ struct SettingsView: View {
                     reportSummaryToggle
                 }
 
-                Text(ModelAvailability.current(for: aiConfig).message)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                if let note = AIPolicy.settingsNote() {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                }
+                if !AIPolicy.locksSettings() {
+                    Text(ModelAvailability.current(for: aiConfig).message)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                }
 
                 aiSaveStatus
             }
@@ -1057,7 +1098,7 @@ struct SettingsView: View {
             Toggle("Include the AI summary in reports", isOn: Binding(
                 get: { aiConfig.includeInReports ?? false },
                 set: { aiConfig.includeInReports = $0; saveAIConfig() }))
-                .disabled(workspace.demoMode)
+                .disabled(workspace.demoMode || AIPolicy.locksSettings())
             Text("Adds a model-written paragraph to the HTML and PDF reports you generate "
                 + "here. It can misstate a figure; scheduled reports never include it.")
                 .font(.caption)
@@ -1202,10 +1243,13 @@ struct SettingsView: View {
                         v.showAll()
                         hiddenTabsRaw = v.serialize()
                     }
-                    .help("Restore every hidden tab to the sidebar.")
+                    .disabled(hiddenTabsManaged)
+                    .help(hiddenTabsManaged
+                          ? ManagedPreference.note : "Restore every hidden tab to the sidebar.")
                 }
-                Text("Hide dashboards you don't use. Core tabs (Overview, Computers, Data Sources, "
-                     + "Settings) cannot be hidden.")
+                Text(hiddenTabsManaged ? ManagedPreference.note
+                     : "Hide dashboards you don't use. Core tabs (Overview, Computers, Data "
+                     + "Sources, Settings) cannot be hidden.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                 ForEach(
@@ -1275,6 +1319,7 @@ struct SettingsView: View {
                 ),
                 label: "\(tab.label) visibility"
             )
+            .disabled(hiddenTabsManaged)
         }
         .padding(.vertical, 2)
     }

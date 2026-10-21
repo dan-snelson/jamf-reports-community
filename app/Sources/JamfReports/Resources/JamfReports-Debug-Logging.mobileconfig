@@ -16,8 +16,11 @@
         <dict>
           <key>DEFAULT-OPTIONS</key>
           <dict>
-            <key>Enable-Level</key><string>Debug</string>
-            <key>Persist</key><string>Debug</string>
+            <key>Level</key>
+            <dict>
+              <key>Enable</key><string>Debug</string>
+              <key>Persist</key><string>Debug</string>
+            </dict>
           </dict>
         </dict>
       </dict>

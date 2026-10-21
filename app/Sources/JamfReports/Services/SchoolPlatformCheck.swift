@@ -27,7 +27,7 @@ enum SchoolPlatformCheck {
         ["-p", profile, "--no-input", "school", "blueprints", "list", "--output", "json"]
     }
 
-    static func verdict(_ attempt: ConnectionCheck.Attempt?) -> Verdict {
+    static func verdict(_ attempt: ConnectionCheck.Attempt?, profile: String? = nil) -> Verdict {
         guard let attempt else { return .undecided(reason: "jamf-cli did not start") }
         if attempt.exitCode == CLIBridge.exitCodeTimedOut {
             return .undecided(reason: "no answer within \(Int(ConnectionCheck.timeout)) seconds")
@@ -43,13 +43,17 @@ enum SchoolPlatformCheck {
         case .missingPermission: return .missingPermission
         default:
             let message = JamfCLIErrorEnvelope.parse(attempt.stdout)?.message
-            return .undecided(reason: message.map { "exit \(attempt.exitCode): \($0)" }
+            // The message is jamf-cli's own text and reaches the UI and the setup note.
+            let shown = message.map {
+                String(LogRedactor.redactedForSharing($0, profile: profile).prefix(200))
+            }
+            return .undecided(reason: shown.map { "exit \(attempt.exitCode): \($0)" }
                 ?? "exit \(attempt.exitCode)")
         }
     }
 
     static func run(profile: String, runner: Runner) async -> Verdict {
-        verdict(await runner(arguments(profile: profile)))
+        verdict(await runner(arguments(profile: profile)), profile: profile)
     }
 }
 

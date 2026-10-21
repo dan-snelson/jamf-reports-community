@@ -996,9 +996,12 @@ struct SettingsView: View {
         func onOff(_ value: Bool?) -> String {
             value.map { $0 ? "on" : "off" } ?? "not set"
         }
-        return "A configuration profile sets logging for Jamf Reports: "
+        let base = "A configuration profile sets logging for Jamf Reports: "
             + "verbose logs \(onOff(managed.persistVerbose)), "
             + "private data \(onOff(managed.revealPrivate))."
+        guard managed.revealPrivate == true else { return base }
+        return base + " Private values (server names, paths, account names) are written to "
+            + "this Mac's unified log."
     }
 
     private func revealDebugProfile() {

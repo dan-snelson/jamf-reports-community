@@ -208,6 +208,10 @@ enum LogRedactor {
         // Each seed call replaces the last, so hand over every profile's values at once.
         redactor.seedScopeIDs(profiles.flatMap(scopeIDs))
         redactor.seedServerHosts(profiles.flatMap(serverHosts))
+        // The profile is often the organisation's name; the bundle seeds the same forms.
+        redactor.seedWorkspaceNames(profiles.flatMap { profile in
+            [profile] + [ProfileName.pathComponent, ProfileName.labelComponent].map { $0(profile) }
+        })
         return redactor.redactText(redact(text))
     }
 

@@ -46,6 +46,26 @@ final class ServerHostRedactionTests: XCTestCase {
         XCTAssertTrue(r.redactText("myjss.example.org.test").contains("myjss.example.org.test"))
     }
 
+    /// A multi-label Jamf Cloud host (`acme.protect.jamfcloud.com`) leaves no tenant label.
+    func testMultiLabelJamfCloudHostLeavesNoResidue() {
+        let r = DiagnosticRedactor()
+        for text in ["protect alerts failed at acme.protect.jamfcloud.com",
+                     "GET https://acme.protect.jamfcloud.com/api/alerts failed"] {
+            let out = r.redactText(text)
+            XCTAssertFalse(out.lowercased().contains("jamfcloud"), "got: \(out)")
+            XCTAssertFalse(out.contains("acme"), "got: \(out)")
+            XCTAssertTrue(out.contains("host-"), "got: \(out)")
+        }
+        XCTAssertTrue(r.redactText("jamfcloud.com docs and v1.2.3").contains("v1.2.3"))
+    }
+
+    func testSeededServerHostWinsOverTheGenericHostPattern() {
+        let r = DiagnosticRedactor()
+        r.seedServerHosts(["acme.protect.jamfcloud.com"])
+        let out = r.redactText("failed at acme.protect.jamfcloud.com")
+        XCTAssertFalse(out.contains("jamfcloud"), "got: \(out)")
+    }
+
     func testHostIsLeftAloneWhenHostnameRedactionIsOff() {
         let r = DiagnosticRedactor(redactHostnames: false)
         r.seedServerHosts(["jss.example.org"])
@@ -68,81 +88,51 @@ final class ServerHostRedactionTests: XCTestCase {
         XCTAssertEqual(forms(""), [])
     }
 
-    func testServerHostsReadsTheProfileFromJamfCLIConfig() throws {
+    private func writeConfig(_ text: String) throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("jrc-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("config.yaml")
-        try """
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        return file
+    }
+
+    func testServerHostsReturnsEveryProfileInJamfCLIConfig() throws {
+        let file = try writeConfig("""
         profiles:
             onprem:
                 url: https://jss.example.org:8443
                 auth-method: oauth2
+            shield:
+                url: https://acme-label.protect.example.com
             other:
                 url: https://other.example.net
-        """.write(to: file, atomically: true, encoding: .utf8)
+        """)
+        let expected = ["jss.example.org:8443", "jss.example.org",
+                        "acme-label.protect.example.com", "other.example.net"]
         XCTAssertEqual(DiagnosticBundleService.serverHosts(profile: "onprem", configURL: file),
-                       ["jss.example.org:8443", "jss.example.org"])
-        XCTAssertEqual(
-            DiagnosticBundleService.serverHosts(profile: "missing", configURL: file), [])
+                       expected)
+        XCTAssertEqual(DiagnosticBundleService.serverHosts(profile: "missing", configURL: file),
+                       expected)
         XCTAssertEqual(DiagnosticBundleService.serverHosts(
-            profile: "onprem", configURL: dir.appendingPathComponent("absent.yaml")), [])
+            profile: "onprem",
+            configURL: file.deletingLastPathComponent().appendingPathComponent("absent.yaml")),
+            [])
     }
 
-    /// jamf-cli config with three servers, and workspaces `prod` (Pro + Protect) and `edu`
-    /// (School + Protect) under a scratch workspaces root.
-    private func protectFixture() throws -> (config: URL, root: URL) {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("jrc-\(UUID().uuidString)", isDirectory: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
-        let root = dir.appendingPathComponent("ws", isDirectory: true)
-        let school = "school_cli:\n  enabled: true\n  profile: edu\n"
-        for (name, product) in [("prod", ""), ("edu", school)] {
-            let folder = root.appendingPathComponent(name, isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try (product + "protect:\n  enabled: true\n  profile: shield\n")
-                .write(to: folder.appendingPathComponent("config.yaml"), atomically: true,
-                       encoding: .utf8)
-        }
-        let config = dir.appendingPathComponent("config.yaml")
-        try """
+    func testSharedLogRedactsAnotherProfilesHost() throws {
+        let file = try writeConfig("""
         profiles:
             prod:
                 url: https://jss.example.org:8443
-            edu:
-                url: https://school.example.net
             shield:
                 url: https://acme-label.protect.example.com
-            elsewhere:
-                url: https://other.example.com
-        """.write(to: config, atomically: true, encoding: .utf8)
-        return (config, root)
-    }
-
-    func testServerHostsAddsTheWorkspacesProtectProfile() throws {
-        let (config, root) = try protectFixture()
-        let prod = DiagnosticBundleService.serverHosts(
-            profile: "prod", configURL: config, workspacesRoot: root)
-        XCTAssertEqual(prod, ["jss.example.org:8443", "jss.example.org",
-                              "acme-label.protect.example.com"])
-        let edu = DiagnosticBundleService.serverHosts(
-            profile: "edu", configURL: config, workspacesRoot: root)
-        XCTAssertEqual(edu, ["school.example.net", "acme-label.protect.example.com"])
-        XCTAssertFalse(DiagnosticBundleService.serverHosts(
-            profile: "elsewhere", configURL: config, workspacesRoot: root)
-            .contains("acme-label.protect.example.com"))
-    }
-
-    func testSharedLogRedactsTheProtectHost() throws {
-        let (config, root) = try protectFixture()
+        """)
         let shared = LogRedactor.redactedForSharing(
             "[error] protect alerts failed at acme-label.protect.example.com", profile: "prod",
             scopeIDs: { _ in [] },
-            serverHosts: {
-                DiagnosticBundleService.serverHosts(
-                    profile: $0, configURL: config, workspacesRoot: root)
-            })
+            serverHosts: { DiagnosticBundleService.serverHosts(profile: $0, configURL: file) })
         XCTAssertFalse(shared.contains("acme-label"), "got: \(shared)")
     }
 
@@ -157,5 +147,18 @@ final class ServerHostRedactionTests: XCTestCase {
         XCTAssertFalse(shared.contains("jss.example.org"), "got: \(shared)")
         XCTAssertFalse(shared.contains("school.example.net"), "got: \(shared)")
         XCTAssertFalse(shared.contains("3f2b8c1e"), "got: \(shared)")
+    }
+
+    func testSharedLogRedactsTheProfileName() {
+        let text = "[collect] Contoso: patch-status failed; keychain:jamf-cli/Contoso/api-key"
+        let shared = LogRedactor.redactedForSharing(
+            text, profile: "Contoso", scopeIDs: { _ in [] }, serverHosts: { _ in [] })
+        XCTAssertFalse(shared.contains("Contoso"), "got: \(shared)")
+        XCTAssertTrue(shared.contains("patch-status failed"), "got: \(shared)")
+        let plain = "[collect] patch-status failed"
+        XCTAssertEqual(LogRedactor.redactedForSharing(
+            plain, profile: "Contoso", scopeIDs: { _ in [] }, serverHosts: { _ in [] }), plain)
+        XCTAssertEqual(LogRedactor.redactedForSharing(
+            text, profile: nil, scopeIDs: { _ in [] }, serverHosts: { _ in [] }), text)
     }
 }

@@ -612,6 +612,41 @@ final class ProtectBackupTests: XCTestCase {
                        + "neither takes a place from the two Jamf Pro backups")
     }
 
+    func test_pruneKeepsAProFailedBackupThatHoldsJamfProFilesAndRemovesAGenuineOne() throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .ok)
+        let backups = ctx.workspace.appendingPathComponent("backups", isDirectory: true)
+        let ok = BackupProductResult(state: .ok, exitCode: 0, objectCounts: ["plans": 1])
+        func make(_ name: String, pro: String, extra: [String]) throws {
+            let manifest: [String: Any] = ["label": "scheduled-x", "products": [
+                "pro": ["state": pro, "exit_code": pro == "ok" ? 0 : 1],
+                "protect": ok.manifestValue]]
+            let dir = backups.appendingPathComponent(name, isDirectory: true)
+            for folder in extra {
+                try FileManager.default.createDirectory(
+                    at: dir.appendingPathComponent(folder), withIntermediateDirectories: true)
+            }
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: manifest)
+                .write(to: dir.appendingPathComponent("manifest.json"))
+            try write("host", to: dir.appendingPathComponent(".jrc-host"))
+        }
+        try make("20260501T010101", pro: "ok", extra: ["computers"])
+        try make("20260502T010101", pro: "failed", extra: ["protect/plans"])
+        try make("20260503T010101", pro: "failed", extra: ["protect/plans", "computers"])
+        try make("20260504T010101", pro: "ok", extra: ["computers", "protect/plans"])
+        let lines = Lines()
+
+        BackupMaintenance.pruneScheduledBackups(profile: ctx.profile, keep: 2, onLine: lines.append)
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
+        XCTAssertEqual(left, ["20260501T010101", "20260503T010101", "20260504T010101"],
+                       "the genuine Pro-failed backup is removed; the edited one is kept and "
+                       + "takes no place from the Jamf Pro backups")
+        XCTAssertTrue(lines.texts.contains(
+            "[warn] backup 20260503T010101: manifest says the Jamf Pro part failed but the "
+                + "folder holds Jamf Pro files — kept"), "\(lines.texts)")
+    }
+
     // MARK: - Manifest compatibility
 
     func test_olderManifestsStillRead() throws {

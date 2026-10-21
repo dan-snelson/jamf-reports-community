@@ -116,8 +116,13 @@
 	<string>Your Organization</string>
 	<key>PayloadRemovalDisallowed</key>
 	<false/>
+	<!--
+		User scope, so the settings reach the account that signs in and not every account on the
+		Mac. A System scope profile gives every account the same workspacesRootPath, and the app
+		does not check who owns or can write a folder on a /Volumes or CloudStorage path.
+	-->
 	<key>PayloadScope</key>
-	<string>System</string>
+	<string>User</string>
 	<key>PayloadType</key>
 	<string>Configuration</string>
 	<key>PayloadUUID</key>

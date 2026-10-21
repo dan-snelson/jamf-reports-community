@@ -33,9 +33,10 @@ example `.plist` files. To turn off the update check on every Mac, upload
 
 ## The command-line tool
 
-The `jamf-reports` command, run through its symlink, reads a domain named `jamf-reports`,
-not the app's. Set `JRC_WORKSPACES_ROOT` in the script that runs it when the workspaces are
-not in `~/Jamf-Reports`. See [Command Line](https://github.com/tonyyo11/jamf-reports-community/wiki/07-Command-Line).
+The `jamf-reports` command is a link to the app's executable and runs the executable inside
+the app, so it reads the app's domain and sees the same profiles. Set `JRC_WORKSPACES_ROOT` in
+the script that runs it when the workspaces are not in `~/Jamf-Reports`; a profile that manages
+`workspacesRootPath` wins over the variable. See [Command Line](https://github.com/tonyyo11/jamf-reports-community/wiki/07-Command-Line).
 
 ## Verbose logging
 

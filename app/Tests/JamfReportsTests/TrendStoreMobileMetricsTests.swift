@@ -154,6 +154,22 @@ final class TrendStoreMobileMetricsTests: XCTestCase {
         XCTAssertEqual(figures.stale, 0, "judged as of the snapshot's own stamp")
     }
 
+    func testAFIFOSnapshotFillsNothingAndDoesNotBlock() throws {
+        let kind = MobileFleetService.deviceKind
+        let pipe = dataDir.appendingPathComponent(kind)
+            .appendingPathComponent("\(kind)_\(stamp(try instant("2026-10-10", hour: 8))).json")
+        XCTAssertEqual(mkfifo(pipe.path, 0o600), 0)
+        let done = expectation(description: "backfill returned")
+        let dir: URL = dataDir
+        let summary = day("2026-10-10", macs: 5)
+        DispatchQueue.global().async {
+            XCTAssertNil(TrendStore.resolvingMobile([summary], dataDir: dir, staleDays: 30)
+                .first?.mobile)
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+    }
+
     func testOnlyASameDaySnapshotFillsADay() throws {
         try writeSnapshot(passcode: [true], at: instant("2026-10-09", hour: 12))
         try writeSnapshot(passcode: [true], at: instant("2026-10-11", hour: 0.5))

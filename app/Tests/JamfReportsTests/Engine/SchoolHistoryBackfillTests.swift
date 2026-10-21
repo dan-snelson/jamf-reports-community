@@ -192,4 +192,26 @@ final class SchoolHistoryBackfillTests: XCTestCase {
         backfill(staleDays: 30)
         XCTAssertEqual(try summary("2026-10-20").staleCount, 0)
     }
+
+    func testAFutureDatedSnapshotIsSkippedWithOneWarningAndTodayAndPastLand() throws {
+        for day in ["20261020", "20261021", "20261022"] {
+            try snapshot("[\(mac("A", checkin: "2026-10-01 09:00:00"))]",
+                         file: "\(kind)_\(day)T080000.json")
+        }
+        let now = try XCTUnwrap(Calendar.current.date(
+            from: DateComponents(year: 2026, month: 10, day: 21, hour: 12)))
+        let lines = Lines()
+
+        let result = ReportEngine.backfillSchoolSummaries(
+            dataDir: dataDir, summariesDir: summariesDir, staleDays: 30, now: now,
+            onLine: lines.add)
+
+        XCTAssertEqual(result.written, 2)
+        XCTAssertTrue(summaryExists("2026-10-20"))
+        XCTAssertTrue(summaryExists("2026-10-21"))
+        XCTAssertFalse(summaryExists("2026-10-22"))
+        XCTAssertEqual(lines.all.filter { $0.hasPrefix("[warn]") }, [
+            "[warn] skipped 1 future-dated school-devices snapshot(s)"
+        ])
+    }
 }

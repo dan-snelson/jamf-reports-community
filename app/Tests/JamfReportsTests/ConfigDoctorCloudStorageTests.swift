@@ -55,6 +55,22 @@ final class ConfigDoctorCloudStorageTests: XCTestCase {
         )
     }
 
+    // MARK: - Root ownership
+
+    func testVolumesRootWarnsThatOwnershipIsNotChecked() {
+        let volume = URL(fileURLWithPath: "/Volumes/Reports/Jamf-Reports")
+        let rows = ConfigDoctorService.evaluateCloudStorage(inputs(workspace: volume))
+        let row = rows.first { $0.id == "cloud.root_ownership_unchecked" }
+        XCTAssertEqual(row?.severity, .warn)
+        XCTAssertTrue(row?.detail.contains("/Volumes/Reports/Jamf-Reports") == true)
+    }
+
+    func testHomeRootHasNoOwnershipRow() {
+        let rows = ConfigDoctorService.evaluateCloudStorage(
+            inputs(workspace: local(""), rootIsCustom: true))
+        XCTAssertNil(rows.first { $0.id == "cloud.root_ownership_unchecked" })
+    }
+
     // MARK: - Layout shapes
 
     func testFullyLocalWorkspaceEmitsNothing() {

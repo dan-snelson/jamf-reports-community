@@ -93,9 +93,19 @@ enum AddSheetPlan {
     /// a platform workspace, or a platform profile beside an oauth2 one. Adoption's rule
     /// (`PlatformTwin`); `learn` gives a platform profile's Jamf Pro URL, and nil finds nothing.
     static func twinNotes(
-        unassigned: [JamfCLIProfile], workspaces: [JamfCLIProfile], learn: (String) -> String?
+        unassigned: [JamfCLIProfile],
+        workspaces: [JamfCLIProfile],
+        learn probe: (String) -> String?
     ) -> [String: String] {
         var notes: [String: String] = [:]
+        // One probe per profile: each workspace is compared with every unassigned profile.
+        var learned: [String: String?] = [:]
+        func learn(_ name: String) -> String? {
+            if let known = learned[name] { return known }
+            let url = probe(name)
+            learned[name] = .some(url)
+            return url
+        }
         for profile in unassigned {
             let other: String?
             if profile.auth?.isPlatform == true {
@@ -172,7 +182,8 @@ struct AddSheetDiscovery: Sendable {
             unassigned: listed.filter { free.contains($0.name) }, workspaces: listedWorkspaces,
             learn: {
                 store.jamfProURL(profile: $0)
-                    ?? (probeTwins ? PlatformTwin.learnJamfProURL(profile: $0) : nil)
+                    ?? (probeTwins && !Task.isCancelled
+                        ? PlatformTwin.learnJamfProURL(profile: $0) : nil)
             })
         return AddSheetDiscovery(
             unassigned: unassigned, currentProtect: currentProtect, twinNotes: twinNotes)

@@ -47,6 +47,13 @@ final class DebugLoggingServiceTests: XCTestCase {
         XCTAssertTrue(SettingsView.managedLoggingText(
             ManagedDebugLogging(persistVerbose: true, revealPrivate: nil))
             .hasSuffix("verbose logs on, private data not set."))
+        let revealed = SettingsView.managedLoggingText(
+            ManagedDebugLogging(persistVerbose: nil, revealPrivate: true))
+        XCTAssertTrue(revealed.hasSuffix("Private values (server names, paths, account names) "
+            + "are written to this Mac's unified log."), revealed)
+        XCTAssertFalse(SettingsView.managedLoggingText(
+            ManagedDebugLogging(persistVerbose: nil, revealPrivate: false))
+            .contains("Private values"))
         XCTAssertEqual(SettingsView.managedLoggingText(nil),
                        "No configuration profile sets logging for Jamf Reports.")
     }

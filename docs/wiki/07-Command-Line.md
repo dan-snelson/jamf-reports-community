@@ -43,7 +43,8 @@ JRC_WORKSPACES_ROOT="$HOME/Library/CloudStorage/OneDrive-Contoso/Team/Jamf Repor
 ```
 
 The CLI, the app and its scheduled runs all read the Settings → Workspace location
-setting, so the variable is needed only to point one command at a different folder (see
+setting, so the variable is needed only to point one command at a different folder. A
+configuration profile that sets the workspace location wins over the variable (see
 [Managed Preferences](https://github.com/tonyyo11/jamf-reports-community/wiki/14-Managed-Preferences)).
 
 `--profile` takes the jamf-cli profile name exactly as jamf-cli spells it. Quote a

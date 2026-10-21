@@ -347,8 +347,34 @@ versions in this repository map to git tags.
 
 ### Security
 
-- Shared logs and diagnostic bundles now also remove the Jamf Protect tenant's host, and the
-  Logging export removes the host and tenant IDs of every workspace, not only the active one. (#284)
+- Shared logs and diagnostic bundles now remove the host of every server in your own jamf-cli
+  configuration, Jamf Protect tenants included, however many labels the host has, and the Logging
+  export removes the host and tenant IDs of every workspace, not only the active one. Which hosts
+  are removed no longer depends on the workspace's config.yaml, which other Macs can edit. (#284)
+- Logs shared from the app (Run History's Copy and Export, the Logging export) now replace the
+  workspace's profile name, as diagnostic bundles already did. The webhook card's Profile line
+  still names it. (#284)
+- The Jamf School Platform API check shows jamf-cli's error text redacted and cut to 200
+  characters. (#284)
+- Settings › Logging says so when a configuration profile writes private values (server names,
+  paths, account names) to this Mac's log. (#284)
+- Config Doctor warns when the workspaces folder is on a network or synced volume, where the app
+  cannot check who owns it or who can write to it. The example configuration profile now installs
+  for the user, not the whole Mac. (#284)
+- A workspaces folder set by a configuration profile now wins over `JRC_WORKSPACES_ROOT`. (#284)
+- The Jamf School history backfill skips snapshots dated in the future instead of writing a
+  summary for a day that has not happened. (#284)
+- The SOFA cache and the mobile device, patch and Extension Attribute snapshots Trends and the
+  Mobile screen read now have a size limit; a file over it, or one that is not a regular file, is
+  named in the log instead of read. (#284)
+- A backup whose manifest says the Jamf Pro part failed is pruned only when the folder really
+  holds no Jamf Pro files; otherwise it is kept and the prune log says why. (#284)
+- A file the app reads with links refused is now also refused, and logged, when it has a second
+  hard link. (#284)
+- Protect and School secrets are cleared as soon as jamf-cli has saved them, and when the
+  jamf-cli signature check fails; a typo in the name or URL keeps what you typed. School setup
+  with the Platform API switch on is refused until a tenant ID is entered. The Add sheet checks
+  each profile once and stops checking when it closes. (#284)
 - Files the app reads from a workspace that others can write to are now opened so that a folder
   swapped for a link after the app checked it is refused, and the daily summaries, backup manifests
   and snapshot manifests are read with a size limit. (#284)

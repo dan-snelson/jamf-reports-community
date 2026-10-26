@@ -1331,14 +1331,14 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
     /// configuration. Everything else is toggleable via `TabVisibility`.
     var isCoreTab: Bool {
         switch self {
-        case .overview, .devices, .sources, .settings, .onboarding:
+        case .overview, .devices, .schoolDevices, .sources, .settings, .onboarding:
             return true
         case .fleet, .deviceLookup, .trends, .audit, .reports,
              .schedules, .runs, .config, .customize, .backups,
              .securityPosture, .compliancePosture, .complianceBenchmarks,
              .patch, .updates, .ddmBlueprints,
              .policyProfile, .extensionAttributes,
-             .outreach, .protectDashboard, .mobileFleet, .groupInventory, .schoolDevices:
+             .outreach, .protectDashboard, .mobileFleet, .groupInventory:
             return false
         }
     }

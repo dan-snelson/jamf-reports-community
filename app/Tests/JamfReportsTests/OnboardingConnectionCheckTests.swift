@@ -6,6 +6,13 @@ import XCTest
 /// unchanged.
 @MainActor
 final class OnboardingConnectionCheckTests: XCTestCase {
+    func test_skipFinishText_doesNotCallAnUnvalidatedProfileFullySetUp() {
+        XCTAssertTrue(OnboardingView.skipFinishText(validated: true).contains("fully set up"))
+        let unvalidated = OnboardingView.skipFinishText(validated: false)
+        XCTAssertFalse(unvalidated.contains("fully set up"))
+        XCTAssertTrue(unvalidated.contains("did not validate"))
+    }
+
 
     private func flowAtValidate(
         _ type: OnboardingFlow.ProConnectionType, exit: Int32

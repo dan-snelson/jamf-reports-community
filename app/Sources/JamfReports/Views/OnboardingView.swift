@@ -910,9 +910,8 @@ struct OnboardingView: View {
     ///
     /// Surfaced as a sibling card under the Run card so the user sees an
     /// explicit "safe to skip" message instead of having to abandon the
-    /// wizard. By the time this step renders the profile is registered,
-    /// validated, and `config.yaml` is on disk — so skipping the generate
-    /// run is safe; the user can run reports later from the Reports tab.
+    /// wizard. The profile is registered and `config.yaml` is on disk, but
+    /// the profile may not have validated (Continue without validating).
     private var skipFinishCard: some View {
         Card(padding: 18) {
             HStack(spacing: 12) {
@@ -923,7 +922,7 @@ struct OnboardingView: View {
                     Text("Skip the first run?")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Theme.Colors.fg)
-                    Text("Your workspace is fully set up. Skip if the generate output below looks off — you can run reports later from the Reports tab.")
+                    Text(Self.skipFinishText(validated: flow.connectionValidated))
                         .font(.footnote)
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                         .fixedSize(horizontal: false, vertical: true)
@@ -939,6 +938,15 @@ struct OnboardingView: View {
                 .disabled(flow.isRunningFirstReport)
             }
         }
+    }
+
+    nonisolated static func skipFinishText(validated: Bool) -> String {
+        validated
+            ? "Your workspace is fully set up. Skip if the generate output below looks off — "
+                + "you can run reports later from the Reports tab."
+            : "Your workspace is saved, but the profile did not validate, so the first run "
+                + "will probably fail. Skip it, fix the connection from Data Sources, then run "
+                + "reports from the Reports tab."
     }
 
     /// Dismiss onboarding without running a report.

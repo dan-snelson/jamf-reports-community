@@ -394,6 +394,8 @@ versions in this repository map to git tags.
   reads "200 sampled of 3481". (#284)
 - OS Latest Versions and the OS Currency sheet name iOS releases "iOS 27" instead of a bare
   "27". (#284)
+- Setup's last step no longer calls a workspace fully set up when its profile did not validate;
+  it says the first run will probably fail and where to fix the connection. (#284)
 
 ### Security
 

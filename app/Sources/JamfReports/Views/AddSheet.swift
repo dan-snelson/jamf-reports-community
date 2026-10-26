@@ -109,6 +109,9 @@ struct AddSheet: View {
         }
         .task { await recheck() }
         .onDisappear { twinProbe?.cancel() }
+        // A banner appears mid-list with no focus change, so VoiceOver would not say it.
+        .onChange(of: message) { _, text in announce(text) }
+        .onChange(of: errorText) { _, text in announce(text) }
         .sheet(isPresented: $showingProtectConnect, onDismiss: { Task { await recheck() } }) {
             ProductConnectSheetView(profileSlug: workspace.profile)
         }
@@ -137,6 +140,10 @@ struct AddSheet: View {
                 .disabled(isAdopting)
         }
         .padding(16)
+    }
+
+    private func announce(_ text: String?) {
+        if let text { AccessibilityNotification.Announcement(text).post() }
     }
 
     private func close() {
@@ -233,6 +240,7 @@ struct AddSheet: View {
                 startOnboarding(product)
             }
             .disabled(isAdopting)
+            .accessibilityLabel("Connect new \(product.title) workspace")
         }
         .padding(14)
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
@@ -269,6 +277,7 @@ struct AddSheet: View {
                             showingProtectConnect = true
                         }
                         .disabled(isAdopting || discovery == nil)
+                        .accessibilityLabel("Connect new Jamf Protect profile to \(workspace.profile)")
                     }
                 }
                 Spacer(minLength: 0)
@@ -405,17 +414,20 @@ struct AddSheet: View {
         case .newWorkspace:
             if row.name == adoptingName && isAdopting {
                 ProgressView().controlSize(.small)
+                    .accessibilityLabel("Setting up \(row.name)")
             } else {
                 PNPButton(title: "Set up workspace", icon: "folder.badge.plus", size: .sm) {
                     Task { await adopt(row) }
                 }
                 .disabled(isAdopting || isChecking)
+                .accessibilityLabel("Set up workspace for \(row.name)")
             }
         case .addToCurrent:
             PNPButton(title: "Add to \(workspace.profile)", icon: "plus", size: .sm) {
                 addProtect(row)
             }
             .disabled(isAdopting || isChecking)
+            .accessibilityLabel("Add \(row.name) to \(workspace.profile)")
         case .unavailable:
             EmptyView()
         }

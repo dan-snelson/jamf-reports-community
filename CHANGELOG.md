@@ -151,6 +151,10 @@ versions in this repository map to git tags.
 - **Add workspace or product…** now says when a Jamf Pro login reaches the same server as a
   Platform API workspace you already have (or the other way round), as adopting existing
   profiles does, so one fleet is not set up twice. (#284)
+- Workbook sheets and screens that count Macs only (Security Posture, Executive Summary,
+  Check-in Health, Active Devices, Patch Summary Dashboard, Extension Attributes and the Fleet
+  Size Trend chart) now say **Total Computers** instead of **Total Devices**. Counts that include
+  mobile devices, such as OS Updates and Jamf School, still say devices. (#287)
 
 ### Fixed
 
@@ -348,13 +352,26 @@ versions in this repository map to git tags.
 - `csv-inbox/` is no longer read by reports. Config Doctor suggests deleting the folder when it
   holds files.
 - `exceptions[].control_id` is no longer read; Config Doctor says it can be deleted. (#284)
+- A scheduled Jamf School **Refresh + Generate** run now always collects first, so its workbook
+  is no longer built from data up to 12 hours old after an earlier refresh. (#284)
+- The workbook logo (`branding.logo_path`) now sits beside the first tab's title instead of
+  covering the title and the first rows, and keeps its proportions. (#284)
+- Opening **Add workspace or product…** while a setup is part way through now asks you to finish
+  it first, so a jamf-cli profile that setup already saved is no longer left unassigned. (#284)
+- The **Add** sheet's buttons now name the product or profile they act on for VoiceOver, and its
+  success and error messages are read out. (#284)
+- The sidebar no longer re-reads summary and report files each time the pointer moves over it.
+  (#284)
 
 ### Security
 
 - The `jamf-reports` command-line tool now shows control characters in a device lookup, a log
   line or an error as `\u001b`-style text when it prints to a terminal, so a device name or a
-  server error can no longer clear the screen, change the window title or write the clipboard.
-  Output piped to a file or another program is unchanged.
+  server error can no longer clear the screen, change the window title, write the clipboard, or
+  reorder or split the line with right-to-left or line-separator characters. Output piped to a
+  file or another program is unchanged.
+- The webhook URL in setup's **Run automatically** step is now hidden as you type it, since
+  anyone who has the URL can post to the channel. (#284)
 - Shared logs and diagnostic bundles now remove the host of every server in your own jamf-cli
   configuration, Jamf Protect tenants included, however many labels the host has, and the Logging
   export removes the host and tenant IDs of every workspace, not only the active one. Which hosts

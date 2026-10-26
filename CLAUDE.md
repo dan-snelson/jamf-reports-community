@@ -1201,6 +1201,10 @@ With `html.with_workbook` on (see the html config section), the two modes that g
 the workbook; a failure there is a `[warn]` line, not a `[partial]` one, and the run still
 succeeds.
 
+A Jamf School `jamf-cli-full` run forces its collect past School's 12 h cadence
+(`Schedule.RunMode.forcesCollect(for:)`), so the workbook is built from data collected in that
+run; `snapshot-only` and every Jamf Pro schedule keep their cadence and once-a-day guard.
+
 Legacy plists imported from `~/Library/LaunchAgents` (written before PR-20)
 omit `--mode`; both the legacy-plist parser (`LaunchAgentService.parse`,
 still used for one-time import) and `main.swift`'s `scheduledRun` parser

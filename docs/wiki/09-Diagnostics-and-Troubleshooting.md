@@ -176,7 +176,13 @@ success is past three times its tier cadence. Press **Collect now** to re-collec
 tiers behind it, and read the run log in Run History for jamf-cli's own message — a
 non-zero exit is reported with its cause, not as a bare number. Sources whose last failure
 was a usage/credentials error (exit 2) or a policy refusal (exit 8) stay listed but are
-never retried automatically, because they fail identically every time. See
+never retried automatically, because they fail identically every time. A separate
+**Needs attention** entry means a run logged a warning you have to act on (a rejected webhook,
+a skipped or incomplete Jamf Protect backup, a Jamf School collect with no devices, an
+unreadable Extension Attribute snapshot, a large Fleet Drift change, or a mobile device list
+that could not be saved); its button opens Automation, Backups or Run History, whichever holds
+the fix. It clears once the next run's check passes, and **Dismiss** hides it on this Mac
+until it clears and returns. See
 [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).
 
 **A run says `[partial]`.** The run completed but did not refresh everything: at least one

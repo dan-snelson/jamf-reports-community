@@ -11,13 +11,19 @@ does not issue new API calls. Data is refreshed by collection (see
 A **health strip** sits above whichever screen you are on. It reports data sources that
 have stopped collecting or fallen far behind their schedule, and any overdue or failing
 schedule, with a **Collect now** action that re-collects just what is behind — so you do
-not have to be on Security Posture to learn that security data stopped landing. See
+not have to be on Security Posture to learn that security data stopped landing. It also
+lists **Needs attention** items: a warning a run logged that you have to act on, such as a
+webhook that rejected a card (button: Open Automation), a Jamf Protect backup that was skipped
+or incomplete (Open Backups), a Jamf School collect that returned no devices, an unreadable
+Extension Attribute snapshot, a large Fleet Drift change or a mobile device list that could
+not be saved (each Open Run History). An item clears itself when the next run's check passes;
+**Dismiss** hides it on this Mac until it clears and happens again. See
 [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).
 
 Every screen on this page reads jamf-cli data. With no jamf-cli connection, or no collect
 yet, most of them have nothing to show. See [App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding#running-without-jamf-cli-credentials) for how a
-Jamf School-only setup gets through onboarding. Jamf School data doesn't feed
-these interactive dashboards either — it produces a separate generated workbook; see
+Jamf School-only setup gets through onboarding. A Jamf School workspace has its own
+Overview, Devices and Trends screens and a workbook of its own; see
 [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School).
 
 ## Reports
@@ -34,9 +40,11 @@ these interactive dashboards either — it produces a separate generated workboo
   also surfaces when a scheduled run should have fired but didn't — see
   [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).
   Data source: daily summary digest (tier 3) — see [Data Provenance](https://github.com/tonyyo11/jamf-reports-community/wiki/11-Data-Provenance).
-- **Fleet Overview** — a multi-profile roll-up: one card per workspace with per-profile
-  health signals, so MSPs and teams can scan every tenant at once.
-  Data source: daily summary digest (tier 3) aggregated across profiles.
+- **Fleet Overview** — the workspace selected in the sidebar: its latest summary, issues and
+  stability trend. Two workspaces can be different Jamf Pro servers, so their figures are
+  never averaged or listed together; switch the workspace in the sidebar to see another.
+  Figures across workspaces are in the report-group fleet CSV and workbook.
+  Data source: daily summary digest (tier 3).
 - **Computers** — the computer inventory table with search, sort, and a Priority Action
   filter. The detail panel shows a per-device risk breakdown. Freshness chips show the
   age of each underlying data source (a red "never" chip flags a kind that's never been

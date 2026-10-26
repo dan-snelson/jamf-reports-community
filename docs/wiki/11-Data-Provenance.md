@@ -84,7 +84,7 @@ Feeds these screens:
 
 - **Overview** — all KPI cards and donut charts
 - **Trends** — all timeline charts
-- **Fleet Overview** — per-profile health signals across all workspaces
+- **Fleet Overview** — the selected workspace's health signals
 - **Stability index** on the Overview
 
 Do not expect these screens to update immediately when a device changes. They reflect the

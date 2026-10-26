@@ -77,7 +77,7 @@ final class TrendStoreTests: XCTestCase {
     }
 
     /// Active is the fleet minus its stale Macs, live and demo alike; the demo
-    /// used to plot the whole fleet under Active Devices.
+    /// used to plot the whole fleet under Active Computers.
     func testActiveDevicesDemoSeriesExcludesStaleMacs() {
         let points = TrendDemoSeries.points(for: .activeDevices, range: .all)
 

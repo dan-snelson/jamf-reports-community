@@ -46,7 +46,7 @@ struct OutreachView: View {
     private var subtitle: String? {
         guard snapshot.totalDevices > 0 || snapshot.binaryMissingCount > 0 else { return nil }
         let count = snapshot.totalDevices
-        let bucketed = "\(count) device\(count == 1 ? "" : "s") bucketed by "
+        let bucketed = "\(count) computer\(count == 1 ? "" : "s") bucketed by "
             + "days since \(staleRule.basisPhrase)."
         let missing = snapshot.binaryMissingCount
         guard missing > 0 else { return bucketed }

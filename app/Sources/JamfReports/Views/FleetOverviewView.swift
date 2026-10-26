@@ -410,8 +410,8 @@ func fleetProfileIssues(_ summary: DailySummary?) -> [FleetProfileIssue] {
     }
     if let staleCount = summary.staleCount, staleCount > 0 {
         issues.append(FleetProfileIssue(
-            reason: "\(staleCount) stale device\(staleCount == 1 ? "" : "s")",
-            explanation: "Devices that have not checked in for more than 30 days. Offline "
+            reason: "\(staleCount) stale computer\(staleCount == 1 ? "" : "s")",
+            explanation: "Computers that have not checked in for more than 30 days. Offline "
                 + "Outreach buckets them by how long they have been quiet.",
             actionLabel: "Open Offline Outreach",
             tab: .outreach
@@ -422,7 +422,7 @@ func fleetProfileIssues(_ summary: DailySummary?) -> [FleetProfileIssue] {
     if let fileVaultPct = summary.fileVaultPct, fileVaultPct < 90 {
         issues.append(FleetProfileIssue(
             reason: "FileVault \(String(format: "%.1f", fileVaultPct))% (below 90%)",
-            explanation: "Share of devices reporting FileVault encryption enabled "
+            explanation: "Share of computers reporting FileVault encryption enabled "
                 + "in the latest security snapshot.",
             actionLabel: "Open Security Posture",
             tab: .securityPosture
@@ -431,7 +431,7 @@ func fleetProfileIssues(_ summary: DailySummary?) -> [FleetProfileIssue] {
     if let patchPct = summary.patchPct, patchPct < 80 {
         issues.append(FleetProfileIssue(
             reason: "Patch \(String(format: "%.1f", patchPct))% (below 80%)",
-            explanation: "Share of devices on the latest version of their patch titles, "
+            explanation: "Share of computers on the latest version of their patch titles, "
                 + "in the latest patch snapshot.",
             actionLabel: "Open Patch Compliance",
             tab: .patch

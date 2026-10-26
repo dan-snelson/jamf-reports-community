@@ -59,8 +59,6 @@ struct TrendsView: View {
     /// A metric's name as the pills show it: the configured compliance
     /// benchmark and EDR agent in place of the generic names.
     private func metricLabel(_ m: TrendSeries.Metric) -> String {
-        // A School history counts stale Macs and stale mobile devices side by side.
-        if m == .stale, workspaceStore.isSchoolWorkspace { return "Stale Macs" }
         return m.displayLabel(
             benchmarkLabel: workspaceStore.complianceBenchmarkLabel,
             edrAgentName: workspaceStore.edrAgentName

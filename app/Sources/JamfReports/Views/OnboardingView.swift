@@ -48,7 +48,13 @@ struct OnboardingView: View {
         .task { await flow.refreshJamfCLIStatus() }
         // The flow goes with the view (the Add sheet starting a new onboarding, a tab switch),
         // so its typed secrets are wiped first.
-        .onDisappear { [flow] in flow.clearAllSecrets() }
+        .onDisappear { [flow, workspaceStore] in
+            flow.clearAllSecrets()
+            workspaceStore.onboardingRunHasWork = false
+        }
+        .onChange(of: flow.startOverRemovesSomething) { _, hasWork in
+            workspaceStore.onboardingRunHasWork = hasWork
+        }
         .confirmationDialog(
             "Start over?", isPresented: $confirmingStartOver, titleVisibility: .visible
         ) {

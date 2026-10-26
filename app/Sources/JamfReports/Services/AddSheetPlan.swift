@@ -16,6 +16,16 @@ enum AddSheetPlan {
         return ("\(name) is set up. Switch to it from the workspace menu.", nil)
     }
 
+    /// Why the Add sheet stays closed, or nil. Replacing a setup that has already registered a
+    /// jamf-cli profile or created a workspace would drop it without its Start over cleanup and
+    /// leave that profile behind as unassigned.
+    static func addRefusal(onboardingRunHasWork: Bool) -> String? {
+        onboardingRunHasWork
+            ? "Finish the setup in progress before adding another connection. It has already "
+                + "saved a jamf-cli profile or workspace folder."
+            : nil
+    }
+
     enum Choice: Equatable, Sendable {
         case newWorkspace
         case addToCurrent

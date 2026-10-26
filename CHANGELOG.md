@@ -389,6 +389,9 @@ versions in this repository map to git tags.
   success and error messages are read out. (#284)
 - The sidebar no longer re-reads summary and report files each time the pointer moves over it.
   (#284)
+- OS Updates' Failed Plans table says when it lists a sample: jamf-cli looks up a random
+  sample of failing plans, so "200 total" sat beside a Failing Plans tile of 3481. The header now
+  reads "200 sampled of 3481". (#284)
 
 ### Security
 

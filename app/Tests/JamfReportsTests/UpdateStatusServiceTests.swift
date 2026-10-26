@@ -4,6 +4,13 @@ import XCTest
 /// Tests for UpdateStatusService and UpdatesView instantiation.
 @MainActor
 final class UpdateStatusServiceTests: XCTestCase {
+    func test_failedPlansTrailing_saysSampledWhenJamfCLIListedFewerThanFailing() {
+        XCTAssertEqual(
+            UpdatesView.failedPlansTrailing(listed: 200, failing: 3481), "200 sampled of 3481")
+        XCTAssertEqual(UpdatesView.failedPlansTrailing(listed: 12, failing: 12), "12 total")
+        XCTAssertEqual(UpdatesView.failedPlansTrailing(listed: 3, failing: 0), "3 total")
+    }
+
 
     func testUpdatesViewInstantiatesInDemoMode() throws {
         let workspace = WorkspaceStore()

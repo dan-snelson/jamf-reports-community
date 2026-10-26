@@ -333,7 +333,17 @@ struct UpdatesView: View {
     private var failedPlansCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Failed Plans", trailing: "\(snapshot.failedPlans.count) total")
+                SectionHeader(
+                    title: "Failed Plans",
+                    trailing: Self.failedPlansTrailing(
+                        listed: snapshot.failedPlans.count, failing: failingPlansCount))
+                if snapshot.failedPlans.count < failingPlansCount {
+                    Text("jamf-cli looks up a random sample of failing plans, not all of them. "
+                        + "The Failing Plans tile counts every one.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Table(Array(snapshot.failedPlans.prefix(50))) {
                     TableColumn("Device") { plan in
                         Text(plan.name)
@@ -437,6 +447,11 @@ struct UpdatesView: View {
     }
 
     // MARK: - Helpers
+
+    /// jamf-cli's --scan-failures samples failing plans (max(10%, 100) by default).
+    nonisolated static func failedPlansTrailing(listed: Int, failing: Int) -> String {
+        listed < failing ? "\(listed) sampled of \(failing)" : "\(listed) total"
+    }
 
     private func pillTone(for state: String) -> Pill.Tone {
         let upper = state.uppercased()

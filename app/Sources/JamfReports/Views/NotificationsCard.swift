@@ -220,13 +220,17 @@ struct NotificationsCard: View {
     private func sendTestNotification() async {
         notifyTesting = true
         notifyTestResult = nil
+        let profile = profile
+        let organization = await Task.detached { WebhookNotifier.organization(profile: profile) }
+            .value
         let delivered = await WebhookNotifier.send(
             config: currentNotifyConfig,
-            title: "Test notification — Jamf Reports",
+            title: "Test notification",
             facts: [
                 .init(label: "Profile", value: profile),
                 .init(label: "Status", value: "Test"),
-            ]
+            ],
+            organization: organization
         )
         notifyTesting = false
         notifyTestResult = delivered ? "Delivered" : "Send failed — check the URL"

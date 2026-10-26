@@ -843,7 +843,9 @@ extension WorkspaceStore {
         let outcome = await AttentionLog.recording(profile: profile) {
             let outcome = await marker.sendOnce(day: today, in: [workspace]) {
                 await WebhookNotifier.sendFailed(
-                    config: notify, title: title, facts: facts, failure: failure)
+                    config: notify, title: title, facts: facts,
+                    organization: WebhookNotifier.organization(profile: profile),
+                    failure: failure)
             }
             ScheduledRunSignals.noteWebhook(outcome, failure: failure)
             return outcome

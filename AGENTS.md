@@ -677,7 +677,7 @@ same failure (see the `WebhookNotifier` row).
 
 **Webhook egress discipline (2.6).** Cards never contain report files or
 device-level rows — only aggregate metrics, statuses, and operational names.
-`notify.detail: minimal` reduces every card to event facts (counts/statuses, no
+Every card ends with `WebhookNotifier.footer`: "Jamf Reports application notification", `branding.org_name` (through `ConfigSchema.displayText`, full detail only) and the send time in the Mac's zone; Teams cards open with a header band colored by `WebhookNotifier.Tone`. `notify.detail: minimal` reduces every card to event facts (counts/statuses, no
 values, no error text, no schedule names) for headless/high-security hosts. The
 failure card's error text goes through `LogRedactor.redactedForSharing` with the
 profile's tenant and environment IDs before egress; all titles/facts pass

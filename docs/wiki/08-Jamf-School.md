@@ -65,16 +65,41 @@ Earlier builds could connect Jamf School to a Jamf Pro workspace, which wrote a
 again and the School profile is not used; Config Doctor warns about it. Set
 `school_cli.enabled: false` there and set Jamf School up as its own workspace.
 
-Jamf School data feeds the standalone workbook described above — it does not appear in
-the interactive dashboards (Overview, Computers, Security Posture, and the rest), which are
-Jamf Pro/jamf-cli surfaces; see [Dashboards](https://github.com/tonyyo11/jamf-reports-community/wiki/03-App-Dashboards).
+A Jamf School workspace shows only the screens that apply to it: Overview, Devices, Trends,
+Generated reports, Automation, Run History, Config, Data Sources and Settings, plus Jamf
+Protect while Protect is connected. The Jamf Pro screens, Fleet Overview included, leave the
+sidebar while it is the active workspace (your own hidden-tab choices are kept for the
+others), and Settings › Sidebar Visibility lists only the screens the workspace has. The rest
+of the dashboards in [Dashboards](https://github.com/tonyyo11/jamf-reports-community/wiki/03-App-Dashboards)
+are Jamf Pro surfaces. On a School workspace:
 
-From 2.10, a Jamf School workspace shows only the screens that apply to it: Overview, Fleet
-Overview, Generated reports, Automation, Run History, Config, Data Sources and Settings. The
-Jamf Pro screens leave the sidebar while it is the active workspace (your own hidden-tab
-choices are kept for the others). Generate opens on the School template and offers the
-workbook only, Data Sources lists the `jamf-cli school` commands a collect runs, and the
-health banner and launch checks no longer judge it by Jamf Pro reports.
+- **Overview** shows School's own data: device counts by platform, managed, supervised and
+  stale devices, and each count Jamf School reports (users, classes, apps and the rest).
+- **Devices** lists the devices Jamf School manages (name, serial, model, OS, managed,
+  supervised, last check-in) with counts by platform, Managed, Unmanaged and Stale filters
+  and a search. Devices waiting in Automated Device Enrollment are listed below them.
+- **Config** keeps Thresholds (only the stale threshold), Output and the From file tab.
+- Generate opens on the School template and offers the workbook only. Data Sources lists the
+  `jamf-cli school` commands a collect runs. The health banner and launch checks no longer
+  judge the workspace by Jamf Pro reports.
+- **Automation**'s Data Freshness card describes School's daily collect; the weekly deep scan
+  applies to Jamf Pro workspaces only.
+
+### Blueprints (experimental)
+
+When the School profile has the Platform API fields (see above), a collect also reads the
+tenant's blueprints and the workbook gets a **Blueprints** tab: name, state, last deployed,
+created and updated. Without those fields Data Sources shows the source as skipped and says
+how to add them.
+
+### Jamf Protect with Jamf School (experimental)
+
+Jamf Protect can be connected to a School workspace from Data Sources or the **Add** sheet.
+Protect is then collected after every School collect, gets its own **Jamf Protect** screen
+and adds its tabs to the School workbook. Its **Jamf School match** card matches Protect
+computers to Jamf School Macs by hardware UUID, then serial number, never by name. A School
+workspace has no backups, so Protect is not backed up there. Please report how this works on
+your tenant on GitHub.
 
 ## CSV export format
 

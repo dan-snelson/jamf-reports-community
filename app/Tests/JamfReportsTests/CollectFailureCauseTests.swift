@@ -58,6 +58,7 @@ final class CollectFailureCauseTests: XCTestCase {
         let stub = root.appendingPathComponent("stub-cli")
         let script = """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         [ "$1" = "--version" ] && { echo "jamf-cli version 1.31.1"; exit 0; }
         cat "\(answers.path)/stdout"
         cat "\(answers.path)/stderr" >&2
@@ -113,6 +114,7 @@ final class CollectFailureCauseTests: XCTestCase {
         let stub = root.appendingPathComponent("stub-cli")
         let script = """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         case "$*" in
           *patch-status*--scan-failures*)
             n=$(( $(cat "\(counter.path)" 2>/dev/null || echo 0) + 1 ))
@@ -145,6 +147,7 @@ final class CollectFailureCauseTests: XCTestCase {
         let stub = root.appendingPathComponent("stub-cli")
         let script = """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         case "$*" in
         \(arms)
           *) printf '[]'; exit 0 ;;

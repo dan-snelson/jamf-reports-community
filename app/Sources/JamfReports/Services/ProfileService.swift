@@ -300,6 +300,17 @@ enum ProfileService {
             }
     }
 
+    /// Workspaces whose jamf-cli profile does not exist: a setup left part way, or a profile
+    /// removed in Terminal. Empty when jamf-cli's list could not be read (`listed` nil), since
+    /// "could not ask" must not stop every workspace collecting.
+    static func workspacesMissingJamfCLIProfile(
+        listed: [String]? = listJamfCLIProfiles(scheduleCounts: [:])?.map(\.name),
+        under root: URL = workspacesRoot()
+    ) -> Set<String> {
+        guard let listed else { return [] }
+        return Set(localOnlyWorkspaces(under: root, cliNames: listed))
+    }
+
     /// The profiles a multi-profile run collects: exclusions applied, and the
     /// `.error` ones dropped. Discovery marks a profile the app can't use that way
     /// (unsupported name, or a case variant sharing another's folder); it has no

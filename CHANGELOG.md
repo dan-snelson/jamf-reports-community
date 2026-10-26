@@ -352,6 +352,12 @@ versions in this repository map to git tags.
 - `csv-inbox/` is no longer read by reports. Config Doctor suggests deleting the folder when it
   holds files.
 - `exceptions[].control_id` is no longer read; Config Doctor says it can be deleted. (#284)
+- A workspace whose jamf-cli profile does not exist, such as one left by a setup you did not
+  finish, no longer makes every scheduled run fail. Scheduled runs skip it with one warning, the
+  health strip names the workspace whichever one is open, and collecting it says jamf-cli has no
+  profile of that name instead of "server unreachable or jamf-cli broken". (#284)
+- The Notifications card now says when notifications are on but no webhook URL is set. Nothing,
+  the daily heartbeat included, was sent, and nothing on screen said so. (#284)
 - A scheduled Jamf School **Refresh + Generate** run now always collects first, so its workbook
   is no longer built from data up to 12 hours old after an earlier refresh. (#284)
 - The workbook logo (`branding.logo_path`) now sits beside the first tab's title instead of
@@ -370,8 +376,9 @@ versions in this repository map to git tags.
   server error can no longer clear the screen, change the window title, write the clipboard, or
   reorder or split the line with right-to-left or line-separator characters. Output piped to a
   file or another program is unchanged.
-- The webhook URL in setup's **Run automatically** step is now hidden as you type it, since
-  anyone who has the URL can post to the channel. (#284)
+- The webhook URL is now hidden as you type it, in setup's **Run automatically** step and on the
+  Notifications card in Automation and Schedules, since anyone who has the URL can post to the
+  channel. (#284)
 - Shared logs and diagnostic bundles now remove the host of every server in your own jamf-cli
   configuration, Jamf Protect tenants included, however many labels the host has, and the Logging
   export removes the host and tenant IDs of every workspace, not only the active one. Which hosts

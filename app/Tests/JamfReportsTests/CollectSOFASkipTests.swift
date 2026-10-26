@@ -148,7 +148,7 @@ final class CollectSOFASkipTests: XCTestCase {
     /// A stub jamf-cli that answers every command with an empty list.
     private func makeStub() throws -> URL {
         let stub = root.appendingPathComponent("bin/stub-cli")
-        try "#!/bin/sh\nprintf '[]'\nexit 0\n".write(to: stub, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\n[ \"$1 $2\" = \"config list\" ] && { printf '%s' '[{\"name\":\"\(profile)\"}]'; exit 0; }\nprintf '[]'\nexit 0\n".write(to: stub, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
         return stub
     }

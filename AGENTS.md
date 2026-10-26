@@ -1205,6 +1205,15 @@ A Jamf School `jamf-cli-full` run forces its collect past School's 12 h cadence
 (`Schedule.RunMode.forcesCollect(for:)`), so the workbook is built from data collected in that
 run; `snapshot-only` and every Jamf Pro schedule keep their cadence and once-a-day guard.
 
+A workspace whose jamf-cli profile does not exist (a setup left part way, a profile removed in
+Terminal: `ProfileService.workspacesMissingJamfCLIProfile`, empty when jamf-cli's list could not be
+read) is skipped by every mode but `jamf-cli-only`, with one `[warn]` and an
+`AttentionCode.jamfCLIProfileMissing` item that the health banner shows, named, whichever workspace
+is open; a run of it clears the item once the profile exists. `collect` and `schoolCollect` throw
+`ReportEngineError.profileNotFound` before any command when `resolve` is nil and `config list` does
+not name the profile (`ProfileAuthMethod.isAbsent`). A test stub must list its profile in `config
+list` (`[{"name":"<profile>"}]`; no auth method keeps "could not ask").
+
 Legacy plists imported from `~/Library/LaunchAgents` (written before PR-20)
 omit `--mode`; both the legacy-plist parser (`LaunchAgentService.parse`,
 still used for one-time import) and `main.swift`'s `scheduledRun` parser

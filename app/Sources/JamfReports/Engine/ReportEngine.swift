@@ -2094,6 +2094,9 @@ struct ReportEngine: Sendable {
 
         // Resolved once per run, not per kind — it spawns `config list`.
         let profileAuth = ProfileAuthMethod.resolve(profile: profile, binary: bin)
+        if profileAuth == nil, ProfileAuthMethod.isAbsent(profile: profile, binary: bin) {
+            throw Self.reportDeadCollect(.profileNotFound(profile), onLine: onLine)
+        }
         let nonPlatformAuth = Self.nonPlatformAuthMethod(profileAuth?.authMethod)
         let tenantLevel = profileAuth?.isTenantLevel == true
         let collectSkip = Self.collectSkipKinds(loadedConfig?.jamfCli?.collectSkip)
@@ -3444,6 +3447,9 @@ struct ReportEngine: Sendable {
         }
         // nil (could not ask) collects: only a profile known to lack Platform fields skips.
         let resolved = ProfileAuthMethod.resolve(profile: profile, binary: bin)
+        if resolved == nil, ProfileAuthMethod.isAbsent(profile: profile, binary: bin) {
+            throw Self.reportDeadCollect(.profileNotFound(profile), onLine: onLine)
+        }
         let plan = planSchoolCollect(
             profile: profile, tiers: tiers, force: force,
             platformFieldsMissing: resolved.map { !$0.hasTenantID } ?? false) {
@@ -4461,6 +4467,9 @@ enum ReportEngineError: Error, LocalizedError {
     /// config.yaml's `jamf_cli.profile` names a profile other than the one the run is for.
     case profileMismatch(named: String, run: String)
     case snapshotParseError(String)
+    /// jamf-cli has no profile of this name (`ProfileAuthMethod.isAbsent`); thrown before any
+    /// command runs.
+    case profileNotFound(String)
     /// Raised during collect when `use_cached_data=false` and a live call fails.
     case collectFailed(kind: String, exitCode: Int32)
     /// Raised at the end of collect when every live jamf-cli call failed and at
@@ -4515,6 +4524,10 @@ enum ReportEngineError: Error, LocalizedError {
                 + "jamf_cli.profile back to '\(ConfigSchema.displayText(run))'."
         case .snapshotParseError(let kind):
             return "No cached snapshot found for '\(kind)'. Run collect first."
+        case .profileNotFound(let p):
+            return "jamf-cli has no profile named '\(ConfigSchema.displayText(p))', so nothing "
+                + "was collected. Finish this workspace's setup from Add workspace or product, "
+                + "or remove its folder."
         case .collectFailed(let kind, let code):
             return "Collect failed for '\(kind)' (exit \(code)). Set use_cached_data: true to allow fallback."
         case .authExpired(let p, let n):

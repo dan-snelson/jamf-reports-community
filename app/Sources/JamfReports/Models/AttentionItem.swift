@@ -10,6 +10,7 @@ enum AttentionCode: String, Codable, Sendable, CaseIterable {
     case protectBackupSkipped
     case protectBackupPartial
     case lostModeStripFailed
+    case jamfCLIProfileMissing
 
     /// The screen where the fix, or the run that saw it, is.
     enum Destination: Sendable, Equatable {
@@ -18,7 +19,7 @@ enum AttentionCode: String, Codable, Sendable, CaseIterable {
 
     var destination: Destination {
         switch self {
-        case .webhookRejected: .automation
+        case .webhookRejected, .jamfCLIProfileMissing: .automation
         case .protectBackupSkipped, .protectBackupPartial: .backups
         case .schoolZeroDevices, .eaSnapshotUnreadable, .fleetDriftLargeChange,
              .lostModeStripFailed: .runHistory

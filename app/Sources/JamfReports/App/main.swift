@@ -218,6 +218,22 @@ func notifyTargets(
 /// `--profile --all-profiles` taking "--all-profiles" as the profile).
 private func isFlagValue(_ value: String) -> Bool { !value.hasPrefix("--") }
 
+/// A workspace in `missing` (its jamf-cli profile does not exist) is skipped, not run: every
+/// command would fail. One `[warn]` line, and a Needs attention item in that workspace that a
+/// run of it clears once the profile exists.
+private func skippedForMissingProfile(_ profile: String, missing: Set<String>) async -> Bool {
+    guard missing.contains(profile) else { return false }
+    let line = "[warn] skipping \(profile): jamf-cli has no profile of that name. Finish its "
+        + "setup, exclude it in Automation, or remove its workspace folder."
+    fputs(line + "\n", stderr)
+    AppLogger.schedule.warning("\(line, privacy: .public)")
+    await AttentionLog.recording(profile: profile) {
+        AttentionLog.raise(.jamfCLIProfileMissing,
+            "jamf-cli has no profile for this workspace, so scheduled runs skip it")
+    }
+    return true
+}
+
 @Sendable
 private func scheduledRunSingle(
     profile: String,
@@ -257,6 +273,8 @@ private func scheduledRunSingleBody(
         fputs("[error] No workspace for profile '\(profile)'\n", stderr)
         return 1
     }
+    // `runSchedule` skips a workspace with no jamf-cli profile before this, so it has one now.
+    if mode != .jamfCLIOnly { AttentionLog.clear(.jamfCLIProfileMissing) }
 
     // Loaded once for the product refusal, the version preflight, routing and generate. A
     // config.yaml that exists but does not decode is kept as an error, not read as "no config":
@@ -716,7 +734,12 @@ private func scheduledRun(profile: String) async -> Int32 {
 @Sendable
 func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcome {
     let label = schedule.launchAgentLabel
+    let missing = schedule.mode == .jamfCLIOnly
+        ? [] : ProfileService.workspacesMissingJamfCLIProfile()
     guard schedule.isMulti else {
+        if await skippedForMissingProfile(schedule.profile, missing: missing) {
+            return ScheduleRunOutcome(exitCode: 0, incomplete: false)
+        }
         let honesty = CollectHonestyWatcher()
         let start = Date()
         let code = await scheduledRunSingle(
@@ -750,6 +773,7 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
     var anyIncomplete = false
     var anyRetryable = false
     for p in profiles {
+        if await skippedForMissingProfile(p.name, missing: missing) { continue }
         // One watcher per profile: a shared one would carry profile A's
         // stand-down into profile B's completion line.
         let honesty = CollectHonestyWatcher()

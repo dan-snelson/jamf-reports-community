@@ -427,8 +427,19 @@ extension WorkspaceStore {
         let folderRefused = await Task.detached(priority: .utility) {
             ProfileService.workspaceURL(for: profile).map(AutomationStateFile.isRefused) ?? false
         }.value
+        // A workspace with no jamf-cli profile is skipped by every scheduled run, so its item is
+        // shown whichever workspace is open, named, since nothing else would point at it.
+        let others = profiles.map(\.name).filter { $0 != profile }
         let attention = await Task.detached(priority: .utility) {
-            AttentionLog.openItems(profile: profile)
+            AttentionLog.openItems(profile: profile) + others.flatMap { other in
+                AttentionLog.openItems(profile: other)
+                    .filter { $0.code == .jamfCLIProfileMissing }
+                    .map { item in
+                        var named = item
+                        named.message = "\(other): \(item.message)"
+                        return named
+                    }
+            }
         }.value
         let jamfCLIVersion = self.jamfCLIVersion
         let resolveAuth = resolveAuthMethod

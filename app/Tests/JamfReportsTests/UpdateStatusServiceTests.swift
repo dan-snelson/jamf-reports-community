@@ -22,6 +22,13 @@ final class UpdateStatusServiceTests: XCTestCase {
     }
 
     /// Tests decode parity with summary-only JSON (no failure arrays).
+    func testSubtitleCountsStatusesNotDevices() {
+        XCTAssertNil(UpdatesView.subtitle(total: 0))
+        XCTAssertEqual(UpdatesView.subtitle(total: 1), "1 update status, one per device and update.")
+        XCTAssertEqual(
+            UpdatesView.subtitle(total: 3832), "3832 update statuses, one per device and update.")
+    }
+
     func testUpdateStatusServiceDecodesSummaryOnlyReport() throws {
         let json = """
         [

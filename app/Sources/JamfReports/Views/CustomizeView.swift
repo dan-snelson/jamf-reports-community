@@ -263,7 +263,7 @@ struct CustomizeView: View {
                     isOn: $chartSavePNGs,
                     hasDivider: false
                 )
-                Text("The stale-device trend and the compliance bands are set under "
+                Text("The device-state trend and the compliance trend are set under "
                      + "charts in config.yaml.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))

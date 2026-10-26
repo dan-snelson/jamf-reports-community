@@ -307,7 +307,7 @@ struct ContentView: View {
     private func subtitle(for tab: Tab) -> String? {
         switch tab {
         case .overview:          "FLEET"
-        case .fleet:             "MULTI-PROFILE"
+        case .fleet:             "WORKSPACE SUMMARY"
         case .devices:           "INVENTORY"
         case .deviceLookup:      "LOOKUP"
         case .trends:            TrendRange(rawValue: defaultTrendRangeRaw)?.rawValue ?? TrendRange.w4.rawValue
@@ -326,7 +326,7 @@ struct ContentView: View {
         case .reports:           nil
         case .securityPosture:   "SCORE & CONTROLS"
         case .compliancePosture: "BANDS & GAPS"
-        case .complianceBenchmarks: "EXPERIMENTAL · PLATFORM API"
+        case .complianceBenchmarks: "BENCHMARKS & RULES"
         case .patch:             "TITLES & FAILURES"
         case .updates:           "PLANS & FAILURES"
         case .ddmBlueprints:     "DEVICE STATUS · BLUEPRINTS"

@@ -84,7 +84,17 @@ next collect fetches it.
   schedule that failed or came back incomplete — a source did not land — one hour after it
   started, then two hours after that, then four, and then waits for the schedule's next
   time. A retry only re-collects what is still due, so sources that already landed are not
-  fetched again. Report-from-cache and backup schedules are not retried.
+  fetched again. If today's daily summary is still missing after those three retries, the
+  collect keeps retrying every hour until midnight, so a laptop that was off the VPN until
+  the afternoon still gets its day; it stops sooner when every source failed in a way another
+  try repeats (see the next item). Report-from-cache and backup schedules are not retried.
+- **A Mac that is on only part of the day.** A daily collect runs at its scheduled time or,
+  after the Mac was off or asleep, at its first background check after waking; that run is
+  the day's run, so the scheduled time does not repeat it. **Run now** never moves or
+  cancels the scheduled run.
+- **One failure card a day.** A scheduled run that fails the same way again posts its
+  failure card once a day per schedule and profile, not on every hourly retry. A different
+  failure still posts, and a card that could not be sent is tried again.
 - **Some failures are never retried automatically.** They fail identically every time until
   something outside the app changes:
   - a usage or credentials-gate error (exit 2)

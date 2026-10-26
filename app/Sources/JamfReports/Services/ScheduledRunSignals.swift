@@ -139,7 +139,8 @@ enum ScheduledRunSignals {
         )
         let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.send(
-            config: notify, title: "Jamf Report — \(profile)", facts: facts, failure: failure
+            config: notify, title: "Scheduled run finished — \(profile)", facts: facts,
+            tone: sheetFailures > 0 ? .warning : .good, failure: failure
         )
         if !sent {
             let message = "[warn] webhook notification failed for '\(profile)': "
@@ -191,7 +192,8 @@ enum ScheduledRunSignals {
             onLine: { fputs($0 + "\n", stderr) }
         ) {
             await WebhookNotifier.sendFailed(
-                config: notify, title: "Jamf Report — \(profile)", facts: facts, failure: failure)
+                config: notify, title: "Scheduled run failed — \(profile)", facts: facts,
+                failure: failure)
         }
         if outcome == .failed {
             let message = "[warn] failure webhook notification failed for '\(profile)': "
@@ -244,7 +246,7 @@ enum ScheduledRunSignals {
                 ) {
                     await WebhookNotifier.send(
                         config: target.notify,
-                        title: "Jamf Reports heartbeat — \(target.profile)",
+                        title: "Daily heartbeat — \(target.profile)",
                         facts: facts, failure: failure)
                 }
                 noteWebhook(outcome, failure: failure)
@@ -375,7 +377,7 @@ enum ScheduledRunSignals {
         let facts = alertFacts(detail: notify.resolvedDetail, profile: profile, hits: newHits)
         let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.sendAlert(
-            config: notify, title: "Jamf Reports alert — \(profile)", facts: facts,
+            config: notify, title: "Metric alert — \(profile)", facts: facts,
             failure: failure
         )
         noteWebhook(sent ? .sent : .failed, failure: failure)

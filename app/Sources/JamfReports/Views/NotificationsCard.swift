@@ -222,7 +222,7 @@ struct NotificationsCard: View {
         notifyTestResult = nil
         let delivered = await WebhookNotifier.send(
             config: currentNotifyConfig,
-            title: "Test notification — Jamf Reports",
+            title: "Test notification",
             facts: [
                 .init(label: "Profile", value: profile),
                 .init(label: "Status", value: "Test"),

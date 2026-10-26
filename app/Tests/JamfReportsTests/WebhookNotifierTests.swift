@@ -106,7 +106,7 @@ final class WebhookNotifierTests: XCTestCase {
         let attachments = try XCTUnwrap(card["attachments"] as? [[String: Any]])
         let content = try XCTUnwrap(attachments.first?["content"] as? [String: Any])
         let body = try XCTUnwrap(content["body"] as? [[String: Any]])
-        let titleBlock = try XCTUnwrap(body.first { $0["type"] as? String == "TextBlock" })
+        let titleBlock = try XCTUnwrap(Self.titleBlock(in: body))
         XCTAssertEqual(titleBlock["color"] as? String, "Attention",
                        "failed-run card must use Attention color")
         let factSet = try XCTUnwrap(body.first { $0["type"] as? String == "FactSet" })
@@ -242,12 +242,42 @@ final class WebhookNotifierTests: XCTestCase {
         }
     }
 
+    /// The title: the last TextBlock of the header band, after the product label.
+    private static func titleBlock(in body: [[String: Any]]) -> [String: Any]? {
+        (body.first?["items"] as? [[String: Any]])?.last
+    }
+
+    private static func band(_ card: [String: Any]) -> [String: Any]? {
+        let content = (card["attachments"] as? [[String: Any]])?.first?["content"] as? [String: Any]
+        return (content?["body"] as? [[String: Any]])?.first
+    }
+
+    func testEachCardKindHasItsBandAndTheProductLabel() throws {
+        let cases: [(card: [String: Any], style: String)] = [
+            (WebhookNotifier.teamsCard(title: "t", facts: facts), "emphasis"),
+            (WebhookNotifier.teamsCard(title: "t", facts: facts, tone: .good), "good"),
+            (WebhookNotifier.teamsCard(title: "t", facts: facts, tone: .warning), "warning"),
+            (WebhookNotifier.teamsFailedCard(title: "t", facts: facts), "attention"),
+            (WebhookNotifier.teamsAlertCard(title: "t", facts: facts), "warning"),
+        ]
+        for (card, style) in cases {
+            let band = try XCTUnwrap(Self.band(card))
+            XCTAssertEqual(band["type"] as? String, "Container")
+            XCTAssertEqual(band["style"] as? String, style)
+            let items = try XCTUnwrap(band["items"] as? [[String: Any]])
+            XCTAssertEqual(items.first?["text"] as? String, "JAMF REPORTS")
+        }
+        let slack = WebhookNotifier.slackBlocks(title: "t", facts: facts)
+        let first = try XCTUnwrap((slack["blocks"] as? [[String: Any]])?.first)
+        XCTAssertEqual(first["type"] as? String, "context", "Slack carries the same label")
+    }
+
     func testSanitizeAlsoNeutralizesTitle() throws {
         let card = WebhookNotifier.teamsCard(title: "<!here> alert", facts: [])
         let attachments = try XCTUnwrap(card["attachments"] as? [[String: Any]])
         let content = try XCTUnwrap(attachments.first?["content"] as? [String: Any])
         let body = try XCTUnwrap(content["body"] as? [[String: Any]])
-        let titleBlock = try XCTUnwrap(body.first { $0["type"] as? String == "TextBlock" })
+        let titleBlock = try XCTUnwrap(Self.titleBlock(in: body))
         let titleText = try XCTUnwrap(titleBlock["text"] as? String)
         XCTAssertFalse(titleText.contains("<!here>"))
         XCTAssertTrue(titleText.contains("&lt;!here&gt;"))
@@ -305,7 +335,7 @@ final class WebhookNotifierTests: XCTestCase {
             let attachments = try XCTUnwrap(obj["attachments"] as? [[String: Any]])
             let content = try XCTUnwrap(attachments.first?["content"] as? [String: Any])
             let body = try XCTUnwrap(content["body"] as? [[String: Any]])
-            let title = try XCTUnwrap(body.first?["text"] as? String)
+            let title = try XCTUnwrap(Self.titleBlock(in: body)?["text"] as? String)
             XCTAssertTrue(title.contains("\\_T\\_"), title)
             let set = try XCTUnwrap(body.first { $0["type"] as? String == "FactSet" })
             let fact = try XCTUnwrap((set["facts"] as? [[String: String]])?.first)
@@ -539,7 +569,12 @@ final class WebhookNotifierTests: XCTestCase {
         WebhookCapture.respond(with: 404)
         let config = NotifyConfig(
             enabled: true, provider: "slack", url: WebhookCapture.webhookURL)
-        for send in [WebhookNotifier.send, WebhookNotifier.sendFailed, WebhookNotifier.sendAlert] {
+        let senders: [(NotifyConfig, String, [WebhookNotifier.Fact], WebhookNotifier.DeliveryFailure?)
+            async -> Bool] = [
+            { await WebhookNotifier.send(config: $0, title: $1, facts: $2, failure: $3) },
+            WebhookNotifier.sendFailed, WebhookNotifier.sendAlert,
+        ]
+        for send in senders {
             let failure = WebhookNotifier.DeliveryFailure()
             let delivered = await send(config, "t", facts, failure)
             XCTAssertFalse(delivered)

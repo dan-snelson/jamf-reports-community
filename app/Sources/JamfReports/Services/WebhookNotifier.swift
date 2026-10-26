@@ -71,11 +71,11 @@ enum WebhookNotifier {
     /// JSON body for `provider`. Pure — no network. Returns nil only if
     /// serialization fails (never expected for these literal structures).
     static func payload(
-        provider: NotifyConfig.Provider, title: String, facts: [Fact]
+        provider: NotifyConfig.Provider, title: String, facts: [Fact], tone: Tone = .neutral
     ) -> Data? {
         let object: [String: Any]
         switch provider {
-        case .teams: object = teamsCard(title: title, facts: facts)
+        case .teams: object = teamsCard(title: title, facts: facts, tone: tone)
         case .slack: object = slackBlocks(title: title, facts: facts)
         }
         return try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -108,66 +108,51 @@ enum WebhookNotifier {
         return try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
-    /// Microsoft Teams Adaptive Card (mirrors the Python `_post_webhook` Teams
-    /// shape so both engines render identically).
-    static func teamsCard(title rawTitle: String, facts rawFacts: [Fact]) -> [String: Any] {
-        let title = sanitizeForTeams(rawTitle)
-        let facts = rawFacts.map(sanitizeForTeams)
-        return [
-            "type": "message",
-            "attachments": [[
-                "contentType": "application/vnd.microsoft.card.adaptive",
-                "contentUrl": NSNull(),
-                "content": [
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "body": [
-                        ["type": "TextBlock", "size": "Large", "weight": "Bolder", "text": title],
-                        ["type": "FactSet",
-                         "facts": facts.map { ["title": $0.label, "value": $0.value] }],
-                    ],
-                ],
-            ]],
-        ]
+    /// The color a card carries: its Teams header band. A success digest is `good`, a partial
+    /// one `warning`, a failure `attention`; the heartbeat and the test are `neutral`.
+    enum Tone: Sendable {
+        case neutral, good, warning, attention
+
+        var containerStyle: String {
+            switch self {
+            case .neutral: "emphasis"
+            case .good: "good"
+            case .warning: "warning"
+            case .attention: "attention"
+            }
+        }
     }
 
-    /// Microsoft Teams Adaptive Card for a failed run. Uses "Attention" color
-    /// so failures are visually distinct from success digests.
+    /// Microsoft Teams Adaptive Card: a header band colored by `tone`, holding the product
+    /// label and the title, then the facts.
+    static func teamsCard(
+        title rawTitle: String, facts rawFacts: [Fact], tone: Tone = .neutral
+    ) -> [String: Any] {
+        teamsAdaptiveCard(title: sanitizeForTeams(rawTitle), facts: rawFacts, tone: tone)
+    }
+
+    /// Microsoft Teams Adaptive Card for a failed run: red band and title.
     static func teamsFailedCard(title rawTitle: String, facts rawFacts: [Fact]) -> [String: Any] {
-        let title = sanitizeForTeams(rawTitle)
-        let facts = rawFacts.map(sanitizeForTeams)
-        return [
-            "type": "message",
-            "attachments": [[
-                "contentType": "application/vnd.microsoft.card.adaptive",
-                "contentUrl": NSNull(),
-                "content": [
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "body": [
-                        [
-                            "type": "TextBlock",
-                            "size": "Large",
-                            "weight": "Bolder",
-                            "text": title,
-                            "color": "Attention",
-                        ],
-                        ["type": "FactSet",
-                         "facts": facts.map { ["title": $0.label, "value": $0.value] }],
-                    ],
-                ],
-            ]],
-        ]
+        teamsAdaptiveCard(title: sanitizeForTeams(rawTitle), facts: rawFacts, tone: .attention)
     }
 
-    /// Microsoft Teams Adaptive Card for a metric alert. Uses "Attention"
-    /// color + a ⚠️ prefix so tripped thresholds are visually distinct from
-    /// both success and failure digests.
+    /// Microsoft Teams Adaptive Card for a metric alert: amber band and a ⚠️ before the title,
+    /// so a tripped threshold reads apart from both success and failure.
     static func teamsAlertCard(title rawTitle: String, facts rawFacts: [Fact]) -> [String: Any] {
-        let title = sanitizeForTeams(rawTitle)
+        teamsAdaptiveCard(title: "⚠️ \(sanitizeForTeams(rawTitle))", facts: rawFacts, tone: .warning)
+    }
+
+    /// The one Teams layout (Adaptive Card 1.4, which Teams Workflows posts as sent). `title`
+    /// arrives sanitized; the facts are sanitized here.
+    private static func teamsAdaptiveCard(
+        title: String, facts rawFacts: [Fact], tone: Tone
+    ) -> [String: Any] {
         let facts = rawFacts.map(sanitizeForTeams)
+        var titleBlock: [String: Any] = [
+            "type": "TextBlock", "size": "Large", "weight": "Bolder", "wrap": true,
+            "spacing": "Small", "text": title,
+        ]
+        if tone == .attention { titleBlock["color"] = "Attention" }
         return [
             "type": "message",
             "attachments": [[
@@ -179,13 +164,14 @@ enum WebhookNotifier {
                     "version": "1.4",
                     "body": [
                         [
-                            "type": "TextBlock",
-                            "size": "Large",
-                            "weight": "Bolder",
-                            "text": "⚠️ \(title)",
-                            "color": "Attention",
+                            "type": "Container", "style": tone.containerStyle, "bleed": true,
+                            "items": [
+                                ["type": "TextBlock", "text": "JAMF REPORTS", "size": "Small",
+                                 "weight": "Bolder", "isSubtle": true, "spacing": "None"],
+                                titleBlock,
+                            ],
                         ],
-                        ["type": "FactSet",
+                        ["type": "FactSet", "spacing": "Medium",
                          "facts": facts.map { ["title": $0.label, "value": $0.value] }],
                     ],
                 ],
@@ -202,6 +188,7 @@ enum WebhookNotifier {
         return [
             "text": title,
             "blocks": [
+                slackProductLabel,
                 ["type": "header",
                  "text": ["type": "plain_text", "text": title]],
                 ["type": "section",
@@ -219,6 +206,7 @@ enum WebhookNotifier {
         return [
             "text": failedTitle,
             "blocks": [
+                slackProductLabel,
                 ["type": "header",
                  "text": ["type": "plain_text", "text": failedTitle]],
                 ["type": "section",
@@ -236,6 +224,7 @@ enum WebhookNotifier {
         return [
             "text": alertTitle,
             "blocks": [
+                slackProductLabel,
                 ["type": "header",
                  "text": ["type": "plain_text", "text": alertTitle, "emoji": true]],
                 ["type": "section",
@@ -243,6 +232,11 @@ enum WebhookNotifier {
             ],
         ]
     }
+
+    /// "Jamf Reports" above every Slack header, as Teams' band label.
+    private static var slackProductLabel: [String: Any] { [
+        "type": "context", "elements": [["type": "mrkdwn", "text": "*Jamf Reports*"]],
+    ] }
 
     enum Endpoint: Equatable {
         case notConfigured
@@ -272,12 +266,14 @@ enum WebhookNotifier {
     /// network error so callers can record a warning in the run audit trail.
     @discardableResult
     static func send(
-        config: NotifyConfig, title: String, facts: [Fact], failure: DeliveryFailure? = nil
+        config: NotifyConfig, title: String, facts: [Fact], tone: Tone = .neutral,
+        failure: DeliveryFailure? = nil
     ) async -> Bool {
         let ep = endpoint(for: config)
         guard case .url(let url) = ep else { return ep == .notConfigured }
         AppLogger.webhook.debug("posting \(config.resolvedProvider.rawValue, privacy: .public) digest")
-        guard let body = payload(provider: config.resolvedProvider, title: title, facts: facts) else {
+        guard let body = payload(
+            provider: config.resolvedProvider, title: title, facts: facts, tone: tone) else {
             AppLogger.webhook.warning(
                 "WebhookNotifier: failed to encode \(config.resolvedProvider.rawValue, privacy: .public) payload"
             )

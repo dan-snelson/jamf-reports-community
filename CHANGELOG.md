@@ -356,6 +356,11 @@ versions in this repository map to git tags.
   finish, no longer makes every scheduled run fail. Scheduled runs skip it with one warning, the
   health strip names the workspace whichever one is open, and collecting it says jamf-cli has no
   profile of that name instead of "server unreachable or jamf-cli broken". (#284)
+- Teams notification cards have a colored header (green for a finished run, amber for a partial
+  run or a metric alert, red for a failure or an overdue schedule, gray for the heartbeat and the
+  test) and titles that say what happened, such as "Scheduled run failed — prod". Slack messages
+  carry the same "Jamf Reports" label above the title. The facts a card sends are unchanged.
+  (#284)
 - The Notifications card now says when notifications are on but no webhook URL is set. Nothing,
   the daily heartbeat included, was sent, and nothing on screen said so. (#284)
 - A scheduled Jamf School **Refresh + Generate** run now always collects first, so its workbook

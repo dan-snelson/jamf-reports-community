@@ -6,6 +6,13 @@ import XCTest
 /// EOL detection, and graceful degradation on missing/corrupt data.
 @MainActor
 final class SOFAFeedServiceTests: XCTestCase {
+    func test_familyName_namesABareIOSMajor_andLeavesNamedFamiliesAlone() {
+        XCTAssertEqual(SOFAFeedService.familyName("27", platformLabel: "iOS / iPadOS"), "iOS 27")
+        XCTAssertEqual(SOFAFeedService.familyName("tvOS 27", platformLabel: "tvOS"), "tvOS 27")
+        XCTAssertEqual(SOFAFeedService.familyName("Tahoe 26", platformLabel: "macOS"), "Tahoe 26")
+        XCTAssertEqual(SOFAFeedService.familyName("", platformLabel: "iOS / iPadOS"), "")
+    }
+
 
     // MARK: - Helpers
 

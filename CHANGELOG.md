@@ -389,6 +389,13 @@ versions in this repository map to git tags.
   success and error messages are read out. (#284)
 - The sidebar no longer re-reads summary and report files each time the pointer moves over it.
   (#284)
+- OS Updates' Failed Plans table says when it lists a sample: jamf-cli looks up a random
+  sample of failing plans, so "200 total" sat beside a Failing Plans tile of 3481. The header now
+  reads "200 sampled of 3481". (#284)
+- OS Latest Versions and the OS Currency sheet name iOS releases "iOS 27" instead of a bare
+  "27". (#284)
+- Setup's last step no longer calls a workspace fully set up when its profile did not validate;
+  it says the first run will probably fail and where to fix the connection. (#284)
 
 ### Security
 

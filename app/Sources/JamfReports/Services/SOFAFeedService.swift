@@ -270,6 +270,14 @@ struct SOFAFeedService: Sendable {
         return (devices, versions)
     }
 
+    /// SOFA names an iOS family by its bare major ("27"); every other feed names it ("tvOS 27").
+    nonisolated static func familyName(_ osVersion: String, platformLabel: String) -> String {
+        let trimmed = osVersion.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.allSatisfy(\.isNumber),
+              let name = platformLabel.split(separator: " ").first else { return osVersion }
+        return "\(name) \(trimmed)"
+    }
+
     // MARK: - Private
 
     private static func normalizeFeed(
@@ -303,7 +311,7 @@ struct SOFAFeedService: Sendable {
             let cveCount = latest.activelyExploitedCVEs?.count ?? 0
             result.append(OSFamilyRow(
                 platform: label,
-                osFamily: entry.osVersion,
+                osFamily: familyName(entry.osVersion, platformLabel: label),
                 productVersion: product,
                 build: latest.build ?? "",
                 releaseDate: relStr,

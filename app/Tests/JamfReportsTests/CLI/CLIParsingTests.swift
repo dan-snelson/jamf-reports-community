@@ -168,6 +168,10 @@ final class CLIParsingTests: XCTestCase {
             CLIRun.terminalSafe(hostile),
             #"Mac\u001b[2J\u001b]52;c;aGk=\u0007\u007f\u009b31m\u000d"# + "\tok\n")
         XCTAssertEqual(CLIRun.terminalSafe("Büro-Mac — 15.7 ✓"), "Büro-Mac — 15.7 ✓")
+        // Right-to-left override and isolate, and a line separator, reorder or split a line.
+        XCTAssertEqual(
+            CLIRun.terminalSafe("Mac\u{202E}gpj.exe\u{2066}x\u{2028}y"),
+            #"Mac\u202egpj.exe\u2066x\u2028y"#)
     }
 
     func testTerminalSafeJSONDecodesToTheSameValue() throws {

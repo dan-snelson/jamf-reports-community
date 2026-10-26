@@ -94,6 +94,20 @@ enum ProfileAuthMethod {
         return resolved
     }
 
+    /// True only when `config list` was read and does not name `profile`: a workspace left by a
+    /// setup that never saved its jamf-cli profile, or a profile removed in Terminal. False when
+    /// it is listed or jamf-cli could not be asked, which keeps collecting. Collect asks only
+    /// after `resolve` came back nil.
+    static func isAbsent(
+        profile: String,
+        binary: URL? = ExecutableLocator.locate("jamf-cli"),
+        timeout: TimeInterval = JamfCLIProbe.defaultTimeout
+    ) -> Bool {
+        guard let binary, let data = configList(binary: binary, timeout: timeout),
+              let names = JamfCLIConfigList.names(data: data) else { return false }
+        return !names.contains(profile)
+    }
+
     /// `config list` shows no ID for the profile, and the config file, when it holds the profile,
     /// agrees. The file is the second look because this answer blocks the profile: a jamf-cli
     /// that leaves the ID out of `config list` must not make every platform profile organization

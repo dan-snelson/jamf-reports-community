@@ -46,6 +46,7 @@ final class CollectClaimLifecycleTests: XCTestCase {
         let url = binDir.appendingPathComponent("stub-cli")
         let script = """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         printf '%s' '\(stdout)'
         exit \(exitCode)
         """

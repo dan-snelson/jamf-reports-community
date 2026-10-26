@@ -126,6 +126,7 @@ final class SchoolCollectSOFATests: XCTestCase {
         let stub = root.appendingPathComponent("bin/stub-cli")
         try """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         case "$*" in
           *--version*) echo "jamf-cli version 1.31.1" ;;
           *"school devices list"*) cat "\(fleet.path)" ;;

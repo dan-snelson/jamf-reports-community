@@ -352,6 +352,10 @@ versions in this repository map to git tags.
 - `csv-inbox/` is no longer read by reports. Config Doctor suggests deleting the folder when it
   holds files.
 - `exceptions[].control_id` is no longer read; Config Doctor says it can be deleted. (#284)
+- A workspace whose jamf-cli profile does not exist, such as one left by a setup you did not
+  finish, no longer makes every scheduled run fail. Scheduled runs skip it with one warning, the
+  health strip names the workspace whichever one is open, and collecting it says jamf-cli has no
+  profile of that name instead of "server unreachable or jamf-cli broken". (#284)
 - A scheduled Jamf School **Refresh + Generate** run now always collects first, so its workbook
   is no longer built from data up to 12 hours old after an earlier refresh. (#284)
 - The workbook logo (`branding.logo_path`) now sits beside the first tab's title instead of

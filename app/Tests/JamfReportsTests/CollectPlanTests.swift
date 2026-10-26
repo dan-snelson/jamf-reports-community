@@ -241,7 +241,7 @@ final class CollectPlanTests: XCTestCase {
         }
         let calls = root.appendingPathComponent("calls.log")
         let stub = bin.appendingPathComponent("stub-cli")
-        try "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"\(calls.path)\"\nprintf '[]'\nexit 0\n"
+        try "#!/bin/sh\n[ \"$1 $2\" = \"config list\" ] && { printf '%s' '[{\"name\":\"\(profile)\"}]'; exit 0; }\nprintf '%s\\n' \"$*\" >> \"\(calls.path)\"\nprintf '[]'\nexit 0\n"
             .write(to: stub, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
         let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))

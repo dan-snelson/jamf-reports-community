@@ -41,6 +41,12 @@ enum JamfCLIConfigList {
             tenantID: field("tenant-id", in: entry))
     }
 
+    /// Every profile name `config list` lists, or nil when the response is unreadable.
+    nonisolated static func names(data: Data) -> [String]? {
+        ((try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]])?
+            .compactMap { $0["name"] as? String }
+    }
+
     /// The `config list` row for `profile`, or the `default: true` row when `profile` is empty.
     private nonisolated static func entry(data: Data, profile: String) -> [String: Any]? {
         guard let entries = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]

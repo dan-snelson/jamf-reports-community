@@ -65,6 +65,10 @@ struct TrendsView: View {
         )
     }
 
+    private static func archivedSummaries(_ count: Int) -> String {
+        "\(count) archived summar\(count == 1 ? "y" : "ies")"
+    }
+
     private var chartYDomain: ClosedRange<Double> {
         Self.chartYDomain(metric: metric, values: values)
     }
@@ -773,7 +777,7 @@ struct TrendsView: View {
                     }
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle").font(.system(size: 11))
-                        Text("\(trendDates.count) archived summaries").font(.caption)
+                        Text("\(Self.archivedSummaries(trendDates.count))").font(.caption)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                     }
                     Spacer()
@@ -1257,7 +1261,7 @@ struct TrendsView: View {
                         HStack(spacing: 4) {
                             Text("snapshots/summaries/")
                                 .font(Theme.Fonts.mono(11.5))
-                            Text("· \(trendDates.count) archived summaries · one per day, "
+                            Text("· \(Self.archivedSummaries(trendDates.count)) · one per day, "
                                  + "written by collect")
                         }
                         .font(.caption)

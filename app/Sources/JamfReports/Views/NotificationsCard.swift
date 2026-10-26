@@ -4,7 +4,7 @@ import TipKit
 /// Configures the active profile's `notify:` webhook. Scheduled runs already
 /// read this block at run time, so the panel only WRITES it; each control
 /// persists immediately (write-on-change), matching the Settings AI panel.
-/// The URL TextField is the exception: its binding fires per KEYSTROKE, and each
+/// The URL field is the exception: its binding fires per KEYSTROKE, and each
 /// save is a full config.yaml read/decode/re-encode/atomic-rename — so URL edits
 /// are debounced (600ms) instead of written per character.
 ///
@@ -57,7 +57,8 @@ struct NotificationsCard: View {
                     .pickerStyle(.menu)
                     .frame(maxWidth: 260, alignment: .leading)
 
-                    TextField("https://...", text: Binding(
+                    // The URL is a bearer secret: anyone holding it can post to the channel.
+                    SecureField("https://...", text: Binding(
                         get: { notifyURL },
                         set: { notifyURL = $0; scheduleDebouncedNotifySave() }))
                         .textFieldStyle(.roundedBorder)
@@ -65,6 +66,11 @@ struct NotificationsCard: View {
                         .frame(maxWidth: 420, alignment: .leading)
                         .onSubmit { flushNotifySave() }
 
+                    if NotifyConfigWriter.showsMissingURLWarning(enabled: notifyEnabled, url: notifyURL) {
+                        Text("Add the webhook URL. Nothing is sent until then, the heartbeat "
+                            + "included.")
+                            .font(.footnote).foregroundStyle(Theme.Colors.warn)
+                    }
                     if NotifyConfigWriter.showsInsecureURLWarning(enabled: notifyEnabled, url: notifyURL) {
                         Text("URL must start with https:// — notifications will not send.")
                             .font(.footnote).foregroundStyle(Theme.Colors.warn)

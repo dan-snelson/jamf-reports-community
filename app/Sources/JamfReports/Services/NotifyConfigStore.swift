@@ -106,4 +106,9 @@ enum NotifyConfigWriter {
         guard enabled, !trimmed.isEmpty else { return false }
         return !trimmed.lowercased().hasPrefix("https://")
     }
+
+    /// True when notifications are on with no URL: no card, the heartbeat included, is sent.
+    static func showsMissingURLWarning(enabled: Bool, url: String) -> Bool {
+        enabled && url.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 }

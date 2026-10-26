@@ -194,6 +194,13 @@ final class NotifyConfigStoreTests: XCTestCase {
         )
     }
 
+    func testMissingURLWarningPredicate() {
+        XCTAssertTrue(NotifyConfigWriter.showsMissingURLWarning(enabled: true, url: " "))
+        XCTAssertFalse(NotifyConfigWriter.showsMissingURLWarning(enabled: false, url: ""),
+                       "disabled never warns")
+        XCTAssertFalse(NotifyConfigWriter.showsMissingURLWarning(enabled: true, url: "https://x.com"))
+    }
+
     func testInsecureURLWarningPredicate() {
         XCTAssertFalse(NotifyConfigWriter.showsInsecureURLWarning(enabled: false, url: "http://x"),
                        "disabled never warns")

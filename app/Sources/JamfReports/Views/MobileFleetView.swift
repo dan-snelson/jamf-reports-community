@@ -43,8 +43,10 @@ struct MobileFleetView: View {
                 )
             }
 
-            if !snapshot.isDetected {
-                emptyState
+            if snapshot.totalDevices == 0 {
+                // Collected and empty reads differently from never collected.
+                if snapshot.collectedWithNoDevices { noDevicesState } else { emptyState }
+                if !snapshot.profiles.isEmpty { profilesTable }
             } else {
                 kpiGrid
                 supervisionCard
@@ -218,6 +220,22 @@ struct MobileFleetView: View {
         }
     }
 
+    private var collectInventoryCommand: String {
+        EmptyStateView.collectCommand(
+            profile: workspace.profile, kinds: [MobileFleetService.deviceKind])
+    }
+
+    private var noDevicesState: some View {
+        Card(padding: 24) {
+            EmptyStateView(
+                systemImage: "ipad.and.iphone",
+                title: "Jamf Pro reports no mobile devices",
+                message: "The latest mobile device collection found none, so there is "
+                    + "nothing to chart here."
+            )
+        }
+    }
+
     // Both tile rows use the Overview's grid: the adaptive LazyVGrid capped
     // tiles at 320 pt, leaving an empty band beside them on a wide window.
     private var kpiGrid: some View {
@@ -307,8 +325,9 @@ struct MobileFleetView: View {
                     EmptyStateView(
                         systemImage: "questionmark.circle",
                         title: "Collect inventory for KPIs",
-                        message: "Supervision and ownership signals come from "
-                            + "`pro mobile-devices list`."
+                        message: "Supervision and ownership signals come from the full "
+                            + "mobile device inventory.",
+                        commands: [collectInventoryCommand]
                     )
                 } else {
                     HStack(alignment: .top, spacing: 28) {
@@ -482,7 +501,8 @@ struct MobileFleetView: View {
                     EmptyStateView(
                         systemImage: "questionmark.circle",
                         title: "Collect inventory for KPIs",
-                        message: "Enrollment method comes from `general.deviceOwnershipType`."
+                        message: "Enrollment method comes from the full mobile device inventory.",
+                        commands: [collectInventoryCommand]
                     )
                 } else if snapshot.enrollmentMethodDistribution.isEmpty {
                     Text("No enrollment method values reported by Jamf Pro for this fleet.")

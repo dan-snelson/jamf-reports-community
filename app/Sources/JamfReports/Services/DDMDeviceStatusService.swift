@@ -23,6 +23,18 @@ struct DDMDeviceStatusService: Sendable {
         let mixed: Int
         let devices: [DeviceRef]
         var issues: Int { inactive + invalid + mixed }
+        /// Every device carrying the identifier; each is in exactly one of the four states.
+        var deviceCount: Int { devices.count }
+    }
+
+    /// The identifier list split for display: `notable` is every identifier on more than one
+    /// device or with any issue (worst first); `quietSingles` is the long tail that sits on
+    /// one device and is healthy. A failing single-device identifier is never in the tail.
+    struct IdentifierOverview: Sendable, Equatable {
+        let notable: [IdentifierSummary]
+        let quietSingles: [IdentifierSummary]
+        var totalCount: Int { notable.count + quietSingles.count }
+        var withIssuesCount: Int { notable.filter { $0.issues > 0 }.count }
     }
 
     struct Snapshot: Sendable, Equatable {
@@ -43,7 +55,7 @@ struct DDMDeviceStatusService: Sendable {
             records.first { $0.deviceId == id }
         }
 
-        /// Worst first: mixed, then invalid, then inactive, then identifier.
+        /// Most affected devices first, then most devices, then identifier.
         var byIdentifier: [IdentifierSummary] {
             var order: [String] = []
             var perId: [String: (
@@ -74,10 +86,16 @@ struct DDMDeviceStatusService: Sendable {
         /// Field-by-field comparator (avoids a heterogeneous tuple comparison,
         /// which Swift 6.1's type-checker can time out on).
         private static func worstFirst(_ a: IdentifierSummary, _ b: IdentifierSummary) -> Bool {
-            if a.mixed != b.mixed { return a.mixed > b.mixed }
-            if a.invalid != b.invalid { return a.invalid > b.invalid }
-            if a.inactive != b.inactive { return a.inactive > b.inactive }
+            if a.issues != b.issues { return a.issues > b.issues }
+            if a.deviceCount != b.deviceCount { return a.deviceCount > b.deviceCount }
             return a.identifier < b.identifier
+        }
+
+        var identifierOverview: IdentifierOverview {
+            let all = byIdentifier
+            let isQuiet: (IdentifierSummary) -> Bool = { $0.deviceCount == 1 && $0.issues == 0 }
+            return IdentifierOverview(notable: all.filter { !isQuiet($0) },
+                                      quietSingles: all.filter(isQuiet))
         }
 
         var failingDeclarationCount: Int { byIdentifier.reduce(0) { $0 + $1.issues } }

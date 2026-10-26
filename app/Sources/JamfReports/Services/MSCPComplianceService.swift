@@ -194,14 +194,14 @@ extension MSCPComplianceService.BaselineResult {
         "\(passCount) of \(devicesWithData) evaluated"
     }
 
-    /// The evaluated devices against all devices in the snapshot: "of 664 devices, 32 No Data".
+    /// The evaluated devices against all devices in the snapshot: "of 664 computers, 32 No Data".
     var evaluatedBasisText: String {
-        "of \(totalDevices) device\(totalDevices == 1 ? "" : "s"), \(noDataCount) No Data"
+        "of \(totalDevices) computer\(totalDevices == 1 ? "" : "s"), \(noDataCount) No Data"
     }
 
     /// What the donut legend's percentages divide: every device in the snapshot, No Data included.
     var shareBasisText: String {
-        "Share of all \(totalDevices) device\(totalDevices == 1 ? "" : "s"), No Data included"
+        "Share of all \(totalDevices) computer\(totalDevices == 1 ? "" : "s"), No Data included"
     }
 }
 
@@ -216,9 +216,9 @@ extension MSCPComplianceService {
             return "No device data matched the configured baseline EA column."
         }
         let baselines = "\(results.count) mSCP baseline\(results.count == 1 ? "" : "s")"
-        let devices = "\(total) device\(total == 1 ? "" : "s")"
+        let devices = "\(total) computer\(total == 1 ? "" : "s")"
         if low == high { return "\(low) of \(devices) evaluated across \(baselines)." }
-        return "\(devices) across \(baselines); each evaluates the devices that report its "
+        return "\(devices) across \(baselines); each evaluates the computers that report its "
             + "column (\(low) to \(high))."
     }
 }

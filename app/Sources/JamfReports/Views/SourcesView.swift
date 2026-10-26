@@ -649,7 +649,12 @@ struct SourcesView: View {
                     // empty filler rows that read as missing data.
                     .frame(height: min(CGFloat(families.count) * 28 + 34, 200))
                     .scrollContentBackground(.hidden)
-                    Text("Families appear as snapshot types are archived: summaries "
+                    Text(isSchoolWorkspace
+                        ? "Families appear as snapshot types are archived: summaries "
+                        + "(daily trend data: a day's first collect writes it, and each later "
+                        + "collect that fetches new data rebuilds it) plus dated Jamf School "
+                        + "device, group, and user archives."
+                        : "Families appear as snapshot types are archived: summaries "
                         + "(daily trend data: a day's first collect writes it, and each later "
                         + "collect that fetches new data rebuilds it) plus dated computers, "
                         + "mobile, compliance, and patching archives. A jamf-cli-only workspace "

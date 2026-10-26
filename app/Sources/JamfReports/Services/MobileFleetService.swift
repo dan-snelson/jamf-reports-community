@@ -249,8 +249,13 @@ struct MobileFleetService: Sendable {
         /// on-disk kind names (`mobile-devices-list`, `classic-ios-profiles`); a
         /// kind absent from disk is absent from the map.
         var sourceDates: [String: Date] = [:]
+        /// A device snapshot was collected and read, whether or not it holds any device.
+        var inventoryCollected = false
 
         // MARK: - Computed properties
+
+        /// Collected and read, and Jamf Pro listed no mobile device.
+        var collectedWithNoDevices: Bool { inventoryCollected && totalDevices == 0 }
 
         var totalDevices: Int {
             richDevices.isEmpty ? lightDevices.count : richDevices.count
@@ -464,7 +469,8 @@ struct MobileFleetService: Sendable {
             lhs.profiles.count == rhs.profiles.count &&
             lhs.sourceFile == rhs.sourceFile &&
             lhs.snapshotDate == rhs.snapshotDate &&
-            lhs.sourceDates == rhs.sourceDates
+            lhs.sourceDates == rhs.sourceDates &&
+            lhs.inventoryCollected == rhs.inventoryCollected
         }
     }
 
@@ -562,7 +568,9 @@ struct MobileFleetService: Sendable {
         // that is present but whose data cannot be decoded is a decode failure and
         // is logged; it does NOT count as detected.
         var readSomething = inventoryRows != nil
-        let lightDevices = loadDeviceList(from: listURL, success: &readSomething)
+        var listRead = false
+        let lightDevices = loadDeviceList(from: listURL, success: &listRead)
+        readSomething = readSomething || listRead
         let profiles = loadProfiles(from: profilesURL, success: &readSomething)
 
         // Determine source file and date from the most recent of the three
@@ -602,7 +610,8 @@ struct MobileFleetService: Sendable {
             profiles: profiles,
             sourceFile: sourceFile,
             snapshotDate: snapshotDate,
-            sourceDates: sourceDates
+            sourceDates: sourceDates,
+            inventoryCollected: listRead || inventoryRows != nil
         )
     }
 

@@ -9,7 +9,7 @@ final class SidebarVisibilityListTests: XCTestCase {
 
     /// Every tab the user may hide has a switch, once, and no tab that cannot be hidden does.
     func testEveryHideableTabHasExactlyOneSwitch() {
-        let hideable = Tab.allCases.filter { !$0.isCoreTab && $0 != .schoolDevices }
+        let hideable = Tab.allCases.filter { !$0.isCoreTab }
         XCTAssertEqual(Set(listed), Set(hideable))
         XCTAssertEqual(listed.count, hideable.count, "no tab listed twice")
         XCTAssertTrue(listed.allSatisfy { !$0.isCoreTab })
@@ -37,7 +37,7 @@ final class SidebarVisibilityListTests: XCTestCase {
     func testSchoolListsOnlyItsOwnTabs() {
         let school = SettingsView.toggleableGroups(school: true).flatMap(\.tabs)
         XCTAssertEqual(Set(school), Tab.schoolTabs.filter { !$0.isCoreTab })
-        XCTAssertTrue(school.contains(.schoolDevices))
+        XCTAssertFalse(school.contains(.schoolDevices), "Devices is the School core tab")
         XCTAssertFalse(school.contains(.fleet))
         XCTAssertFalse(school.contains(.protectDashboard))
         let withProtect = SettingsView.toggleableGroups(school: true, protectConnected: true)

@@ -1235,6 +1235,11 @@ struct SettingsView: View {
         ExperimentalBadge()
     }
 
+    /// The inventory tab as this workspace's sidebar names it: Devices on Jamf School.
+    private var inventoryTabLabel: String {
+        (workspace.isSchoolWorkspace ? Tab.schoolDevices : Tab.devices).label
+    }
+
     private var sidebarVisibilityCard: some View {
         Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
@@ -1251,8 +1256,8 @@ struct SettingsView: View {
                           ? ManagedPreference.note : "Restore every hidden tab to the sidebar.")
                 }
                 Text(hiddenTabsManaged ? ManagedPreference.note
-                     : "Hide dashboards you don't use. Core tabs (Overview, Computers, Data "
-                     + "Sources, Settings) cannot be hidden.")
+                     : "Hide dashboards you don't use. Core tabs (Overview, \(inventoryTabLabel), "
+                     + "Data Sources, Settings) cannot be hidden.")
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                 ForEach(

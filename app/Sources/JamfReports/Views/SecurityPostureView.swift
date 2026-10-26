@@ -71,7 +71,8 @@ struct SecurityPostureView: View {
 
     private var subtitle: String? {
         if snapshot.totalDevices == 0 { return nil }
-        return "Weighted across \(snapshot.totalDevices) device\(snapshot.totalDevices == 1 ? "" : "s")."
+        let count = snapshot.totalDevices
+        return "Weighted across \(count) computer\(count == 1 ? "" : "s")."
     }
 
     // MARK: - Data loading

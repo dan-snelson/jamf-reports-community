@@ -46,7 +46,7 @@ struct OutreachView: View {
     private var subtitle: String? {
         guard snapshot.totalDevices > 0 || snapshot.binaryMissingCount > 0 else { return nil }
         let count = snapshot.totalDevices
-        let bucketed = "\(count) device\(count == 1 ? "" : "s") bucketed by "
+        let bucketed = "\(count) computer\(count == 1 ? "" : "s") bucketed by "
             + "days since \(staleRule.basisPhrase)."
         let missing = snapshot.binaryMissingCount
         guard missing > 0 else { return bucketed }
@@ -250,7 +250,8 @@ struct OutreachView: View {
                                 .foregroundStyle(daysSinceColor(for: Int(age) ?? .max))
                                 .monospacedDigit()
                                 .accessibilityLabel(
-                                    "\(age) days since \(staleRule.basisPhrase)")
+                                    "\(age) day\(age == "1" ? "" : "s") "
+                                    + "since \(staleRule.basisPhrase)")
                         }
                         .width(min: 80, ideal: 90)
 
@@ -317,7 +318,8 @@ struct OutreachView: View {
             )
             let csv = StaleDeviceService.outreachCSV(snapshot)
             try csv.write(to: fileURL, atomically: true, encoding: .utf8)
-            let exported = "Exported \(snapshot.totalDevices) computers to \(filename)"
+            let n = snapshot.totalDevices
+            let exported = "Exported \(n) computer\(n == 1 ? "" : "s") to \(filename)"
             if let note = SharedConfigPin.outputFolderNote(
                 profile: workspace.profile, folder: outputDir) {
                 workspace.toast = Toast(message: exported + ". " + note, style: .warning)

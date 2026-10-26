@@ -36,8 +36,8 @@ final class TrendInsightInputTests: XCTestCase {
         metric.displayLabel(benchmarkLabel: "CIS Level 1", edrAgentName: "CrowdStrike Falcon")
     }
 
-    /// "Stale Devices (>30d)" alone read as a statement about how old the devices are.
-    private let stale = "Stale Devices (>30d) — devices with no recent check-in"
+    /// "Stale Computers (>30d)" alone read as a statement about how old the devices are.
+    private let stale = "Stale Computers (>30d) — computers with no recent check-in"
 
     private func input(
         _ store: TrendStore, metrics: [TrendSeries.Metric] = TrendSeries.Metric.allCases
@@ -58,7 +58,7 @@ final class TrendInsightInputTests: XCTestCase {
             "Focus: which metrics moved together or against each other over the period, and "
                 + "which change matters most.",
             "- Stability Index: 85.2 (up 3.2 vs prior, better)",
-            "- Active Devices: 99",
+            "- Active Computers: 99",
             "- CIS Level 1: 78.0% (down 2.0 pp vs prior, worse)",
             "- FileVault Encryption on 92.0% of devices; not encrypted on 8.0% "
                 + "(up 2.0 pp vs prior, better)",
@@ -71,7 +71,7 @@ final class TrendInsightInputTests: XCTestCase {
             "- Managed Computers: 110",
             "Range: 2026-09-01 to 2026-09-15, 3 snapshots. Each value is the last snapshot in "
                 + "the range and its prior is the first.",
-            "Active Devices: 80 at the start, 99 at the end.",
+            "Active Computers: 80 at the start, 99 at the end.",
             "\(stale): 20 at the start, 11 at the end.",
             "Security Score (Weighted): compared from 2026-09-08 to 2026-09-15, its first and "
                 + "last snapshots in the range.",

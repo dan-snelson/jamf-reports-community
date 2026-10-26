@@ -362,6 +362,21 @@ versions in this repository map to git tags.
   carry the same "Jamf Reports" label above the title. Every card ends with a line naming the
   Jamf Reports application, your organization name from Config › Output & Branding (left out
   at minimal detail) and when the card was sent. The facts a card sends are unchanged. (#284)
+- Trends, Overview, Security Posture, Compliance Posture, Offline Outreach and Fleet Overview
+  say "computers" where a figure counts Macs only, and counts of one read in the singular
+  ("1 archived summary", "1 device"). (#287)
+- Mobile Devices says Jamf Pro reports no mobile devices when a collection found none, instead
+  of asking you to collect. (#284)
+- OS Updates calls its totals update statuses (one per device and update), since jamf-cli
+  returns one record per device per update; it no longer reads as a device count. (#284)
+- The DDM screen lists declaration identifiers by how many Macs they fail on, with a device
+  count for each, shows 15 at a time, and folds healthy identifiers that sit on one Mac each
+  into one line. Failing ones always stay listed. (#284)
+- On a Jamf School workspace, Automation hides the Jamf Pro-only deep-scan controls, Data
+  Sources describes School's archives, and Sidebar Visibility names the Devices tab and no
+  longer offers to hide it. (#284)
+- Fleet Overview and Compliance Benchmarks show accurate title-bar subtitles, and the Customize
+  Reports chart note no longer mentions the retired compliance bands. (#284)
 - The Notifications card now says when notifications are on but no webhook URL is set. Nothing,
   the daily heartbeat included, was sent, and nothing on screen said so. (#284)
 - A scheduled Jamf School **Refresh + Generate** run now always collects first, so its workbook

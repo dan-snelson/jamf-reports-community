@@ -75,7 +75,7 @@ final class FleetOverviewFilterTests: XCTestCase {
             patchPct: 72
         )
         let patch = try XCTUnwrap(fleetProfileIssues(summary).first { $0.tab == .patch })
-        XCTAssertTrue(patch.explanation.hasPrefix("Share of devices"), patch.explanation)
+        XCTAssertTrue(patch.explanation.hasPrefix("Share of computers"), patch.explanation)
         XCTAssertFalse(patch.explanation.contains("Average"), patch.explanation)
     }
 
@@ -166,7 +166,7 @@ final class FleetOverviewFilterTests: XCTestCase {
         )
         let reasons = fleetProfileIssues(summary).map(\.reason)
         XCTAssertEqual(reasons.count, 3)
-        XCTAssertTrue(reasons.contains { $0.contains("5 stale devices") })
+        XCTAssertTrue(reasons.contains { $0.contains("5 stale computers") })
         XCTAssertTrue(reasons.contains { $0.contains("FileVault 82.0%") })
         XCTAssertTrue(reasons.contains { $0.contains("Patch 60.0%") })
     }

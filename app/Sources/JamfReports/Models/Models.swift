@@ -1161,12 +1161,12 @@ struct TrendSeries: Identifiable, Sendable {
         var displayLabel: String {
             switch self {
             case .stability:     return "Stability Index"
-            case .activeDevices: return "Active Devices"
+            case .activeDevices: return "Active Computers"
             case .compliance:    return "Compliance Benchmark"
             case .fileVault:     return "FileVault Encryption"
             case .osCurrent:     return "On Current macOS"
             case .edrAgent:      return "EDR agent coverage"
-            case .stale:         return "Stale Devices (>30d)"
+            case .stale:         return "Stale Computers (>30d)"
             case .patch:         return "Patch Compliance"
             case .securityScore: return "Security Score (Weighted)"
             case .mscpBandTrend: return "mSCP Compliance Bands"

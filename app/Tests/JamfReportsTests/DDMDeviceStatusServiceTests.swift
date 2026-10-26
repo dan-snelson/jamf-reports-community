@@ -61,8 +61,44 @@ final class DDMDeviceStatusServiceTests: XCTestCase {
         XCTAssertEqual(c.invalid, 1)
         // failing = invalid + inactive + mixed device-declarations
         XCTAssertEqual(s.failingDeclarationCount, 3)
-        XCTAssertEqual(s.byIdentifier.map(\.identifier), ["B", "C", "A"],
-                       "worst first: mixed, then invalid, then inactive, then name")
+        XCTAssertEqual(s.byIdentifier.map(\.identifier), ["A", "B", "C"],
+                       "one issue each: A is on two devices, then B and C by name")
+    }
+
+    func testIdentifierOrderIsAffectedDevicesThenTotalDevicesThenName() throws {
+        // X fails on 2 of 2 devices; Y fails on 1 of 3; Z fails on 1 of 1; W is healthy on 3.
+        let url = try write([
+            rec("1", decl: [("X", true, false), ("Y", true, false), ("Z", false, true),
+                            ("W", true, true)]),
+            rec("2", decl: [("X", false, true), ("Y", true, true), ("W", true, true)]),
+            rec("3", decl: [("Y", true, true), ("W", true, true)]),
+        ])
+        let s = DDMDeviceStatusService.load(url: url)
+        XCTAssertEqual(s.byIdentifier.map(\.identifier), ["X", "Y", "Z", "W"])
+        XCTAssertEqual(s.byIdentifier.map(\.deviceCount), [2, 3, 1, 3])
+        XCTAssertEqual(s.failingDeclarationCount, 4, "counts device-declaration pairs")
+    }
+
+    func testIdentifierOverviewCollapsesOnlyHealthySingleDeviceIdentifiers() throws {
+        let url = try write([
+            rec("1", decl: [("shared", true, true), ("bad-single", true, false),
+                            ("q-b", true, true)]),
+            rec("2", decl: [("shared", true, true), ("q-a", true, true)]),
+        ])
+        let o = DDMDeviceStatusService.load(url: url).identifierOverview
+        XCTAssertEqual(o.notable.map(\.identifier), ["bad-single", "shared"])
+        XCTAssertEqual(o.quietSingles.map(\.identifier), ["q-a", "q-b"])
+        XCTAssertEqual(o.totalCount, 4)
+        XCTAssertEqual(o.withIssuesCount, 1)
+    }
+
+    func testPluralisedCountText() {
+        XCTAssertEqual(DDMBlueprintView.quietSinglesText(1),
+                       "1 identifier appears on one device and is healthy")
+        XCTAssertEqual(DDMBlueprintView.quietSinglesText(2204),
+                       "2204 identifiers appear on one device each and are healthy")
+        XCTAssertEqual(DDMBlueprintView.identifiersSummary(total: 1, withIssues: 0),
+                       "1 identifier, 0 with issues")
     }
 
     func testSoftwareUpdateAggregation() throws {

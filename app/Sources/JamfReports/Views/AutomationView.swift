@@ -256,10 +256,12 @@ struct AutomationView: View {
                         + "Trends and reports stay current.")
                     .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
                 Divider().background(Theme.Colors.hairline)
-                Toggle("Weekly deep scan", isOn: binding(\.scanEnabled))
-                    .toggleStyle(.switch)
-                if policy.scanEnabled {
-                    weekdayPicker("Scan day", binding(\.scanWeekday))
+                if !workspace.isSchoolWorkspace {
+                    Toggle("Weekly deep scan", isOn: binding(\.scanEnabled))
+                        .toggleStyle(.switch)
+                    if policy.scanEnabled {
+                        weekdayPicker("Scan day", binding(\.scanWeekday))
+                    }
                 }
                 // The policy covers every profile; only Jamf Pro has a deep scan.
                 Text(workspace.isSchoolWorkspace

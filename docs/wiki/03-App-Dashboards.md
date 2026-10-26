@@ -169,9 +169,9 @@ Overview, Devices and Trends screens and a workbook of its own; see
   "Protect not detected" state for tenants that do not run Jamf Protect.
   Data source: Jamf Protect GraphQL API (separate OAuth2 credentials, tier 2).
 - **Groups & Searches** — computer and mobile-device group inventory (smart vs. static)
-  with each group's member count and description. Empty groups and groups no policy or
-  profile uses are flagged (from the Health Audit's **Analyze Groups**), and a summary row
-  also counts policies with no scope. Saved advanced mobile-device searches spell out their
+  with each group's member count and description. Empty groups are flagged, and so are
+  computer groups no policy or profile uses (from the Health Audit's **Analyze Groups**; mobile
+  groups are not analysed), and a summary row also counts policies with no scope. Saved advanced mobile-device searches spell out their
   criteria, and the list is not cut off.
   Data source: Classic API computer/mobile-device group lists (tier 1, same as the group
   lists in Health Audit above), advanced mobile-device searches, and the latest Analyze

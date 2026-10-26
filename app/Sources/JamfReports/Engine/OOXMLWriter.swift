@@ -119,6 +119,9 @@ struct ImageEmbed: Sendable {
     let filename: String
     let xScale: Double
     let yScale: Double
+    /// Set for a logo: drawn at this height with its own aspect ratio, not stretched over a
+    /// fixed block of cells as a chart is.
+    var fixedHeightEMU: Int? = nil
 }
 
 // MARK: - Merge range
@@ -190,6 +193,17 @@ final class Worksheet: @unchecked Sendable {
             row: row, col: col, data: data, filename: filename,
             xScale: xScale, yScale: yScale
         ))
+    }
+
+    /// Puts a logo in row 0, one empty column right of the title's merged range (and of any
+    /// image already in row 0), so it never covers the title or the table below it.
+    func insertLogo(data: Data, filename: String) {
+        let titleEnd = mergeRanges.filter { $0.firstRow == 0 }.map(\.lastCol).max() ?? 0
+        // An image block spans four columns.
+        let imageEnd = imageEmbeds.filter { $0.row == 0 }.map { $0.col + 3 }.max() ?? 0
+        imageEmbeds.append(ImageEmbed(
+            row: 0, col: max(titleEnd, imageEnd) + 2, data: data, filename: filename,
+            xScale: 1.0, yScale: 1.0, fixedHeightEMU: 457_200))
     }
 
     /// Cells de-duplicated by `(row, col)`, keeping the LAST write — matching
@@ -748,11 +762,20 @@ final class Workbook: @unchecked Sendable {
                 emuCX = Int(1200.0 / defaultDPI * emuPerInch * embed.xScale)
                 emuCY = Int(600.0 / defaultDPI * emuPerInch * embed.yScale)
             }
-            xml += "<xdr:twoCellAnchor editAs=\"oneCell\">"
-            xml += "<xdr:from><xdr:col>\(embed.col)</xdr:col><xdr:colOff>0</xdr:colOff>"
-            xml += "<xdr:row>\(embed.row)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
-            xml += "<xdr:to><xdr:col>\(embed.col+4)</xdr:col><xdr:colOff>0</xdr:colOff>"
-            xml += "<xdr:row>\(embed.row+15)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+            if let height = embed.fixedHeightEMU {
+                let dims = pngDimensions(embed.data)
+                let aspect = dims.map { Double($0.width) / Double(max($0.height, 1)) } ?? 1
+                xml += "<xdr:oneCellAnchor>"
+                xml += "<xdr:from><xdr:col>\(embed.col)</xdr:col><xdr:colOff>0</xdr:colOff>"
+                xml += "<xdr:row>\(embed.row)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+                xml += "<xdr:ext cx=\"\(Int(Double(height) * aspect))\" cy=\"\(height)\"/>"
+            } else {
+                xml += "<xdr:twoCellAnchor editAs=\"oneCell\">"
+                xml += "<xdr:from><xdr:col>\(embed.col)</xdr:col><xdr:colOff>0</xdr:colOff>"
+                xml += "<xdr:row>\(embed.row)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+                xml += "<xdr:to><xdr:col>\(embed.col+4)</xdr:col><xdr:colOff>0</xdr:colOff>"
+                xml += "<xdr:row>\(embed.row+15)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+            }
             xml += "<xdr:pic><xdr:nvPicPr>"
             xml += "<xdr:cNvPr id=\"\(idx+2)\" name=\"Image \(idx+1)\"/>"
             xml += "<xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr>"
@@ -762,7 +785,8 @@ final class Workbook: @unchecked Sendable {
             xml += "</xdr:blipFill><xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/>"
             xml += "<a:ext cx=\"\(emuCX)\" cy=\"\(emuCY)\"/>"
             xml += "</a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr>"
-            xml += "</xdr:pic><xdr:clientData/></xdr:twoCellAnchor>"
+            xml += "</xdr:pic><xdr:clientData/>"
+            xml += embed.fixedHeightEMU == nil ? "</xdr:twoCellAnchor>" : "</xdr:oneCellAnchor>"
         }
         xml += "</xdr:wsDr>"
         return xml

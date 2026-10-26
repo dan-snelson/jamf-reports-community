@@ -123,6 +123,36 @@ final class EngineCorrectnessTests: XCTestCase {
             "EMU height should be \(expectedCY); drawing XML: \(xml.prefix(500))")
     }
 
+    // MARK: - Logo anchor
+
+    func testLogoSitsRightOfTheTitleAtItsOwnAspect() throws {
+        let wb = Workbook()
+        let ws = wb.addSheet("Executive Summary")
+        _ = ws.writeSheetHeader(title: "Executive Summary", subtitle: "Fleet KPIs", ncols: 3)
+        ws.insertLogo(data: makePNG(width: 400, height: 100), filename: "logo.png")
+
+        // The title is merged over columns 0-2, so the logo starts at column 4, row 0.
+        let embed = try XCTUnwrap(ws.imageEmbeds.first)
+        XCTAssertEqual(embed.row, 0)
+        XCTAssertEqual(embed.col, 4)
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".xlsx")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try wb.write(to: url)
+        let archive = try Archive(url: url, accessMode: .read)
+        let entry = try XCTUnwrap(archive["xl/drawings/drawing1.xml"])
+        var xmlData = Data()
+        _ = try archive.extract(entry) { xmlData.append($0) }
+        let xml = String(data: xmlData, encoding: .utf8) ?? ""
+
+        XCTAssertTrue(xml.contains("<xdr:oneCellAnchor>"), xml)
+        XCTAssertFalse(xml.contains("twoCellAnchor"), "a logo must not stretch over cells")
+        XCTAssertTrue(xml.contains("<xdr:from><xdr:col>4</xdr:col>"), xml)
+        // Half an inch tall; a 4:1 image is two inches wide.
+        XCTAssertTrue(xml.contains("<xdr:ext cx=\"1828800\" cy=\"457200\"/>"), xml)
+    }
+
     // MARK: - P10-B-42: XLSXValidator empty sheetData detection
 
     func testXLSXValidatorDetectsEmptySheetData() throws {

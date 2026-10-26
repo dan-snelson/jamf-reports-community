@@ -362,11 +362,11 @@ struct DDMBlueprintView: View {
     }
 
     /// "2,204 identifiers, 29 with issues" (the card's count, not the header tile's).
-    static func identifiersSummary(total: Int, withIssues: Int) -> String {
+    nonisolated static func identifiersSummary(total: Int, withIssues: Int) -> String {
         "\(HtmlSectionFormatters.plural(total, "identifier")), \(withIssues) with issues"
     }
 
-    static func quietSinglesText(_ count: Int) -> String {
+    nonisolated static func quietSinglesText(_ count: Int) -> String {
         let noun = HtmlSectionFormatters.plural(count, "identifier")
         return count == 1
             ? "\(noun) appears on one device and is healthy"

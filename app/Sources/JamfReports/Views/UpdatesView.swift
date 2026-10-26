@@ -63,7 +63,7 @@ struct UpdatesView: View {
 
     /// `total` counts jamf-cli's update-status records, one per device and update (it
     /// fetches `/v1/managed-software-updates/update-statuses`), so it is not a device count.
-    static func subtitle(total: Int) -> String? {
+    nonisolated static func subtitle(total: Int) -> String? {
         guard total > 0 else { return nil }
         return "\(total) update status\(total == 1 ? "" : "es"), one per device and update."
     }

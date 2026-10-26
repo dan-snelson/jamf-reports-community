@@ -134,8 +134,7 @@ struct ReportEngine: Sendable {
         // The tabs of every writer above, the Charts tab included, as one list.
         workbook.arrange(by: sheets)
         if let logo = ReportLogo.load(from: config, profile: profile) {
-            workbook.firstSheet?.insertImage(
-                row: 0, col: 0, data: logo, filename: "logo.png", xScale: 1.0, yScale: 1.0)
+            workbook.firstSheet?.insertLogo(data: logo, filename: "logo.png")
         }
         try workbook.write(to: outputURL)
 
@@ -1232,7 +1231,7 @@ struct ReportEngine: Sendable {
                 return (s.parsedDate, Double(s.totalDevices))
             }
             if !fleetPoints.isEmpty {
-                let series = ChartSeries(label: "Total Devices",
+                let series = ChartSeries(label: "Total Computers",
                                          color: ChartPalette.color(for: 0), points: fleetPoints)
                 if let png = ChartRenderer.lineChart(series: [series], title: "Fleet Size Trend") {
                     ws.insertImage(row: embedRow, col: 0, data: png, filename: "fleet_trend.png")

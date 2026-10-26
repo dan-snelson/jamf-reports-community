@@ -311,7 +311,7 @@ final class CoreDashboardTests: XCTestCase {
         let sheet = try checkinSheet(rows: rows, checkinOverdueDays: 7)
 
         XCTAssertTrue(try XCTUnwrap(text(sheet, row: 1, col: 0)).hasPrefix(subtitlePrefix(7)))
-        XCTAssertEqual(count(in: sheet, label: "Total Devices"), 6)
+        XCTAssertEqual(count(in: sheet, label: "Total Computers"), 6)
         XCTAssertEqual(count(in: sheet, label: "Checked In (within 7 days)"), 3)
         XCTAssertEqual(count(in: sheet, label: "Overdue (>7 days)"), 3)
     }

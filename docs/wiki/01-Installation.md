@@ -7,7 +7,7 @@ This page covers installing the macOS app and `jamf-cli`.
 | Component | Requirement |
 |---|---|
 | macOS | macOS Sequoia 15 or later — to run the app |
-| jamf-cli | v1.29.0 or later — optional; powers live collection (v1.18.0 to v1.28 still run, with a warning; the project tracks v1.33.0) |
+| jamf-cli | v1.29.0 or later — optional; powers live collection (collect, backup and scheduled runs stop on an older one; the project tracks v1.34.0) |
 | Xcode | 16 or later — only needed to build the app from source |
 | Architecture | Apple silicon (arm64) — the prebuilt `.pkg`/`.dmg` are arm64-only; Intel Macs build from source |
 

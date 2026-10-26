@@ -85,7 +85,7 @@ final class WorkbookStaleCountTests: XCTestCase {
 
         XCTAssertEqual(try row(dash, "Active Devices", "Stale Devices")[1], "3")
         XCTAssertEqual(try row(dash, "Active Devices", "Active (non-stale)")[1], "7")
-        XCTAssertEqual(try row(dash, "Active Devices", "Total Devices")[1], "10")
+        XCTAssertEqual(try row(dash, "Active Devices", "Total Computers")[1], "10")
     }
 
     func testActiveDevicesFollowsAChangedThreshold() throws {
@@ -184,7 +184,7 @@ final class WorkbookStaleCountTests: XCTestCase {
         let dash = try dashboard(rows: deviceRows(), patch: true)
         try dash.writePatchSummaryDashboard()
 
-        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Active Devices")[1], "7")
-        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Inactive Devices")[1], "3")
+        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Active Computers")[1], "7")
+        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Inactive Computers")[1], "3")
     }
 }

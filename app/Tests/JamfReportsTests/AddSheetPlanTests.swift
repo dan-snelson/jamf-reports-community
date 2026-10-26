@@ -17,6 +17,22 @@ final class AddSheetPlanTests: XCTestCase {
             profiles: profiles, workspaces: workspaces, paired: paired, unusable: unusable)
     }
 
+    // MARK: - Add while setup is running
+
+    func testAddIsRefusedOnlyWhileASetupHoldsRegisteredWork() {
+        XCTAssertNil(AddSheetPlan.addRefusal(onboardingRunHasWork: false))
+        let refusal = AddSheetPlan.addRefusal(onboardingRunHasWork: true)
+        XCTAssertTrue(refusal?.contains("Finish the setup in progress") == true)
+    }
+
+    @MainActor
+    func testARunHasWorkOnceItRegisteredAProfileOrCreatedAFolder() {
+        let flow = OnboardingFlow()
+        XCTAssertFalse(flow.startOverRemovesSomething)
+        flow.createdProfiles.append("alpha")
+        XCTAssertTrue(flow.startOverRemovesSomething)
+    }
+
     // MARK: - Adoption outcome
 
     func testAFailedFirstCollectIsReportedNotCalledSetUp() {

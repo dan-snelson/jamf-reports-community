@@ -272,7 +272,8 @@ for the full picture, including what a shared folder costs you in readable devic
 ### Metric alerts (`alerts`)
 
 Opt-in threshold alerting, off by default. Each rule in `alerts.rules` names a metric
-(`filevault_pct`, `patch_pct`, `stale_count`, and similar daily-summary fields), a
+(`filevault_pct`, `patch_pct`, `stale_count`, the mobile figures such as
+`mobile_stale_count`, and similar daily-summary fields), a
 comparison (`below`, `above`, or `drops_more_than`), a `threshold`, and — for
 `drops_more_than` only — a `lookback_days` (default 7). Rules are evaluated only on
 scheduled runs that actually collect fresh data (a `jamf-cli-only` schedule generates
@@ -288,8 +289,12 @@ Opt-in scheduled-run digest to a Microsoft Teams or Slack incoming webhook:
 `enabled`, `provider` (`teams` | `slack`), `url` (must be `https://`), and `detail`
 (`full` sends metric values and schedule names; `minimal` sends event facts only —
 counts and statuses, no values or free text — for headless or high-security
-deployments). `heartbeat: true` (off by default) also posts one short "background item
-ran" card a day, so a receiver can alert on a day without one. Unlike `alerts`/`retention`, `notify` has an in-app editor: the
+deployments). `heartbeat: true` (off by default; the Notifications section's **Send a daily heartbeat**
+switch writes it) also posts one short "background item ran" card a day per workspace, so a
+receiver can alert on a day without one. The card carries the profile and, unless `detail` is
+`minimal`, the date of the newest daily summary. Only the background item's own wake sends it;
+**Run now** sends none. On a shared workspace a Mac keeps the `heartbeat` value it was set up with until you
+confirm a changed one. Unlike `alerts`/`retention`, `notify` has an in-app editor: the
 Automation screen's Notifications section (enable toggle, provider picker, URL field,
 detail level, and a "Send test notification" button). See
 [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).

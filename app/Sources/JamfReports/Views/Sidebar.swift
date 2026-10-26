@@ -18,6 +18,9 @@ struct Sidebar: View {
     @State private var chipHovered: Bool = false
     @FocusState private var chipFocused: Bool
     @State private var hoveredItem: Tab? = nil
+    /// Live badge counts, read off the main actor: `body` re-runs on every hover.
+    @State private var liveTrendCount = 0
+    @State private var liveReportCount = 0
 
     /// Groups filtered by user visibility. Empty groups are dropped entirely.
     private var visibleGroups: [Tab.NavGroup] {
@@ -61,6 +64,14 @@ struct Sidebar: View {
         .background(reduceTransparency ? AnyShapeStyle(Theme.Colors.winBG2) : AnyShapeStyle(.regularMaterial))
         .overlay(alignment: .trailing) {
             Rectangle().fill(Theme.Colors.hairline).frame(width: 0.5)
+        }
+        // A collect or generate flips the in-flight flag when it starts and ends.
+        .task(id: "\(workspace.profile)|\(workspace.demoMode)|"
+              + "\(workspace.isCollectInFlight(for: workspace.profile))") {
+            await loadBadgeCounts()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshActiveTab)) { _ in
+            Task { await loadBadgeCounts() }
         }
     }
 
@@ -220,11 +231,11 @@ struct Sidebar: View {
         let count: Int
         switch item {
         case .trends:
-            count = workspace.demoMode ? DemoData.trendDates.count : liveTrendCount()
+            count = workspace.demoMode ? DemoData.trendDates.count : liveTrendCount
         case .reports:
             count = workspace.demoMode
                 ? DemoData.generatedReports.count
-                : ReportLibrary().stats(profile: workspace.profile).count
+                : liveReportCount
         case .schedules:
             count = workspace.schedules.count
         default:
@@ -233,9 +244,21 @@ struct Sidebar: View {
         return count > 0 ? "\(count)" : nil
     }
 
-    private func liveTrendCount() -> Int {
-        guard let summariesDir = try? WorkspacePaths.summariesDir(for: workspace.profile) else { return 0 }
-        return SummaryJSONParser.parseDirectory(summariesDir).count
+    private func loadBadgeCounts() async {
+        let profile = workspace.profile
+        guard !workspace.demoMode else { return }
+        let counts = await Self.readBadgeCounts(profile: profile)
+        guard !Task.isCancelled, profile == workspace.profile else { return }
+        liveTrendCount = counts.trends
+        liveReportCount = counts.reports
+    }
+
+    private nonisolated static func readBadgeCounts(
+        profile: String
+    ) async -> (trends: Int, reports: Int) {
+        let trends = (try? WorkspacePaths.summariesDir(for: profile))
+            .map { SummaryJSONParser.parseDirectory($0).count } ?? 0
+        return (trends, ReportLibrary().stats(profile: profile).count)
     }
 
     // MARK: Workspace switcher chip (bottom of sidebar)

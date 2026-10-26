@@ -250,7 +250,7 @@ struct CoreDashboard: Sendable {
         if let s = summaryData {
             let total = s.totalDevices ?? 0
             var fields: [(String, String)] = [
-                ("Total Devices", "\(total)"),
+                ("Total Computers", "\(total)"),
                 ("FileVault Encrypted", percentLabel(s.fileVaultEncrypted, total: total)),
                 ("Gatekeeper Enabled", percentLabel(s.gatekeeperEnabled, total: total)),
                 ("SIP Enabled", percentLabel(s.sipEnabled, total: total)),
@@ -1297,7 +1297,7 @@ struct CoreDashboard: Sendable {
         ws.write("Count", row: row, col: 1, format: .header)
         ws.write("% of Total", row: row, col: 2, format: .header)
         row += 1
-        ws.write("Total Devices", row: row, col: 0, format: .cell)
+        ws.write("Total Computers", row: row, col: 0, format: .cell)
         ws.write(total, row: row, col: 1, format: .cell)
         ws.write("", row: row, col: 2, format: .cell)
         row += 1
@@ -1510,7 +1510,7 @@ struct CoreDashboard: Sendable {
         ws.setColumnWidth(1, 1, 14)
 
         let pairs: [(String, Int)] = [
-            ("Total Devices", total),
+            ("Total Computers", total),
             ("Active (non-stale)", active),
             ("Stale Devices", stale),
             ("Managed", managed),
@@ -2396,8 +2396,9 @@ struct CoreDashboard: Sendable {
         // Fleet Overview section
         ws.write("FLEET OVERVIEW", row: row, col: 0, format: .header)
         row += 1
-        for (label, value) in [("Total Devices", totalEnrolled), ("Active Devices", activeCount),
-                                ("Inactive Devices", inactiveCount)] {
+        for (label, value) in [("Total Computers", totalEnrolled),
+                               ("Active Computers", activeCount),
+                               ("Inactive Computers", inactiveCount)] {
             ws.write(label, row: row, col: 0, format: .cell)
             ws.write(value, row: row, col: 1, format: .cell)
             row += 1
@@ -2978,7 +2979,7 @@ struct CoreDashboard: Sendable {
 
         var metricRows: [(String, String)] = [
             ("Security Score", scoreLabel),
-            ("Total Devices", fmtInt(m.totalDevices)),
+            ("Total Computers", fmtInt(m.totalDevices)),
             ("Managed Devices", fmtInt(m.managedCount)),
             ("Patch Fleet Compliance", fmtPct(m.patchFleetCompliancePct)),
             ("FileVault Coverage", fmtPct(m.fileVaultPct)),

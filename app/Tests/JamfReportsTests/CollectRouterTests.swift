@@ -728,3 +728,41 @@ private struct RouterSpy {
         }
     }
 }
+
+/// A scheduled School run that collects and then generates forces past School's 12 h cadence;
+/// snapshot-only and Jamf Pro do not.
+final class ScheduledCollectForceTests: XCTestCase {
+    func test_forcesCollect_onlyForSchoolCollectThenGenerate() {
+        typealias Mode = Schedule.RunMode
+        XCTAssertTrue(Mode.jamfCLIFull.forcesCollect(for: .jamfSchool))
+        XCTAssertFalse(Mode.snapshotOnly.forcesCollect(for: .jamfSchool))
+        XCTAssertFalse(Mode.jamfCLIOnly.forcesCollect(for: .jamfSchool))
+        XCTAssertFalse(Mode.backup.forcesCollect(for: .jamfSchool))
+        XCTAssertFalse(Mode.jamfCLIFull.forcesCollect(for: .jamfPro))
+    }
+
+    func test_router_passesForceToSchoolCollect() async throws {
+        let config = try ConfigLoader.loadFromString("""
+        school_cli:
+          enabled: true
+          profile: testschool
+        """)
+        let seen = LockedForce()
+        let mode = Schedule.RunMode.jamfCLIFull
+        try await CollectRouter.run(
+            profile: "testschool",
+            force: mode.forcesCollect(for: ProfileProductType.detect(from: config, profile: "testschool").type),
+            config: config,
+            schoolCollect: { _, _, _, force, _ in seen.set(force) },
+            protectCollect: { _, _, _ in },
+            onLine: { _ in })
+        XCTAssertEqual(seen.value, true)
+    }
+}
+
+private final class LockedForce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Bool?
+    var value: Bool? { lock.withLock { stored } }
+    func set(_ v: Bool) { lock.withLock { stored = v } }
+}

@@ -71,14 +71,16 @@ enum CLIRun {
         stream.write(Data(shown.utf8))
     }
 
-    /// `text` with C0 controls other than tab and newline, DEL and C1 controls written as
-    /// `\u00NN`: a device name or server error can otherwise clear the screen, retitle the
-    /// window or set the clipboard. JSON stays valid JSON for the same value.
+    /// `text` with C0 controls other than tab and newline, DEL, C1 controls, the line and
+    /// paragraph separators and the bidi controls written as `\uNNNN`: a device name or server
+    /// error can otherwise clear the screen, retitle the window, set the clipboard or reorder
+    /// what the line shows. JSON stays valid JSON for the same value.
     static func terminalSafe(_ text: String) -> String {
         var out = String.UnicodeScalarView()
         for scalar in text.unicodeScalars {
             let value = scalar.value
-            if (value < 0x20 && value != 0x09 && value != 0x0A) || (0x7F...0x9F).contains(value) {
+            if (value < 0x20 && value != 0x09 && value != 0x0A) || (0x7F...0x9F).contains(value)
+                || (0x2028...0x202E).contains(value) || (0x2066...0x2069).contains(value) {
                 out.append(contentsOf: String(format: "\\u%04x", value).unicodeScalars)
             } else {
                 out.append(scalar)

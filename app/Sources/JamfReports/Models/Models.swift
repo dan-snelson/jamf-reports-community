@@ -187,6 +187,14 @@ struct Schedule: Identifiable, Sendable {
             }
         }
 
+        /// Whether a scheduled run of this mode forces the collect. Only `jamf-cli-full` on a
+        /// Jamf School workspace: its workbook must come from data collected in the run, not
+        /// held back by School's 12 h cadence. Jamf Pro keeps its once-a-day guard and the
+        /// shared-workspace freshness check, which `force` would also bypass.
+        func forcesCollect(for product: ProfileProductType) -> Bool {
+            self == .jamfCLIFull && product == .jamfSchool
+        }
+
         /// Whether this mode may CATCH UP a fire it missed (`TickScheduler.due`).
         ///
         /// The collect modes (which gather jamf-cli data) run however late so a

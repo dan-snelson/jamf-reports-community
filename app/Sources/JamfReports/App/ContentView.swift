@@ -161,6 +161,12 @@ struct ContentView: View {
             cycleSidebar()
         }
         .onReceive(NotificationCenter.default.publisher(for: .showAddSheet)) { note in
+            if let refusal = AddSheetPlan.addRefusal(
+                onboardingRunHasWork: workspace.onboardingRunHasWork) {
+                workspace.toast = Toast(message: refusal, style: .info)
+                AccessibilityNotification.Announcement(refusal).post()
+                return
+            }
             addRequest = AddSheetRequest(product: (note.userInfo?["product"] as? String)
                 .flatMap(AddSheetPlan.NewProduct.init(rawValue:)))
         }

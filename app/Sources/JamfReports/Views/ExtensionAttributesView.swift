@@ -285,7 +285,7 @@ struct ExtensionAttributesView: View {
                 sub: "In the latest results"
             )
             StatTile(
-                label: "Total Devices",
+                label: "Total Computers",
                 value: "\(snapshot.totalDevices)",
                 sub: "With EA result data"
             )

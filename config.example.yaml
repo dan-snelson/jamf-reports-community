@@ -107,7 +107,8 @@ jamf_cli:
   # section; underscores and hyphens are interchangeable. Anything else is
   # ignored, so core inventory always runs. A listed source is skipped even by a
   # manual collect and is left out of the data freshness strip.
-  # sofa stops the fetch from sofafeed.macadmins.io; a cached feed stays in use.
+  # sofa stops the fetch from sofafeed.macadmins.io (a Jamf Pro or Jamf School collect);
+  # a cached feed stays in use.
   # Example: collect_skip: [update-status, update-device-failures]
   collect_skip: []
 
@@ -238,9 +239,11 @@ html:
 #   jamf-cli protect setup
 
 protect:
-  # Set true to collect Jamf Protect data after each Jamf Pro collect.
+  # Set true to collect Jamf Protect data after each Jamf Pro collect (on a Jamf School
+  # workspace, after each School collect; experimental).
   enabled: false
-  # jamf-cli protect profile name; empty = jamf-cli's default Protect profile.
+  # jamf-cli protect profile name. Required: a blank name, or one that names a Jamf Pro,
+  # Jamf School or Security Cloud login, skips Protect with a warning.
   # Distinct from jamf_cli.profile (the Pro profile).
   profile: ""
   # Back up Jamf Protect even when this workspace is on storage other Macs reach
@@ -708,7 +711,7 @@ thresholds:
   # A Mac whose Last Contact is current while its Last Check-in, or its Last Inventory
   # Update, is more than this many days behind that Last Contact is a Mac MDM reaches
   # and the Jamf binary does not (or not for inventory). The Health Audit lists both
-  # kinds, Devices has a Contact gap filter and the HTML report names them under Needs
+  # kinds, Computers has a Contact gap filter and the HTML report names them under Needs
   # attention. A whole number from 1 to 365; anything else uses 14.
   contact_gap_days: 14
 

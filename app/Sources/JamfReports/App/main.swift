@@ -329,7 +329,9 @@ private func scheduledRunSingleBody(
     let onLine: @Sendable (CLIBridge.LogLine) -> Void = { line in
         honesty.observe(line.text)
         recorder?.record(line.text)
-        if let echo = scheduledRunEcho(line, verbose: verbose) { print(echo) }
+        if let echo = scheduledRunEcho(line, verbose: verbose) {
+            print(isatty(STDOUT_FILENO) == 1 ? CLIRun.terminalSafe(echo) : echo)
+        }
     }
 
     if retiredCSVAssisted {
@@ -467,10 +469,13 @@ private func scheduledRunSingleBody(
             // the generate modes → all tiers.
             let resolvedTiers = tiers ?? mode.defaultTiers
             // Route to the correct collect function(s) based on profile product type.
-            // Scheduled collects never bypass the once-per-day guard (force: false).
+            // Scheduled collects never bypass the Jamf Pro once-per-day guard; a School
+            // collect-then-generate forces past School's 12 h cadence (`forcesCollect`).
             try await CollectRouter.run(
                 profile: profile,
                 tiers: resolvedTiers,
+                force: mode.forcesCollect(
+                    for: ProfileProductType.detect(from: routingConfig, profile: profile).type),
                 config: routingConfig,
                 onLine: onLine
             )
@@ -787,7 +792,9 @@ func runCheck(profile: String) -> Int32 {
         let config = try ConfigLoader.load(from: configURL)
         let cliProfile = config.jamfCli?.resolvedProfile ?? profile
         print("[ok] config.yaml decoded successfully")
-        print("[ok] jamf_cli.profile: \(cliProfile.isEmpty ? "(not set)" : cliProfile)")
+        // A peer on a shared workspace can write config.yaml, so the value is shown filtered.
+        print("[ok] jamf_cli.profile: "
+            + (cliProfile.isEmpty ? "(not set)" : ConfigSchema.displayText(cliProfile)))
         let dataDir = (try? WorkspacePaths.dataDir(for: profile)) ?? workspace
             .appendingPathComponent("jamf-cli-data")
         var isDir: ObjCBool = false

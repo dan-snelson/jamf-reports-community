@@ -32,8 +32,8 @@ Feeds these screens:
   as stale by your `stale_device_days` and `stale_basis`)
 - The workbook's **Fleet Drift** sheet, which compares the `computers` snapshots of two
   different days
-- **Groups & Searches** (group member counts and descriptions come from the group lists and
-  the Health Audit's Analyze Groups result)
+- **Groups & Searches** (member counts and descriptions come from the collected groups
+  list, the unused flag from the Health Audit's Analyze Groups result)
 - **Device Lookup**
 - Failure drawers in **Patch Compliance** and **OS Updates**
 - **Extension Attributes** coverage and value distributions, and the custom EA and EA
@@ -84,7 +84,7 @@ Feeds these screens:
 
 - **Overview** — all KPI cards and donut charts
 - **Trends** — all timeline charts
-- **Fleet Overview** — per-profile health signals across all workspaces
+- **Fleet Overview** — the selected workspace's health signals
 - **Stability index** on the Overview
 
 Do not expect these screens to update immediately when a device changes. They reflect the

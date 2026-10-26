@@ -762,13 +762,15 @@ final class Workbook: @unchecked Sendable {
                 emuCX = Int(1200.0 / defaultDPI * emuPerInch * embed.xScale)
                 emuCY = Int(600.0 / defaultDPI * emuPerInch * embed.yScale)
             }
-            if let height = embed.fixedHeightEMU {
-                let dims = pngDimensions(embed.data)
-                let aspect = dims.map { Double($0.width) / Double(max($0.height, 1)) } ?? 1
+            // A logo's anchor and picture share one size, so the picture is not scaled again.
+            let logoExt = embed.fixedHeightEMU.map {
+                (cx: Int(Double($0) * Double(emuCX) / Double(max(emuCY, 1))), cy: $0)
+            }
+            if let ext = logoExt {
                 xml += "<xdr:oneCellAnchor>"
                 xml += "<xdr:from><xdr:col>\(embed.col)</xdr:col><xdr:colOff>0</xdr:colOff>"
                 xml += "<xdr:row>\(embed.row)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
-                xml += "<xdr:ext cx=\"\(Int(Double(height) * aspect))\" cy=\"\(height)\"/>"
+                xml += "<xdr:ext cx=\"\(ext.cx)\" cy=\"\(ext.cy)\"/>"
             } else {
                 xml += "<xdr:twoCellAnchor editAs=\"oneCell\">"
                 xml += "<xdr:from><xdr:col>\(embed.col)</xdr:col><xdr:colOff>0</xdr:colOff>"
@@ -783,7 +785,7 @@ final class Workbook: @unchecked Sendable {
             xml += "<a:blip r:embed=\"rId\(idx+1)\"/>"
             xml += "<a:stretch><a:fillRect/></a:stretch>"
             xml += "</xdr:blipFill><xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/>"
-            xml += "<a:ext cx=\"\(emuCX)\" cy=\"\(emuCY)\"/>"
+            xml += "<a:ext cx=\"\(logoExt?.cx ?? emuCX)\" cy=\"\(logoExt?.cy ?? emuCY)\"/>"
             xml += "</a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr>"
             xml += "</xdr:pic><xdr:clientData/>"
             xml += embed.fixedHeightEMU == nil ? "</xdr:twoCellAnchor>" : "</xdr:oneCellAnchor>"

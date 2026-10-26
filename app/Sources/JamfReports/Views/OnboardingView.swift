@@ -885,7 +885,8 @@ struct OnboardingView: View {
                 .pickerStyle(.menu)
                 .frame(maxWidth: 260, alignment: .leading)
                 .disabled(locked)
-                TextField("https://...", text: $flow.webhookURL)
+                // The URL is a bearer secret: anyone holding it can post to the channel.
+                SecureField("https://...", text: $flow.webhookURL)
                     .textFieldStyle(.roundedBorder)
                     .font(.body.monospaced())
                     .frame(maxWidth: 420, alignment: .leading)

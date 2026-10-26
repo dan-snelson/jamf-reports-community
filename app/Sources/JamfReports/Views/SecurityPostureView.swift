@@ -256,7 +256,7 @@ struct SecurityPostureView: View {
             kpiTile(label: "Firewall", control: .firewall, count: snapshot.firewallEnabled)
             kpiTile(label: "Gatekeeper", control: .gatekeeper, count: snapshot.gatekeeperEnabled)
             StatTile(
-                label: "Total Devices",
+                label: "Total Computers",
                 value: "\(snapshot.totalDevices)",
                 sub: "Across active and recently inactive"
             )

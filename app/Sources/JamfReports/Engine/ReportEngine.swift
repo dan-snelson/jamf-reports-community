@@ -1232,7 +1232,7 @@ struct ReportEngine: Sendable {
                 return (s.parsedDate, Double(s.totalDevices))
             }
             if !fleetPoints.isEmpty {
-                let series = ChartSeries(label: "Total Devices",
+                let series = ChartSeries(label: "Total Computers",
                                          color: ChartPalette.color(for: 0), points: fleetPoints)
                 if let png = ChartRenderer.lineChart(series: [series], title: "Fleet Size Trend") {
                     ws.insertImage(row: embedRow, col: 0, data: png, filename: "fleet_trend.png")

@@ -144,8 +144,8 @@ final class StaleBasisReportsTests: XCTestCase {
                 GoldenFleetWorkspace.patchRow(id: "1", title: "Chrome", onLatest: 8, total: 10),
             ])
         try dash.writePatchSummaryDashboard()
-        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Inactive Devices")[1], "2")
-        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Active Devices")[1], "2")
+        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Inactive Computers")[1], "2")
+        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Active Computers")[1], "2")
     }
 
     func testTheExecutiveSummaryTiersBucketByStaleAge() throws {

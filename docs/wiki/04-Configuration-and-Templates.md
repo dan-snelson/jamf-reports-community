@@ -272,7 +272,8 @@ for the full picture, including what a shared folder costs you in readable devic
 ### Metric alerts (`alerts`)
 
 Opt-in threshold alerting, off by default. Each rule in `alerts.rules` names a metric
-(`filevault_pct`, `patch_pct`, `stale_count`, and similar daily-summary fields), a
+(`filevault_pct`, `patch_pct`, `stale_count`, the mobile figures such as
+`mobile_stale_count`, and similar daily-summary fields), a
 comparison (`below`, `above`, or `drops_more_than`), a `threshold`, and — for
 `drops_more_than` only — a `lookback_days` (default 7). Rules are evaluated only on
 scheduled runs that actually collect fresh data (a `jamf-cli-only` schedule generates

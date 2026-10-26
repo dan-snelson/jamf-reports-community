@@ -38,6 +38,12 @@ passcode compliant, data protection and jailbreaks where Jamf Pro reports them. 
 devices are never added together into one figure. A figure the product does not report is left
 out, not drawn as 0. Each share is counted over the devices that report the field.
 
+The Macs series is **Managed Computers** (it was Managed Devices): its figure and chart count
+Macs only, and mobile devices have their own **Managed mobile devices** series. Device-count
+charts scale to the data, so a small fleet no longer sits flat at the bottom of a 0 to 1,000
+axis. Alert rules can watch the mobile figures too; the metric names are in
+`config.example.yaml` under `alerts`.
+
 ## Compliance band history
 
 When `compliance.baselines` (see [Configuration & Templates](https://github.com/tonyyo11/jamf-reports-community/wiki/04-Configuration-and-Templates))

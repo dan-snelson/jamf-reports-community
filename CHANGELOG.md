@@ -359,8 +359,9 @@ versions in this repository map to git tags.
 - Teams notification cards have a colored header (green for a finished run, amber for a partial
   run or a metric alert, red for a failure or an overdue schedule, gray for the heartbeat and the
   test) and titles that say what happened, such as "Scheduled run failed — prod". Slack messages
-  carry the same "Jamf Reports" label above the title. The facts a card sends are unchanged.
-  (#284)
+  carry the same "Jamf Reports" label above the title. Every card ends with a line naming the
+  Jamf Reports application, your organization name from Config › Output & Branding (left out
+  at minimal detail) and when the card was sent. The facts a card sends are unchanged. (#284)
 - The Notifications card now says when notifications are on but no webhook URL is set. Nothing,
   the daily heartbeat included, was sent, and nothing on screen said so. (#284)
 - A scheduled Jamf School **Refresh + Generate** run now always collects first, so its workbook

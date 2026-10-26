@@ -71,12 +71,13 @@ enum WebhookNotifier {
     /// JSON body for `provider`. Pure — no network. Returns nil only if
     /// serialization fails (never expected for these literal structures).
     static func payload(
-        provider: NotifyConfig.Provider, title: String, facts: [Fact], tone: Tone = .neutral
+        provider: NotifyConfig.Provider, title: String, facts: [Fact], tone: Tone = .neutral,
+        footer: String? = nil
     ) -> Data? {
         let object: [String: Any]
         switch provider {
-        case .teams: object = teamsCard(title: title, facts: facts, tone: tone)
-        case .slack: object = slackBlocks(title: title, facts: facts)
+        case .teams: object = teamsCard(title: title, facts: facts, tone: tone, footer: footer)
+        case .slack: object = slackBlocks(title: title, facts: facts, footer: footer)
         }
         return try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
@@ -84,12 +85,12 @@ enum WebhookNotifier {
     /// JSON body for a failed-run digest. Uses a red/attention accent so the
     /// failure stands out from success digests on Teams and Slack. Pure — no network.
     static func failedPayload(
-        provider: NotifyConfig.Provider, title: String, facts: [Fact]
+        provider: NotifyConfig.Provider, title: String, facts: [Fact], footer: String? = nil
     ) -> Data? {
         let object: [String: Any]
         switch provider {
-        case .teams: object = teamsFailedCard(title: title, facts: facts)
-        case .slack: object = slackFailedBlocks(title: title, facts: facts)
+        case .teams: object = teamsFailedCard(title: title, facts: facts, footer: footer)
+        case .slack: object = slackFailedBlocks(title: title, facts: facts, footer: footer)
         }
         return try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
@@ -98,12 +99,12 @@ enum WebhookNotifier {
     /// Attention accent + ⚠️ so a tripped-threshold alert stands out from
     /// routine success digests. Pure — no network.
     static func alertPayload(
-        provider: NotifyConfig.Provider, title: String, facts: [Fact]
+        provider: NotifyConfig.Provider, title: String, facts: [Fact], footer: String? = nil
     ) -> Data? {
         let object: [String: Any]
         switch provider {
-        case .teams: object = teamsAlertCard(title: title, facts: facts)
-        case .slack: object = slackAlertBlocks(title: title, facts: facts)
+        case .teams: object = teamsAlertCard(title: title, facts: facts, footer: footer)
+        case .slack: object = slackAlertBlocks(title: title, facts: facts, footer: footer)
         }
         return try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
@@ -126,33 +127,55 @@ enum WebhookNotifier {
     /// Microsoft Teams Adaptive Card: a header band colored by `tone`, holding the product
     /// label and the title, then the facts.
     static func teamsCard(
-        title rawTitle: String, facts rawFacts: [Fact], tone: Tone = .neutral
+        title rawTitle: String, facts rawFacts: [Fact], tone: Tone = .neutral,
+        footer: String? = nil
     ) -> [String: Any] {
-        teamsAdaptiveCard(title: sanitizeForTeams(rawTitle), facts: rawFacts, tone: tone)
+        teamsAdaptiveCard(
+            title: sanitizeForTeams(rawTitle), facts: rawFacts, tone: tone, footer: footer)
     }
 
     /// Microsoft Teams Adaptive Card for a failed run: red band and title.
-    static func teamsFailedCard(title rawTitle: String, facts rawFacts: [Fact]) -> [String: Any] {
-        teamsAdaptiveCard(title: sanitizeForTeams(rawTitle), facts: rawFacts, tone: .attention)
+    static func teamsFailedCard(
+        title rawTitle: String, facts rawFacts: [Fact], footer: String? = nil
+    ) -> [String: Any] {
+        teamsAdaptiveCard(
+            title: sanitizeForTeams(rawTitle), facts: rawFacts, tone: .attention, footer: footer)
     }
 
     /// Microsoft Teams Adaptive Card for a metric alert: amber band and a ⚠️ before the title,
     /// so a tripped threshold reads apart from both success and failure.
-    static func teamsAlertCard(title rawTitle: String, facts rawFacts: [Fact]) -> [String: Any] {
-        teamsAdaptiveCard(title: "⚠️ \(sanitizeForTeams(rawTitle))", facts: rawFacts, tone: .warning)
+    static func teamsAlertCard(
+        title rawTitle: String, facts rawFacts: [Fact], footer: String? = nil
+    ) -> [String: Any] {
+        teamsAdaptiveCard(
+            title: "⚠️ \(sanitizeForTeams(rawTitle))", facts: rawFacts, tone: .warning,
+            footer: footer)
     }
 
     /// The one Teams layout (Adaptive Card 1.4, which Teams Workflows posts as sent). `title`
     /// arrives sanitized; the facts are sanitized here.
     private static func teamsAdaptiveCard(
-        title: String, facts rawFacts: [Fact], tone: Tone
+        title: String, facts rawFacts: [Fact], tone: Tone, footer: String?
     ) -> [String: Any] {
         let facts = rawFacts.map(sanitizeForTeams)
-        var titleBlock: [String: Any] = [
-            "type": "TextBlock", "size": "Large", "weight": "Bolder", "wrap": true,
-            "spacing": "Small", "text": title,
+        var body: [[String: Any]] = [
+            [
+                "type": "Container", "style": tone.containerStyle, "bleed": true,
+                "items": [
+                    ["type": "TextBlock", "text": "JAMF REPORTS", "size": "Small",
+                     "weight": "Bolder", "isSubtle": true, "spacing": "None"],
+                    titleBlock(title, tone: tone),
+                ],
+            ],
+            ["type": "FactSet", "spacing": "Medium",
+             "facts": facts.map { ["title": $0.label, "value": $0.value] }],
         ]
-        if tone == .attention { titleBlock["color"] = "Attention" }
+        if let footer {
+            body.append([
+                "type": "TextBlock", "text": sanitizeForTeams(footer), "size": "Small",
+                "isSubtle": true, "wrap": true, "spacing": "Medium", "separator": true,
+            ])
+        }
         return [
             "type": "message",
             "attachments": [[
@@ -162,26 +185,26 @@ enum WebhookNotifier {
                     "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
                     "type": "AdaptiveCard",
                     "version": "1.4",
-                    "body": [
-                        [
-                            "type": "Container", "style": tone.containerStyle, "bleed": true,
-                            "items": [
-                                ["type": "TextBlock", "text": "JAMF REPORTS", "size": "Small",
-                                 "weight": "Bolder", "isSubtle": true, "spacing": "None"],
-                                titleBlock,
-                            ],
-                        ],
-                        ["type": "FactSet", "spacing": "Medium",
-                         "facts": facts.map { ["title": $0.label, "value": $0.value] }],
-                    ],
+                    "body": body,
                 ],
             ]],
         ]
     }
 
+    private static func titleBlock(_ title: String, tone: Tone) -> [String: Any] {
+        var block: [String: Any] = [
+            "type": "TextBlock", "size": "Large", "weight": "Bolder", "wrap": true,
+            "spacing": "Small", "text": title,
+        ]
+        if tone == .attention { block["color"] = "Attention" }
+        return block
+    }
+
     /// Slack Block Kit message. `text` is the notification/fallback line; the
     /// blocks render the header + a mrkdwn fact list.
-    static func slackBlocks(title rawTitle: String, facts rawFacts: [Fact]) -> [String: Any] {
+    static func slackBlocks(
+        title rawTitle: String, facts rawFacts: [Fact], footer: String? = nil
+    ) -> [String: Any] {
         let title = sanitize(rawTitle)
         let facts = rawFacts.map(sanitize)
         let factLines = facts.map { "*\($0.label):* \($0.value)" }.joined(separator: "\n")
@@ -193,13 +216,15 @@ enum WebhookNotifier {
                  "text": ["type": "plain_text", "text": title]],
                 ["type": "section",
                  "text": ["type": "mrkdwn", "text": factLines.isEmpty ? title : factLines]],
-            ],
+            ] + slackFooter(footer),
         ]
     }
 
     /// Slack Block Kit message for a failed run. Prefixes the header with a
     /// red-circle emoji so failures stand out in notification feeds.
-    static func slackFailedBlocks(title rawTitle: String, facts rawFacts: [Fact]) -> [String: Any] {
+    static func slackFailedBlocks(
+        title rawTitle: String, facts rawFacts: [Fact], footer: String? = nil
+    ) -> [String: Any] {
         let failedTitle = "🔴 \(sanitize(rawTitle))"
         let facts = rawFacts.map(sanitize)
         let factLines = facts.map { "*\($0.label):* \($0.value)" }.joined(separator: "\n")
@@ -211,13 +236,15 @@ enum WebhookNotifier {
                  "text": ["type": "plain_text", "text": failedTitle]],
                 ["type": "section",
                  "text": ["type": "mrkdwn", "text": factLines.isEmpty ? failedTitle : factLines]],
-            ],
+            ] + slackFooter(footer),
         ]
     }
 
     /// Slack Block Kit message for a metric alert. Prefixes the header with a
     /// warning emoji so tripped thresholds stand out in notification feeds.
-    static func slackAlertBlocks(title rawTitle: String, facts rawFacts: [Fact]) -> [String: Any] {
+    static func slackAlertBlocks(
+        title rawTitle: String, facts rawFacts: [Fact], footer: String? = nil
+    ) -> [String: Any] {
         let alertTitle = "⚠️ \(sanitize(rawTitle))"
         let facts = rawFacts.map(sanitize)
         let factLines = facts.map { "*\($0.label):* \($0.value)" }.joined(separator: "\n")
@@ -229,8 +256,38 @@ enum WebhookNotifier {
                  "text": ["type": "plain_text", "text": alertTitle, "emoji": true]],
                 ["type": "section",
                  "text": ["type": "mrkdwn", "text": factLines.isEmpty ? alertTitle : factLines]],
-            ],
+            ] + slackFooter(footer),
         ]
+    }
+
+    /// The fine print as a trailing context block, or nothing.
+    private static func slackFooter(_ footer: String?) -> [[String: Any]] {
+        guard let footer else { return [] }
+        return [["type": "context", "elements": [["type": "mrkdwn", "text": sanitize(footer)]]]]
+    }
+
+    /// The fine print under every card: what sent it, the organisation (`branding.org_name`,
+    /// left out at minimal detail) and when, in this Mac's time zone.
+    static func footer(organization: String?, detail: NotifyConfig.Detail, sentAt: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d, yyyy 'at' h:mm a zzz"
+        let org = detail == .full ? organization : nil
+        return ["Jamf Reports application notification", org, formatter.string(from: sentAt)]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// `branding.org_name` of `profile`'s workspace, filtered like other text from config.yaml,
+    /// or nil when unset or unreadable.
+    static func organization(profile: String) -> String? {
+        guard let workspace = ProfileService.workspaceURL(for: profile) else { return nil }
+        let config = try? ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        return organization(from: config)
+    }
+
+    static func organization(from config: ReportConfig?) -> String? {
+        let name = ConfigSchema.displayText(config?.branding?.resolvedOrgName ?? "")
+        return name.isEmpty ? nil : name
     }
 
     /// "Jamf Reports" above every Slack header, as Teams' band label.
@@ -267,13 +324,16 @@ enum WebhookNotifier {
     @discardableResult
     static func send(
         config: NotifyConfig, title: String, facts: [Fact], tone: Tone = .neutral,
-        failure: DeliveryFailure? = nil
+        organization: String? = nil, failure: DeliveryFailure? = nil
     ) async -> Bool {
         let ep = endpoint(for: config)
         guard case .url(let url) = ep else { return ep == .notConfigured }
         AppLogger.webhook.debug("posting \(config.resolvedProvider.rawValue, privacy: .public) digest")
+        let footer = Self.footer(
+            organization: organization, detail: config.resolvedDetail, sentAt: Date())
         guard let body = payload(
-            provider: config.resolvedProvider, title: title, facts: facts, tone: tone) else {
+            provider: config.resolvedProvider, title: title, facts: facts, tone: tone,
+            footer: footer) else {
             AppLogger.webhook.warning(
                 "WebhookNotifier: failed to encode \(config.resolvedProvider.rawValue, privacy: .public) payload"
             )
@@ -288,11 +348,15 @@ enum WebhookNotifier {
     /// Never throws.
     @discardableResult
     static func sendFailed(
-        config: NotifyConfig, title: String, facts: [Fact], failure: DeliveryFailure? = nil
+        config: NotifyConfig, title: String, facts: [Fact], organization: String? = nil,
+        failure: DeliveryFailure? = nil
     ) async -> Bool {
         let ep = endpoint(for: config)
         guard case .url(let url) = ep else { return ep == .notConfigured }
-        guard let body = failedPayload(provider: config.resolvedProvider, title: title, facts: facts) else {
+        let footer = Self.footer(
+            organization: organization, detail: config.resolvedDetail, sentAt: Date())
+        guard let body = failedPayload(
+            provider: config.resolvedProvider, title: title, facts: facts, footer: footer) else {
             AppLogger.webhook.warning(
                 "WebhookNotifier: failed to encode failed-run \(config.resolvedProvider.rawValue, privacy: .public) payload"
             )
@@ -307,11 +371,15 @@ enum WebhookNotifier {
     /// Never throws.
     @discardableResult
     static func sendAlert(
-        config: NotifyConfig, title: String, facts: [Fact], failure: DeliveryFailure? = nil
+        config: NotifyConfig, title: String, facts: [Fact], organization: String? = nil,
+        failure: DeliveryFailure? = nil
     ) async -> Bool {
         let ep = endpoint(for: config)
         guard case .url(let url) = ep else { return ep == .notConfigured }
-        guard let body = alertPayload(provider: config.resolvedProvider, title: title, facts: facts) else {
+        let footer = Self.footer(
+            organization: organization, detail: config.resolvedDetail, sentAt: Date())
+        guard let body = alertPayload(
+            provider: config.resolvedProvider, title: title, facts: facts, footer: footer) else {
             AppLogger.webhook.warning(
                 "WebhookNotifier: failed to encode alert \(config.resolvedProvider.rawValue, privacy: .public) payload"
             )

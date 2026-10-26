@@ -272,6 +272,32 @@ final class WebhookNotifierTests: XCTestCase {
         XCTAssertEqual(first["type"] as? String, "context", "Slack carries the same label")
     }
 
+    func testTheFootSaysWhatSentItForWhomAndWhen() throws {
+        let sentAt = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-26T15:37:00Z"))
+        let full = WebhookNotifier.footer(organization: "Acme Corp", detail: .full, sentAt: sentAt)
+        XCTAssertTrue(full.hasPrefix("Jamf Reports application notification · Acme Corp · Oct 26, 2026 at "), full)
+        let minimal = WebhookNotifier.footer(
+            organization: "Acme Corp", detail: .minimal, sentAt: sentAt)
+        XCTAssertFalse(minimal.contains("Acme"), "minimal detail leaves the organisation out")
+        XCTAssertTrue(minimal.hasPrefix("Jamf Reports application notification · Oct 26, 2026"))
+        XCTAssertFalse(
+            WebhookNotifier.footer(organization: nil, detail: .full, sentAt: sentAt)
+                .contains("·  ·"), "no empty part when the organisation is unset")
+
+        let card = WebhookNotifier.teamsCard(title: "t", facts: facts, footer: "**Acme**")
+        let content = (card["attachments"] as? [[String: Any]])?.first?["content"] as? [String: Any]
+        let last = try XCTUnwrap((content?["body"] as? [[String: Any]])?.last)
+        XCTAssertEqual(last["isSubtle"] as? Bool, true)
+        XCTAssertEqual(last["text"] as? String, "\\*\\*Acme\\*\\*", "the foot is escaped too")
+        let slack = WebhookNotifier.slackFailedBlocks(title: "t", facts: facts, footer: "<!here>")
+        let foot = try XCTUnwrap((slack["blocks"] as? [[String: Any]])?.last)
+        XCTAssertEqual(foot["type"] as? String, "context")
+        XCTAssertFalse("\(foot)".contains("<!here>"))
+        XCTAssertEqual(
+            (WebhookNotifier.slackBlocks(title: "t", facts: facts)["blocks"] as? [[String: Any]])?
+                .last?["type"] as? String, "section", "no foot, no trailing block")
+    }
+
     func testSanitizeAlsoNeutralizesTitle() throws {
         let card = WebhookNotifier.teamsCard(title: "<!here> alert", facts: [])
         let attachments = try XCTUnwrap(card["attachments"] as? [[String: Any]])
@@ -572,7 +598,8 @@ final class WebhookNotifierTests: XCTestCase {
         let senders: [(NotifyConfig, String, [WebhookNotifier.Fact], WebhookNotifier.DeliveryFailure?)
             async -> Bool] = [
             { await WebhookNotifier.send(config: $0, title: $1, facts: $2, failure: $3) },
-            WebhookNotifier.sendFailed, WebhookNotifier.sendAlert,
+            { await WebhookNotifier.sendFailed(config: $0, title: $1, facts: $2, failure: $3) },
+            { await WebhookNotifier.sendAlert(config: $0, title: $1, facts: $2, failure: $3) },
         ]
         for send in senders {
             let failure = WebhookNotifier.DeliveryFailure()

@@ -162,6 +162,9 @@ func postOverdueDigest(
     let facts = WorkspaceStore.overdueFacts(
         detail: batch.notify.resolvedDetail, profile: names, overdue: batch.issues)
     let count = batch.issues.count
+    // One card can cover several workspaces; it names their organisation only when they agree.
+    let organizations = Set(batch.profiles.compactMap(WebhookNotifier.organization(profile:)))
+    let organization = organizations.count == 1 ? organizations.first : nil
     let failure = WebhookNotifier.DeliveryFailure()
     let outcome = await marker.sendOnce(
         day: today, in: batch.targets.map(\.workspace),
@@ -170,7 +173,7 @@ func postOverdueDigest(
         await WebhookNotifier.sendFailed(
             config: batch.notify,
             title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
-            facts: facts, failure: failure
+            facts: facts, organization: organization, failure: failure
         )
     }
     for profile in batch.profiles {

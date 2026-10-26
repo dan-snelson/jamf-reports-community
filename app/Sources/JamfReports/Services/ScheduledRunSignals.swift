@@ -140,7 +140,8 @@ enum ScheduledRunSignals {
         let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.send(
             config: notify, title: "Scheduled run finished — \(profile)", facts: facts,
-            tone: sheetFailures > 0 ? .warning : .good, failure: failure
+            tone: sheetFailures > 0 ? .warning : .good,
+            organization: WebhookNotifier.organization(from: config), failure: failure
         )
         if !sent {
             let message = "[warn] webhook notification failed for '\(profile)': "
@@ -193,7 +194,7 @@ enum ScheduledRunSignals {
         ) {
             await WebhookNotifier.sendFailed(
                 config: notify, title: "Scheduled run failed — \(profile)", facts: facts,
-                failure: failure)
+                organization: WebhookNotifier.organization(from: config), failure: failure)
         }
         if outcome == .failed {
             let message = "[warn] failure webhook notification failed for '\(profile)': "
@@ -247,7 +248,9 @@ enum ScheduledRunSignals {
                     await WebhookNotifier.send(
                         config: target.notify,
                         title: "Daily heartbeat — \(target.profile)",
-                        facts: facts, failure: failure)
+                        facts: facts,
+                        organization: WebhookNotifier.organization(profile: target.profile),
+                        failure: failure)
                 }
                 noteWebhook(outcome, failure: failure)
                 return outcome
@@ -378,6 +381,7 @@ enum ScheduledRunSignals {
         let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.sendAlert(
             config: notify, title: "Metric alert — \(profile)", facts: facts,
+            organization: WebhookNotifier.organization(from: config),
             failure: failure
         )
         noteWebhook(sent ? .sent : .failed, failure: failure)

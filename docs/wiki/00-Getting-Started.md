@@ -19,12 +19,10 @@ Install it with Homebrew:
 brew install Jamf-Concepts/tap/jamf-cli
 ```
 
-This project supports jamf-cli v1.29.0 or later; v1.18.0 to v1.28 still run, with a warning in
-Settings and in each scheduled run. The app itself currently tracks v1.33.0. On jamf-cli 1.24.0
-through 1.27.0, the security report requires a Jamf Security Cloud subscription (see Known
-Issues in the CHANGELOG) — this is fixed in 1.28.0, so upgrade to restore Security Posture,
-the security score and the FileVault, SIP, firewall and Gatekeeper figures. Tenants that
-cannot upgrade past 1.27.0 should pin jamf-cli to 1.23.x instead. See
+This project needs jamf-cli v1.29.0 or later. With an older jamf-cli, collect, backup and
+scheduled runs stop with a message to update it (Settings says the same); a scheduled
+run that only generates from cached data does not call jamf-cli and is not stopped. The app itself currently
+tracks v1.34.0. See
 [Installation](https://github.com/tonyyo11/jamf-reports-community/wiki/01-Installation) for the full requirements table and pre-built binary
 links.
 

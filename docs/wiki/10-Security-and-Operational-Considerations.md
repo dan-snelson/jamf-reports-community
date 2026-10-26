@@ -575,10 +575,6 @@ a workspace coordinate through the shared-workspace claim described above.
 
 ## Known Issues
 
-**`pro report security` on jamf-cli 1.24.0 through 1.27.0 requires a Jamf Security Cloud
-subscription — fixed in 1.28.0.** On those releases this Jamf Pro report is routed through
-the Jamf Security Cloud client and fails on any tenant without a subscription — Security
-Posture, the weighted security score, and every FileVault, SIP, firewall and Gatekeeper
-figure derived from it show their last collected values. jamf-cli 1.28.0 resolves the
-report as Jamf Pro again, so upgrading restores all of it. If you cannot move past 1.27.0,
-pin jamf-cli to 1.23.x instead; see the CHANGELOG's Known Issues entry.
+**`pro report security` on jamf-cli 1.24.0 through 1.27.0 needed a Jamf Security Cloud
+subscription.** Fixed in jamf-cli 1.28.0. Jamf Reports now needs 1.29.0 or later, so no
+supported jamf-cli has this problem; the CHANGELOG's Known Issues entry has the history.

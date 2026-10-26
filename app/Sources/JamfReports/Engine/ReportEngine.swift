@@ -2690,7 +2690,16 @@ struct ReportEngine: Sendable {
                 text: "[info] \(kind): jamf-cli found no blueprints — saving an empty list"
             ))
         }
-        let payload = noBlueprints ? Data("[]".utf8) : data
+        let emptyUpdates = exitCode == 0 && data.isEmpty && stderrWatcher.sawNoUpdateData
+            ? Self.emptyUpdateReport(kind: kind) : nil
+        if emptyUpdates != nil {
+            onLine(.init(
+                timestamp: Date(), level: .info,
+                text: "[info] \(kind): Jamf Pro has no managed software update data — "
+                    + "saving an empty report"
+            ))
+        }
+        let payload = noBlueprints ? Data("[]".utf8) : (emptyUpdates ?? data)
         guard exitCode == 0 || isPartialFailure, !payload.isEmpty else {
             return try Self.recordUnlandedAttempt(
                 kind: kind, exitCode: exitCode, data: data,
@@ -2708,6 +2717,18 @@ struct ReportEngine: Sendable {
             recordManifest: recordManifest, stateStore: stateStore,
             collectStart: collectStart, onLine: onLine
         )
+    }
+
+    /// The report `pro report update-status` would print for a server with no update statuses
+    /// and no plans. The failures kind carries the two scan lists, so it still reads as a scan.
+    static func emptyUpdateReport(kind: String) -> Data? {
+        let base = #""total":0,"status_summary":[],"plan_total":0,"plan_state_summary":[]"#
+        switch kind {
+        case "update-status": return Data("[{\(base)}]".utf8)
+        case "update-device-failures":
+            return Data("[{\(base),\"error_devices\":[],\"failed_plans\":[]}]".utf8)
+        default: return nil
+        }
     }
 
     /// An attempt that produced nothing to save: classify it, count it, say why, and keep the

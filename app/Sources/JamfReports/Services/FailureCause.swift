@@ -60,6 +60,11 @@ struct FailureCause: Codable, Equatable, Sendable {
     static let forbiddenStderrMarker = "permission denied (HTTP 403)"
     /// `pro report blueprint-status` prints this and exits 0 when the environment has none.
     static let noBlueprintsStderrMarker = "No blueprints found."
+    /// `pro report update-status` prints this and exits 0 when Jamf Pro returned no update
+    /// statuses and no plans: a real empty answer unless a fetch warning came first.
+    static let noUpdateDataStderrMarker = "No managed software update data found."
+    /// What `pro report update-status` prints when one of its two fetches fails.
+    static let updateFetchWarningStderrMarker = "WARNING: failed to fetch"
     /// `pro report ddm-status` prints this and exits 0 when no declaration report came back.
     static let noDeclarationDataStderrMarker = "No DDM declaration data found."
     /// Jamf Pro's 503 body, which `pro report update-status` prints in a warning before it
@@ -202,19 +207,23 @@ struct FailureCause: Codable, Equatable, Sendable {
 }
 
 /// Watches one kind's streamed stderr for the jamf-cli lines that explain an exit 0 without
-/// data (spec §9.1): a swallowed 403, an empty blueprint listing, no declaration data, or
-/// Managed Software Update Plans turned off.
+/// data (spec §9.1): a swallowed 403, an empty blueprint listing, no declaration data,
+/// Managed Software Update Plans turned off, or no managed software update data.
 final class StderrSignalWatcher: @unchecked Sendable {
     private let lock = NSLock()
     private var forbidden = false
     private var noBlueprints = false
     private var noDeclarationData = false
     private var softwareUpdatePlansOff = false
+    private var noUpdateData = false
+    private var updateFetchWarning = false
 
     var sawForbidden: Bool { lock.withLock { forbidden } }
     var sawNoBlueprints: Bool { lock.withLock { noBlueprints } }
     var sawNoDeclarationData: Bool { lock.withLock { noDeclarationData } }
     var sawSoftwareUpdatePlansOff: Bool { lock.withLock { softwareUpdatePlansOff } }
+    /// jamf-cli's "no update data" line with no fetch warning before or after it.
+    var sawNoUpdateData: Bool { lock.withLock { noUpdateData && !updateFetchWarning } }
 
     /// A retried attempt is classified on its own stderr, not the first attempt's.
     func reset() {
@@ -223,6 +232,8 @@ final class StderrSignalWatcher: @unchecked Sendable {
             noBlueprints = false
             noDeclarationData = false
             softwareUpdatePlansOff = false
+            noUpdateData = false
+            updateFetchWarning = false
         }
     }
 
@@ -241,6 +252,12 @@ final class StderrSignalWatcher: @unchecked Sendable {
                 }
                 if text.contains(FailureCause.softwareUpdatePlansOffStderrMarker) {
                     self.softwareUpdatePlansOff = true
+                }
+                if text.contains(FailureCause.noUpdateDataStderrMarker) {
+                    self.noUpdateData = true
+                }
+                if text.contains(FailureCause.updateFetchWarningStderrMarker) {
+                    self.updateFetchWarning = true
                 }
             }
             onLine(line)

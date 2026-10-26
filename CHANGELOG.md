@@ -396,6 +396,12 @@ versions in this repository map to git tags.
   "27". (#284)
 - Setup's last step no longer calls a workspace fully set up when its profile did not validate;
   it says the first run will probably fail and where to fix the connection. (#284)
+- A Jamf Pro server with no managed software updates no longer reads as two failing data
+  sources. jamf-cli answers "No managed software update data found." there, which the app counted
+  as nothing collected: a red banner, a Partial run and same-day retries. That answer now lands
+  an empty report, and OS Updates says Jamf Pro reports no managed software updates. When jamf-cli
+  printed a fetch warning first (Managed Software Update Plans turned off, a failed request), it
+  is still a failure. (#284)
 
 ### Security
 

@@ -167,6 +167,19 @@ final class FailureCauseTests: XCTestCase {
         XCTAssertFalse(watcher.sawSoftwareUpdatePlansOff)
     }
 
+    func testTheWatcherSeesNoUpdateDataOnlyWithoutAFetchWarning() {
+        let watcher = StderrSignalWatcher()
+        let forward = watcher.forwarding(to: { _ in })
+        forward(.init(timestamp: Date(), level: .warn,
+                      text: "No managed software update data found."))
+        XCTAssertTrue(watcher.sawNoUpdateData)
+        forward(.init(timestamp: Date(), level: .warn,
+                      text: "WARNING: failed to fetch update statuses: request failed (HTTP 500)"))
+        XCTAssertFalse(watcher.sawNoUpdateData, "both fetches failing prints the same line")
+        watcher.reset()
+        XCTAssertFalse(watcher.sawNoUpdateData)
+    }
+
     /// jamf-cli 1.29 writes `fetch_error` into a document it exits 0 on.
     func testAFetchError403IsAMissingPermissionCarryingTheText() {
         let text = "fetching page 0: permission denied (HTTP 403)"

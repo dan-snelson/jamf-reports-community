@@ -241,6 +241,46 @@ final class CollectFailureCauseTests: XCTestCase {
         let warn = try XCTUnwrap(
             log.first { $0.hasPrefix("[warn] update-status: exit 0") }, "\(log)")
         XCTAssertTrue(warn.contains("Managed Software Update Plans is turned off"), warn)
+        XCTAssertNil(try snapshotRows("update-status"), "a fetch warning is not an empty answer")
+    }
+
+    /// jamf-cli's stderr for `pro report update-status` on a Jamf Pro with no update statuses
+    /// and no plans (pro_report_updates.go: both lists empty, no fetch warning, exit 0).
+    private static let noUpdateDataStderr = """
+    Fetching managed software update statuses...
+    Fetching managed software update plans...
+    No managed software update data found.
+
+    """
+
+    func testNoUpdateDataLandsAnEmptyReport() async throws {
+        let stderrFile = root.appendingPathComponent("no-update-data-stderr")
+        try Self.noUpdateDataStderr.write(to: stderrFile, atomically: true, encoding: .utf8)
+        let log = try await collectInventory("""
+          *"report update-status"*) cat "\(stderrFile.path)" >&2; exit 0 ;;
+        """)
+        let store = StateFileStore(directory: try WorkspacePaths.stateDir(for: profile))
+        XCTAssertNotNil(store.lastRun(report: "update-status"))
+        XCTAssertNil(store.cause(for: "update-status"))
+        XCTAssertTrue(log.contains {
+            $0.contains("update-status: Jamf Pro has no managed software update data")
+        }, "\(log)")
+        let snapshot = UpdateStatusService.load(profile: profile)
+        XCTAssertTrue(snapshot.collectedWithNoData)
+        XCTAssertFalse(snapshot.scanFailuresAvailable)
+    }
+
+    func testNoUpdateDataLandsAnEmptyScanForTheFailuresKind() async throws {
+        _ = try await runScan(stdout: "", stderr: Self.noUpdateDataStderr, exit: 0)
+        let store = StateFileStore(directory: try WorkspacePaths.stateDir(for: profile))
+        XCTAssertNotNil(store.lastRun(report: "update-device-failures"))
+        let dir = try WorkspacePaths.dataDir(for: profile)
+            .appendingPathComponent("update-device-failures", isDirectory: true)
+        let url = try XCTUnwrap(FileManager.newestJSONFile(in: dir))
+        let snapshot = try XCTUnwrap(UpdateStatusService.load(from: url))
+        XCTAssertTrue(snapshot.scanFailuresAvailable)
+        XCTAssertTrue(snapshot.collectedWithNoData)
+        XCTAssertTrue(snapshot.failedPlans.isEmpty && snapshot.errorDevices.isEmpty)
     }
 
     func testSoftwareUpdatePlansTurnedOffIsRecordedForTheScanToo() async throws {

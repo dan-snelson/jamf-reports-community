@@ -34,7 +34,9 @@ struct UpdatesView: View {
                     expectedKinds: ["update-status", "update-device-failures"]
                 )
             }
-            if snapshot.total == 0 {
+            if snapshot.collectedWithNoData {
+                noUpdateDataState
+            } else if snapshot.total == 0 {
                 emptyState
             } else {
                 kpiGrid
@@ -116,6 +118,17 @@ struct UpdatesView: View {
     }
 
     // MARK: - Sections
+
+    private var noUpdateDataState: some View {
+        Card(padding: 24) {
+            EmptyStateView(
+                systemImage: "arrow.triangle.2.circlepath",
+                title: "Jamf Pro reports no managed software updates",
+                message: "The latest collection found no update statuses and no update plans, "
+                    + "so there is nothing to chart here."
+            )
+        }
+    }
 
     private var emptyState: some View {
         Card(padding: 24) {

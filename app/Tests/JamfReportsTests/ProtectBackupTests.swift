@@ -171,7 +171,7 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertEqual(ProtectBackup.result(exit: 0, directory: empty).state, .ok)
     }
 
-    func test_backup_protectExitingCleanWithNothingExportedIsPartial() async throws {
+    func test_backup_protectExitingCleanWithNothingExportedReportsComplete() async throws {
         let ctx = try makeContext(config: connectedConfig, protect: .empty)
         let lines = Lines()
         let exit = try await CLIBridge().backup(
@@ -182,12 +182,12 @@ final class ProtectBackupTests: XCTestCase {
         let protect = try XCTUnwrap(BackupProductResult.protect(inBackup: try ctx.onlyBackup()))
         XCTAssertEqual(protect.state, .partial)
         XCTAssertEqual(protect.reason, "no objects exported")
+        XCTAssertTrue(protect.isComplete, "retention reads it as complete")
         let texts = lines.texts
-        XCTAssertTrue(texts.contains {
-            $0.hasPrefix("[warn] Jamf Protect backup is PARTIAL") && $0.contains("no objects exported")
-        }, "\(texts)")
-        XCTAssertEqual(texts.filter { $0.hasPrefix("[partial]") }.count, 1, "\(texts)")
-        XCTAssertFalse(texts.contains { $0.contains("backed up (0 objects)") })
+        XCTAssertTrue(texts.contains("[ok] Jamf Protect backed up: it has no objects to export"),
+                      "\(texts)")
+        XCTAssertFalse(texts.contains { $0.hasPrefix("[partial]") || $0.contains("PARTIAL") },
+                       "an empty tenant is not a partial backup: \(texts)")
     }
 
     // MARK: - Needs attention
@@ -208,10 +208,8 @@ final class ProtectBackupTests: XCTestCase {
         let ok = try await attention(config: connectedConfig, protect: .ok)
         XCTAssertEqual(ok, [.protectBackupSkipped: .cleared, .protectBackupPartial: .cleared])
         let empty = try await attention(config: connectedConfig, protect: .empty)
-        XCTAssertEqual(empty, [
-            .protectBackupSkipped: .cleared,
-            .protectBackupPartial: .raised("Protect backup partial: no objects exported"),
-        ])
+        XCTAssertEqual(empty, [.protectBackupSkipped: .cleared, .protectBackupPartial: .cleared],
+                       "an empty export leaves nothing to fix")
         let failed = try await attention(config: connectedConfig, protect: .failed)
         XCTAssertEqual(failed[.protectBackupPartial], .raised("Protect backup failed"))
         let undecodable = try await attention(config: "thresholds: not-a-mapping\n", protect: .ok)
@@ -485,7 +483,8 @@ final class ProtectBackupTests: XCTestCase {
         let left = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
         XCTAssertEqual(left, ["20260503T010101", "20260504T010101"],
                        "empty exports are counted and pruned; a real Protect failure stays")
-        XCTAssertFalse(empty.protectSummary.contains("is kept until"), empty.protectSummary)
+        XCTAssertEqual(empty.protectSummary,
+                       "The latest backup includes Jamf Protect: it has no objects.")
     }
 
     func test_backup_failedProtectDiscardsItsFilesAndKeepsPro() async throws {
@@ -549,6 +548,46 @@ final class ProtectBackupTests: XCTestCase {
         XCTAssertTrue(lines.texts.contains {
             $0.hasPrefix("[error] Jamf Pro backup failed; kept the Jamf Protect part") },
             "\(lines.texts)")
+    }
+
+    func test_backup_protectPartialLineSaysHowTheJamfProBackupEnded() async throws {
+        for (proExit, clause) in [
+            (Int32(0), "the Jamf Pro backup is complete"),
+            (7, "the Jamf Pro backup is partial too"),
+            (1, "the Jamf Pro backup failed too"),
+        ] {
+            let ctx = try makeContext(config: connectedConfig, protect: .failed, proExit: proExit)
+            let lines = Lines()
+            _ = try await CLIBridge().backup(
+                profile: ctx.profile, label: "scheduled-t", _testExecutable: ctx.stub
+            ) { lines.append($0) }
+            let partial = lines.texts.filter { $0.hasPrefix("[partial] Jamf Protect") }
+            XCTAssertEqual(partial.count, 1, "exit \(proExit): \(lines.texts)")
+            XCTAssertTrue(partial.first?.hasSuffix(clause) == true, "exit \(proExit): \(partial)")
+        }
+    }
+
+    func test_pruneHoldsAtMostTenIncompleteBackups() throws {
+        let ctx = try makeContext(config: connectedConfig, protect: .ok)
+        let backups = ctx.workspace.appendingPathComponent("backups", isDirectory: true)
+        let failed = BackupProductResult(state: .failed, exitCode: 3)
+        let names = (1...12).map { String(format: "202605%02dT010101", $0) }
+        for name in names {
+            let dir = backups.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: [
+                "label": "scheduled-x", "products": ["protect": failed.manifestValue],
+            ]).write(to: dir.appendingPathComponent("manifest.json"))
+        }
+
+        let lines = Lines()
+        BackupMaintenance.pruneScheduledBackups(profile: ctx.profile, keep: 1) { lines.append($0) }
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
+        XCTAssertEqual(left, Array(names.dropFirst()),
+                       "the newest 10 are held; of the 2 older ones keep 1 is kept")
+        XCTAssertTrue(lines.texts.contains { $0.contains("2 older backup(s) with an incomplete") },
+                      "\(lines.texts)")
     }
 
     func test_backup_proFailedWithNoProtectObjectsLeavesNoFolder() async throws {

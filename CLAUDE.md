@@ -448,12 +448,14 @@ suggests the setting while backups leave Protect out (`protect.backup_synced_sto
 before. `ProtectBackup.result` classifies the run: exit 0 with objects and no `_failures.yaml` is ok; a
 non-zero exit (7, or any exit with a `_failures.yaml`) that left files, or exit 0 with a
 `_failures.yaml` or with no objects exported (reason "no objects exported"), is partial; everything else, a timeout included, is failed and its files are
-removed. A partial or failed Protect part never costs the Jamf Pro backup or changes its exit:
-the run logs a `[warn]` line (naming `protect/_failures.yaml` when present) and a `[partial]`
-line, so `CollectHonestyWatcher.incomplete` is true and Run History reads the run as Partial
+removed. A part partial only because a clean run exported nothing (`isEmptyExport`) is reported
+as backed up: an `[ok]` line, the attention item cleared, no `[partial]`. A partial or failed
+Protect part never costs the Jamf Pro backup or changes its exit: the run logs a `[warn]` line
+(naming `protect/_failures.yaml` when present) and a `[partial]` line that says how the Jamf Pro
+part ended (`ProtectBackup.proBackupClause`), so `CollectHonestyWatcher.incomplete` is true and Run History reads the run as Partial
 (the scheduled backup's completion line is itself a `[partial]` line, inside the 1 KB log tail
 Run History reads). Backup mode is not a collect mode (`runsAtLoad` false), so Partial triggers no
-same-day retry. `BackupMaintenance.pruneScheduledBackups` leaves a backup whose Protect part is partial or failed out of its candidates (neither counted toward the newest 10 nor removed) until a newer candidate, under the same host scoping, has a complete Protect part; it is then counted and pruned like any other, and a Pro-failed backup is removed rather than counted (only when the folder holds nothing but `protect/`, `manifest.json` and dotfiles, `BackupMaintenance.holdsOnlyProtectPart`; otherwise it is kept, out of the count, with a `[warn]`), so a run of Pro failures cannot push out real Jamf Pro backups.
+same-day retry. `BackupMaintenance.pruneScheduledBackups` leaves a backup whose Protect part is partial or failed out of its candidates (neither counted toward the newest 10 nor removed) until a newer candidate, under the same host scoping, has a complete Protect part; it is then counted and pruned like any other, and a Pro-failed backup is removed rather than counted (only when the folder holds nothing but `protect/`, `manifest.json` and dotfiles, `BackupMaintenance.holdsOnlyProtectPart`; otherwise it is kept, out of the count, with a `[warn]`), so a run of Pro failures cannot push out real Jamf Pro backups. At most `max(keep, BackupMaintenance.maxHeldBackups)` (10) are held, the newest; older held backups are released the same way, so a Protect part that fails every run cannot keep every backup.
 A part that is partial only because a clean run exported nothing (`BackupProductResult.
 isEmptyExport`: exit 0, no `_failures.yaml`, no objects) stays a candidate, so a Protect tenant
 with nothing to export does not keep every scheduled backup (`keepsBackupFromPruning`).
@@ -1077,7 +1079,9 @@ run. A commit merges the run's changes into the workspace's open set (the `atten
 and counts up, a cleared one is removed; the result goes into the run's status file, else the app
 record (`appCollectRunLabel`'s), stamped `max(now, newest attention_at + 1 ms)` so a peer whose
 clock runs ahead cannot make this Mac's later commit read as older. It never creates `automation/`. Items decode leniently: a file
-without the keys is no record, an unknown code is skipped. The banner entry ranks below failing
+without the keys is no record, an unknown code is skipped. A peer can write these files, so a
+record stamped past `AttentionLog.maxAttentionAt` (the year 3000) is not read, a decoded `count`
+is held to 1...`AttentionItem.maxCount`, and counting up stops there instead of overflowing. The banner entry ranks below failing
 collects and the Doctor-driven entries, above stale data ("2 things need attention: …"); its
 button follows the newest item's code (`AttentionCode.destination`: Automation for the webhook,
 Backups for Protect, Run History on that run's log, `openRunLogRequested`, for the rest), and

@@ -53,6 +53,16 @@ struct AttentionItem: Codable, Sendable, Equatable {
     }
 
     static let maxMessageLength = 160
+    /// The most sightings counted. Status files sit in a folder a peer can write, so a stored
+    /// count is held to this range and adding one never overflows.
+    static let maxCount = 1_000_000
+
+    /// `count` held to 1...`maxCount`.
+    func clampingCount() -> AttentionItem {
+        var item = self
+        item.count = min(max(count, 1), Self.maxCount)
+        return item
+    }
 
     /// Redacted as Run History's shared text is, with any URL removed and the length capped.
     static func sanitized(_ text: String, profile: String) -> String {
@@ -81,7 +91,7 @@ struct AttentionItem: Codable, Sendable, Equatable {
             case (.raised(let message), let index?):
                 items[index].message = message
                 items[index].lastSeen = now
-                items[index].count += 1
+                items[index].count = min(max(items[index].count, 0), Self.maxCount - 1) + 1
                 items[index].runLog = runLog
             case (.raised(let message), nil):
                 items.append(AttentionItem(

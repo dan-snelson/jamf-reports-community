@@ -66,6 +66,38 @@ final class AttentionLogTests: XCTestCase {
         XCTAssertEqual(again[0].runLog, "2.log")
     }
 
+    func testACountAtTheTopStopsThereInsteadOfOverflowing() {
+        var top = item(.schoolZeroDevices, seen: at(0))
+        top.count = Int.max
+        let merged = AttentionItem.merging(
+            [top], [.schoolZeroDevices: .raised("a")], profile: profile, runLog: nil, now: at(1))
+        XCTAssertEqual(merged[0].count, AttentionItem.maxCount)
+    }
+
+    func testAPlantedCountIsClampedWhenReadAndARepeatAfterItDoesNotCrash() throws {
+        let planted = #"{"code":"eaSnapshotUnreadable","message":"x","count":9223372036854775807,"#
+            + #""profile":"attn","first_seen":"2026-10-20T08:00:00Z","#
+            + #""last_seen":"2026-10-20T09:00:00Z"}"#
+        let negative = #"{"code":"schoolZeroDevices","message":"x","count":-5,"profile":"attn","#
+            + #""first_seen":"2026-10-20T08:00:00Z","last_seen":"2026-10-20T09:00:00Z"}"#
+        try Data(#"{"label":"peer","attention_at":1e15,"attention":[\#(planted),\#(negative)]}"#
+            .utf8).write(to: try automation().appendingPathComponent("peer_status.json"))
+        XCTAssertTrue(AttentionLog.openItems(profile: profile).isEmpty,
+                      "a record stamped past the year 3000 is not read")
+
+        try Data((#"{"label":"peer","attention_at":1790000000,"#
+            + #""attention":[\#(planted),\#(negative)]}"#).utf8).write(to: try automation().appendingPathComponent("peer_status.json"))
+        XCTAssertEqual(AttentionLog.openItems(profile: profile).map(\.count),
+                       [AttentionItem.maxCount, 1])
+        try run(into: "mine", now: at(60)) {
+            AttentionLog.raise(.eaSnapshotUnreadable, "again")
+        }
+        let item = AttentionLog.openItems(profile: profile)
+            .first { $0.code == .eaSnapshotUnreadable }
+        XCTAssertEqual(item?.count, AttentionItem.maxCount)
+        XCTAssertEqual(item?.message, "again")
+    }
+
     func testAClearRemovesOnlyThatCodeOfThatProfile() {
         let open = [item(.schoolZeroDevices, seen: at(0)), item(.webhookRejected, seen: at(0)),
                     item(.schoolZeroDevices, profile: "other", seen: at(0))]

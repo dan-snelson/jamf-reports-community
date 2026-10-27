@@ -96,7 +96,11 @@ enum BackupMaintenance {
     /// A fourth rule (2.11): a backup whose manifest records a partial or failed Jamf
     /// Protect part is left out of the candidates until a newer candidate's Protect part is
     /// complete; from then on it is counted and pruned like any other. A backup whose Jamf
-    /// Pro part failed is held by the same rule and then removed without being counted.
+    /// Pro part failed is held by the same rule and then removed without being counted. At
+    /// most `keep` (and at least `maxHeldBackups`) are held; older ones are released the same
+    /// way.
+    static let maxHeldBackups = 10
+
     static func pruneScheduledBackups(
         profile: String,
         keep: Int,
@@ -158,7 +162,23 @@ enum BackupMaintenance {
         // Jamf Pro backups.
         var newerProtectComplete = false
         var held = 0
+        var released = 0
         var superseded: [URL] = []
+        // Counted like any other backup from here on; one whose Jamf Pro part failed is removed.
+        func release(_ url: URL, proFailed: Bool) -> Bool {
+            guard proFailed else { return true }
+            // A manifest edited to say failed must not get a Jamf Pro backup removed.
+            guard holdsOnlyProtectPart(url) else {
+                onLine?(.init(
+                    timestamp: Date(), level: .warn,
+                    text: "[warn] backup \(url.lastPathComponent): manifest says the "
+                        + "Jamf Pro part failed but the folder holds Jamf Pro files — kept"
+                ))
+                return false
+            }
+            superseded.append(url)
+            return false
+        }
         let scheduled = stamped
             .sorted { lhs, rhs in
                 lhs.key.0 == rhs.key.0 ? lhs.key.1 > rhs.key.1 : lhs.key.0 > rhs.key.0
@@ -168,21 +188,14 @@ enum BackupMaintenance {
                 let protect = BackupProductResult.protect(inBackup: url)
                 let proFailed = BackupProductResult.pro(inBackup: url)?.state == .failed
                 defer { if protect?.isComplete == true { newerProtectComplete = true } }
-                if newerProtectComplete {
-                    guard proFailed else { return true }
-                    // A manifest edited to say failed must not get a Jamf Pro backup removed.
-                    guard holdsOnlyProtectPart(url) else {
-                        onLine?(.init(
-                            timestamp: Date(), level: .warn,
-                            text: "[warn] backup \(url.lastPathComponent): manifest says the "
-                                + "Jamf Pro part failed but the folder holds Jamf Pro files — kept"
-                        ))
-                        return false
-                    }
-                    superseded.append(url)
-                    return false
-                }
+                if newerProtectComplete { return release(url, proFailed: proFailed) }
                 guard protect?.keepsBackupFromPruning == true || proFailed else { return true }
+                // Only the newest few are held, so a Protect part that fails every day cannot
+                // keep every backup forever.
+                guard held < max(keep, maxHeldBackups) else {
+                    released += 1
+                    return release(url, proFailed: proFailed)
+                }
                 held += 1
                 return false
             }
@@ -192,6 +205,13 @@ enum BackupMaintenance {
                 text: "[info] keeping \(held) scheduled backup(s) with an incomplete Jamf "
                     + "Protect or failed Jamf Pro part until a later backup's Jamf Protect part "
                     + "completes."
+            ))
+        }
+        if released > 0 {
+            onLine?(.init(
+                timestamp: Date(), level: .info,
+                text: "[info] \(released) older backup(s) with an incomplete part are past the "
+                    + "\(held) held and are pruned as usual."
             ))
         }
 

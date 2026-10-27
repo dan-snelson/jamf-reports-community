@@ -51,6 +51,7 @@ struct BackupProductResult: Sendable, Hashable {
             .map { "\($0.key) \($0.value)" }.joined(separator: ", ")
         let found = "\(objectTotal) object\(objectTotal == 1 ? "" : "s")"
             + (counts.isEmpty ? "" : " (\(counts))")
+        if isEmptyExport { return "The latest backup includes Jamf Protect: it has no objects." }
         switch state {
         case .ok:
             return "The latest backup includes Jamf Protect: \(found)."
@@ -61,9 +62,7 @@ struct BackupProductResult: Sendable, Hashable {
                         + "\(ProtectBackup.folderName)/\(ProtectBackup.failuresFileName) "
                         + "in the backup folder. "
                     : "")
-                + (isEmptyExport
-                    ? "Jamf Protect exported no objects."
-                    : "It is kept until a later backup's Jamf Protect part completes.")
+                + "It is kept until a later backup's Jamf Protect part completes."
         case .failed:
             let code = exitCode.map { " (exit \($0))" } ?? ""
             return "The latest backup has no Jamf Protect part: the Protect backup failed\(code). "
@@ -327,6 +326,7 @@ extension CLIBridge {
         staging: URL,
         executable: URL,
         timeout: TimeInterval,
+        proState: BackupProductResult.State,
         sharedStorage: () -> String?,
         onLine: @Sendable @escaping (LogLine) -> Void
     ) async -> BackupProductResult? {
@@ -414,14 +414,23 @@ extension CLIBridge {
         let result = ProtectBackup.result(exit: exit, directory: validated)
         // It ran, so a skip is over; what it left decides the other code.
         AttentionLog.clear(.protectBackupSkipped)
-        reportProtectBackup(result, exit: exit, timeout: timeout, output: validated, onLine: onLine)
+        reportProtectBackup(
+            result, exit: exit, timeout: timeout, output: validated, proState: proState,
+            onLine: onLine)
         return result
     }
 
     private func reportProtectBackup(
         _ result: BackupProductResult, exit: Int32, timeout: TimeInterval, output: URL,
-        onLine: @Sendable (LogLine) -> Void
+        proState: BackupProductResult.State, onLine: @Sendable (LogLine) -> Void
     ) {
+        // A clean run of a tenant with nothing to export is complete, as retention reads it.
+        if result.isEmptyExport {
+            onLine(.init(timestamp: Date(), level: .ok,
+                         text: "[ok] Jamf Protect backed up: it has no objects to export"))
+            AttentionLog.clear(.protectBackupPartial)
+            return
+        }
         switch result.state {
         case .ok:
             onLine(.init(timestamp: Date(), level: .ok,
@@ -471,6 +480,15 @@ extension CLIBridge {
                 + (result.reason.map { ": \($0)" } ?? ""))
         onLine(.init(timestamp: Date(), level: .warn,
                      text: "[partial] Jamf Protect configuration is not fully backed up; "
-                         + "the Jamf Pro backup is complete"))
+                         + Self.proBackupClause(proState)))
+    }
+
+    /// How the Jamf Pro part of the same backup ended, for the Protect `[partial]` line.
+    nonisolated static func proBackupClause(_ state: BackupProductResult.State) -> String {
+        switch state {
+        case .ok: "the Jamf Pro backup is complete"
+        case .partial: "the Jamf Pro backup is partial too"
+        case .failed, .skipped: "the Jamf Pro backup failed too"
+        }
     }
 }

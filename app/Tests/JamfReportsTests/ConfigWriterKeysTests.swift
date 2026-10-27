@@ -32,12 +32,16 @@ final class ConfigWriterKeysTests: XCTestCase {
         XCTAssertEqual(notify.value(for: "url")?.stringValue, "https://hooks.example.test/x")
     }
 
-    func testAIApplyDropsTheRetiredKeysAndKeepsAnotherTypedKey() throws {
+    /// `apply` keeps every typed key; the retired ones are dropped by `saveBlock`, which backs
+    /// the file up first (covered in AIConfigPersistenceTests).
+    func testAIApplyKeepsOtherTypedKeysAndLeavesRetiredOnesToSaveBlock() throws {
         var mapping = try root("ai:\n  lock_on_device: true\n  note: kept\n")
         var config = AIConfig()
         config.enabled = true
         AIConfigWriter.apply(config, to: &mapping)
         let ai = try XCTUnwrap(mapping.value(for: "ai")?.mapping)
-        XCTAssertEqual(ai.entries.map(\.key), ["note", "enabled", "tier", "reasoning_level", "include_in_reports"])
+        XCTAssertEqual(
+            ai.entries.map(\.key),
+            ["lock_on_device", "note", "enabled", "tier", "reasoning_level", "include_in_reports"])
     }
 }

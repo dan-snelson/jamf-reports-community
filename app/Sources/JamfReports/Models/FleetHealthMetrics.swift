@@ -136,7 +136,7 @@ struct DeviceRisk: Sendable, Equatable {
         let detail: String?
     }
 
-    /// The 14 risk factors from v3.5. Each carries a default point value and a
+    /// The risk factors from v3.5 (less the boot-drive one, which jamf-cli data cannot supply). Each carries a default point value and a
     /// remediation string; both are configurable via `RiskFactorWeights`.
     enum Factor: String, CaseIterable, Sendable, Hashable {
         case noFileVault
@@ -144,7 +144,6 @@ struct DeviceRisk: Sendable, Equatable {
         case sipDisabled
         case gatekeeperDisabled
         case firewallDisabled
-        case bootDriveFull
         case mscpHighFailures
         case mscpMediumFailures
         case noBaseline
@@ -165,7 +164,6 @@ struct DeviceRisk: Sendable, Equatable {
             case .sipDisabled:        return "SIP Disabled"
             case .gatekeeperDisabled: return "Gatekeeper Disabled"
             case .firewallDisabled:   return "Firewall Disabled"
-            case .bootDriveFull:      return "Boot Drive >95% Full"
             case .mscpHighFailures:   return "mSCP High Failures"
             case .mscpMediumFailures: return "mSCP Medium Failures"
             case .noBaseline:         return "No mSCP Baseline (Active)"
@@ -194,7 +192,6 @@ struct DeviceRisk: Sendable, Equatable {
             case .sipDisabled:        return "Re-enable SIP from Recovery (csrutil enable)."
             case .gatekeeperDisabled: return "Re-enable Gatekeeper via profile or `spctl --master-enable`."
             case .firewallDisabled:   return "Deploy firewall configuration profile."
-            case .bootDriveFull:      return "User outreach — free disk space immediately."
             case .mscpHighFailures:   return "Investigate failing High-severity mSCP rules."
             case .mscpMediumFailures: return "Schedule remediation of Medium-severity mSCP rules."
             case .noBaseline:         return "Assign mSCP baseline via PreStage or scope."
@@ -225,7 +222,6 @@ struct RiskFactorWeights: Sendable, Equatable {
     var sipDisabled: Int
     var gatekeeperDisabled: Int
     var firewallDisabled: Int
-    var bootDriveFull: Int
     var mscpHighPerFailure: Int
     var mscpHighCap: Int
     var mscpMediumPerFailure: Int
@@ -238,8 +234,6 @@ struct RiskFactorWeights: Sendable, Equatable {
     /// (v3.5's "Nessus disconnected" factor, now config-driven).
     var securityAgentDisconnected: Int
     var bootstrapMissing: Int
-    /// Boot drive fullness threshold (percent). Defaults to 95%.
-    var bootDriveFullThresholdPct: Int
 
     static let defaultWeights = RiskFactorWeights(
         noFileVault: 15,
@@ -247,7 +241,6 @@ struct RiskFactorWeights: Sendable, Equatable {
         sipDisabled: 8,
         gatekeeperDisabled: 6,
         firewallDisabled: 6,
-        bootDriveFull: 8,
         mscpHighPerFailure: 7,
         mscpHighCap: 21,
         mscpMediumPerFailure: 4,
@@ -257,7 +250,6 @@ struct RiskFactorWeights: Sendable, Equatable {
         secureBootMedium: 5,
         staleOffline: 5,
         securityAgentDisconnected: 5,
-        bootstrapMissing: 4,
-        bootDriveFullThresholdPct: 95
+        bootstrapMissing: 4
     )
 }

@@ -77,7 +77,7 @@ final class TrendStoreTests: XCTestCase {
     }
 
     /// Active is the fleet minus its stale Macs, live and demo alike; the demo
-    /// used to plot the whole fleet under Active Devices.
+    /// used to plot the whole fleet under Active Computers.
     func testActiveDevicesDemoSeriesExcludesStaleMacs() {
         let points = TrendDemoSeries.points(for: .activeDevices, range: .all)
 
@@ -528,56 +528,9 @@ final class TrendStoreTests: XCTestCase {
                        "a measured zero still earns the stale component")
     }
 
-    // MARK: - managedDeviceSeries() — computers-vs-mobile trend
+    // MARK: - .managedDevices — Managed Computers
 
-    /// The Computers series always has one point per summary (totalDevices is
-    /// never optional); the Mobile series only carries dates where
-    /// mobileDeviceCount was recorded.
-    func testManagedDeviceSeriesSkipsNilMobileCounts() {
-        let store = TrendStore(
-            summaries: [
-                summary(date: "2026-07-01", totalDevices: 100, mobileDeviceCount: nil),
-                summary(date: "2026-07-08", totalDevices: 110, mobileDeviceCount: 12),
-                summary(date: "2026-07-15", totalDevices: 120, mobileDeviceCount: 15),
-            ],
-            range: .all
-        )
-
-        let series = store.managedDeviceSeries()
-
-        let computers = try? XCTUnwrap(series.first { $0.label == "Computers" })
-        XCTAssertEqual(computers?.points.map(\.value), [100, 110, 120])
-
-        let mobile = try? XCTUnwrap(series.first { $0.label == "Mobile devices" })
-        XCTAssertEqual(mobile?.points.count, 2, "the nil-mobile day must be skipped, not zero-filled")
-        XCTAssertEqual(mobile?.points.map(\.value), [12, 15])
-    }
-
-    /// When no summary has ever recorded a mobile count, the Mobile series is
-    /// entirely absent (not a single-series array with an empty points list) —
-    /// days before the field existed are correctly invisible, not zero.
-    func testManagedDeviceSeriesOmitsMobileSeriesWhenNeverRecorded() {
-        let store = TrendStore(
-            summaries: [
-                summary(date: "2026-07-01", totalDevices: 100, mobileDeviceCount: nil),
-                summary(date: "2026-07-08", totalDevices: 110, mobileDeviceCount: nil),
-            ],
-            range: .all
-        )
-
-        let series = store.managedDeviceSeries()
-
-        XCTAssertEqual(series.map(\.label), ["Computers"])
-    }
-
-    func testManagedDeviceSeriesEmptyWhenNoSummaries() {
-        let store = TrendStore(summaries: [], range: .all)
-        XCTAssertTrue(store.managedDeviceSeries().isEmpty)
-    }
-
-    /// The headline value (`points(metric: .managedDevices)`) is the computer
-    /// count for every summary — the two-line breakdown is a chart-only view,
-    /// mirroring `.activeDevices`.
+    /// The value is the Mac count for every summary; mobile devices have their own metric.
     func testManagedDevicesMetricPointsMatchTotalDevices() {
         let store = TrendStore(
             summaries: [
@@ -587,9 +540,21 @@ final class TrendStoreTests: XCTestCase {
             range: .all
         )
 
-        let points = store.points(metric: .managedDevices)
+        XCTAssertEqual(store.points(metric: .managedDevices).map(\.value), [100, 110])
+    }
 
-        XCTAssertEqual(points.map(\.value), [100, 110])
+    /// A day with no Macs is a gap, not the mobile count and not 0.
+    func testManagedDevicesHasNoValueOnADayWithNoMacs() {
+        let store = TrendStore(
+            summaries: [
+                summary(date: "2026-07-01", totalDevices: 100, mobileDeviceCount: 10),
+                summary(date: "2026-07-08", totalDevices: 0, mobileDeviceCount: 13),
+            ],
+            range: .all
+        )
+
+        XCTAssertEqual(store.points(metric: .managedDevices).map(\.value), [100])
+        XCTAssertEqual(TrendSeries.Metric.managedDevices.displayLabel, "Managed Computers")
     }
 }
 

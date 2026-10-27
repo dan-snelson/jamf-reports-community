@@ -143,46 +143,6 @@ final class SnapshotPickerParityTests: XCTestCase {
         XCTAssertEqual(deviceName, "NEWEST")
     }
 
-    // MARK: - csv-inbox is hand-fed, so a rejection there must be explained
-
-    /// The conflict-copy filter is correct for JSON snapshots, but csv-inbox is
-    /// a folder the operator drops files into — and Finder names a second
-    /// download "Computers 2.csv". Rejecting that silently leaves the screen
-    /// with no CSV source and nothing to act on, so it has to be named the way
-    /// the age bound names an expired export.
-    func testConflictNamedInboxCSVIsNamedInAWarningNotSilentlyDropped() throws {
-        let inbox = workspace.appendingPathComponent("csv-inbox", isDirectory: true)
-        try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
-        try write("""
-        Computer Name,Serial Number
-        Mac-1,INBOX001
-        """, to: inbox.appendingPathComponent("Computers 2.csv"), modified: Date())
-
-        let snapshot = DeviceInventoryService.load(profile: profile, demoMode: false)
-        let warning = snapshot.warnings.first { $0.contains("Computers 2.csv") }
-        let text = try XCTUnwrap(warning, "a rejected inbox CSV must be reported, not dropped")
-        XCTAssertTrue(text.lowercased().contains("rename"),
-                      "the warning must say how to make the file readable")
-        XCTAssertFalse(
-            snapshot.sourceFiles.contains { $0.contains("Computers 2.csv") },
-            "the file is still not read — the warning is the remedy, not a load"
-        )
-    }
-
-    /// A normally-named inbox CSV is unaffected by the filter.
-    func testNormallyNamedInboxCSVLoadsWithNoWarning() throws {
-        let inbox = workspace.appendingPathComponent("csv-inbox", isDirectory: true)
-        try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
-        try write("""
-        Computer Name,Serial Number
-        Mac-1,INBOX001
-        """, to: inbox.appendingPathComponent("Computers.csv"), modified: Date())
-
-        let snapshot = DeviceInventoryService.load(profile: profile, demoMode: false)
-        XCTAssertTrue(snapshot.sourceFiles.contains { $0.contains("Computers.csv") })
-        XCTAssertFalse(snapshot.warnings.contains { $0.contains("Computers.csv") })
-    }
-
     // MARK: - Per-kind freshness dates
 
     /// `sourceDates` feeds the freshness chips, so it must date a snapshot by

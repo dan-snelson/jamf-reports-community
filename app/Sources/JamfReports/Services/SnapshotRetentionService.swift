@@ -96,7 +96,7 @@ enum SnapshotRetentionService {
 
         let today = dayFormatter.string(from: now)
         let marker = workspace.appendingPathComponent(".retention-last")
-        if (try? String(contentsOf: marker, encoding: .utf8))?
+        if BoundedFile.stateText(marker)?
             .trimmingCharacters(in: .whitespacesAndNewlines) == today { return 0 }
 
         guard let dataDir = try? WorkspacePaths.dataDir(for: profile) else { return 0 }

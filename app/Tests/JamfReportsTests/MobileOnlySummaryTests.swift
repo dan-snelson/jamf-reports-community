@@ -297,20 +297,17 @@ final class MobileOnlySummaryReaderTests: XCTestCase {
             "Managed Macs")
     }
 
-    func testTheComputersLineHasAGapNotAZeroOnAMobileOnlyDay() {
+    func testManagedComputersHasAGapNotAZeroOnAMobileOnlyDay() {
         let store = TrendStore(
             summaries: [
                 day("2026-10-11", macs: 0, mobile: 5),
                 day("2026-10-12", macs: 20, mobile: 5),
                 day("2026-10-13", macs: 0, mobile: 6),
             ], range: .all)
-        let series = store.managedDeviceSeries()
-        XCTAssertEqual(series.first { $0.label == "Computers" }?.points.map(\.value), [20])
-        XCTAssertEqual(series.first { $0.label == "Mobile devices" }?.points.map(\.value),
-                       [5, 5, 6])
+        XCTAssertEqual(store.points(metric: .managedDevices).map(\.value), [20])
 
         let mobileOnly = TrendStore(summaries: [day("2026-10-13", macs: 0, mobile: 6)], range: .all)
-        XCTAssertEqual(mobileOnly.managedDeviceSeries().map(\.label), ["Mobile devices"])
+        XCTAssertTrue(mobileOnly.points(metric: .managedDevices).isEmpty)
     }
 
     func testAMobileOnlyDayHasNoStabilityIndexOrActiveDeviceCount() {

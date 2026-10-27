@@ -35,6 +35,11 @@ enum CLIBridgeError: Error, LocalizedError, Equatable, Sendable {
     case executableNotFound
     /// An argument value is invalid (e.g. leading-dash injection risk).
     case invalidArgument(String)
+    /// The profile belongs to another product, so a Jamf Pro command was not run; the text is
+    /// the refusal (`ProfileAuthMethod.Resolved.proRefusal`).
+    case wrongProduct(String)
+    /// The named backup's Jamf Pro part failed, so it holds only Jamf Protect objects.
+    case backupWithoutPro(String)
     /// A required directory could not be created or a file move failed.
     /// `path` is for private logging only — never interpolated into user-visible strings.
     case directoryOperationFailed(path: String)
@@ -97,6 +102,11 @@ enum CLIBridgeError: Error, LocalizedError, Equatable, Sendable {
             return "jamf-cli not found — install via Homebrew: brew install jamf-cli"
         case .invalidArgument(let detail):
             return "Invalid argument: \(detail)"
+        case .wrongProduct(let refusal):
+            return refusal
+        case .backupWithoutPro(let name):
+            return "Backup \(name) has no Jamf Pro part (its Jamf Pro backup failed), so there "
+                + "is nothing to compare. Choose two backups that hold a Jamf Pro backup."
         case .directoryOperationFailed:
             // Path omitted: may contain the home directory or workspace layout.
             return "A required directory could not be created or moved — check available disk space and folder permissions."
@@ -157,18 +167,18 @@ extension CLIBridge {
                 generateXLSX: {
                     if schoolMode {
                         return try await self.schoolGenerate(
-                            profile: profile, csvPath: nil, onLine: onLine)
+                            profile: profile, onLine: onLine)
                     }
                     // A chosen HTML format is the run's one HTML report; `html.with_workbook`
                     // would write a second.
                     return try await self.generate(
-                        profile: profile, csvPath: nil, template: template,
+                        profile: profile, template: template,
                         outputDir: outputDir, aiNarrative: aiNarrative,
                         htmlWithWorkbook: !types.contains(.html), onLine: onLine
                     )
                 },
                 generateHTML: {
-                    let outURL = self.reportFileURL(
+                    let outURL = try self.reportFileURL(
                         profile: profile, outputDir: outputDir, type: .html, onLine: onLine)
                     return try await self.generateHTML(
                         profile: profile, outFile: outURL.path, template: template,
@@ -176,7 +186,7 @@ extension CLIBridge {
                     )
                 },
                 generatePDF: {
-                    let outURL = self.reportFileURL(
+                    let outURL = try self.reportFileURL(
                         profile: profile, outputDir: outputDir, type: .pdf, onLine: onLine)
                     return try await self.generatePDF(
                         profile: profile, outFile: outURL.path, template: template, onLine: onLine
@@ -327,10 +337,10 @@ extension CLIBridge {
     private func reportFileURL(
         profile: String, outputDir: URL?, type: GenerateOutputType,
         onLine: @Sendable @escaping (LogLine) -> Void
-    ) -> URL {
-        let dir = outputDir
-            ?? WorkspacePaths.reportsDir(for: profile, onLine: onLine)
-            ?? FileManager.default.temporaryDirectory
+    ) throws -> URL {
+        guard let dir = outputDir ?? WorkspacePaths.reportsDir(for: profile, onLine: onLine) else {
+            throw ReportEngineError.reportFolderUnavailable(profile)
+        }
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         } catch {

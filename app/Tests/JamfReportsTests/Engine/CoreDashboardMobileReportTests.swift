@@ -3,7 +3,7 @@ import XCTest
 @testable import JamfReports
 
 /// The workbook's Mobile Fleet Summary and Mobile Inventory sheets read the same
-/// fields as the Mobile Fleet screen, and write a value the snapshot never measured
+/// fields as the Mobile Devices screen, and write a value the snapshot never measured
 /// as blank or "Unknown", not 0, "Unmanaged" or "Clean" (#207 G18).
 ///
 /// Shapes: the `fixtureDir` files are the collected `mobile-device-inventory-details`
@@ -177,7 +177,7 @@ final class CoreDashboardMobileReportTests: XCTestCase {
     // MARK: - Collected snapshot: the list row supplies what hardware lacks
 
     /// The collected inventory has no hardware section; model, serial and form factor
-    /// come from the list row with the same id, as on the Mobile Fleet screen.
+    /// come from the list row with the same id, as on the Mobile Devices screen.
     func testInventoryJoinsTheListRowForModelSerialAndFamily() throws {
         let dir = try inventoryNewerThanList()
         defer { try? FileManager.default.removeItem(at: dir) }

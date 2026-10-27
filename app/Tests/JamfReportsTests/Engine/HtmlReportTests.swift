@@ -296,36 +296,31 @@ final class HtmlReportTests: XCTestCase {
     // MARK: - Helper: asInt
 
     func testAsIntFromInt() {
-        let report = makeReport()
-        XCTAssertEqual(report.asInt(42), 42)
+        XCTAssertEqual(asInt(42), 42)
     }
 
     func testAsIntFromString() {
-        let report = makeReport()
-        XCTAssertEqual(report.asInt("99"), 99)
+        XCTAssertEqual(asInt("99"), 99)
     }
 
     func testAsIntFromNilReturnsNil() {
-        let report = makeReport()
-        XCTAssertNil(report.asInt(nil))
+        XCTAssertNil(asInt(nil))
     }
 
     /// A corrupt snapshot can carry a number no `Int` holds; `Int(d)` trapped on it.
     func testAsIntRejectsDoublesOutsideIntRange() {
-        let report = makeReport()
         let outOfRange: [Double] = [
             1e300, -1e300, .nan, .infinity, -.infinity, 9.3e18, -9.3e18,
         ]
         for value in outOfRange {
-            XCTAssertNil(report.asInt(value), "\(value) must read as nil, not trap")
+            XCTAssertNil(asInt(value), "\(value) must read as nil, not trap")
         }
     }
 
     func testAsIntRoundsFractionalDoubles() {
-        let report = makeReport()
-        XCTAssertEqual(report.asInt(3.7), 4)
-        XCTAssertEqual(report.asInt(-2.4), -2)
-        XCTAssertEqual(report.asInt(12.0), 12)
+        XCTAssertEqual(asInt(3.7), 4)
+        XCTAssertEqual(asInt(-2.4), -2)
+        XCTAssertEqual(asInt(12.0), 12)
     }
 
     /// The OS bars read counts through asInt; a corrupt one must not take the report down.
@@ -435,13 +430,13 @@ final class HtmlReportTests: XCTestCase {
             deviceCompliance: devices,
             computersInventory: []
         )
-        XCTAssertTrue(html.contains("Top non-compliant devices (15)"))
+        XCTAssertTrue(html.contains("Top non-compliant computers (15)"))
         // Mac-15 has the highest failure count and should appear first
         XCTAssertTrue(html.contains("Mac-15"))
         // Mac-1 has the lowest: it is not among the top ten, so the report omits it.
         XCTAssertFalse(html.contains("<td>Mac-1</td>"), "Mac-1 (lowest count) is not in the top 10")
         // Table should have the 5 required columns
-        XCTAssertTrue(html.contains("Device Name"))
+        XCTAssertTrue(html.contains("<th>Computer</th>"))
         XCTAssertTrue(html.contains("Serial"))
         XCTAssertTrue(html.contains("Days Since Check-in"))
         XCTAssertTrue(html.contains("Failure Count"))
@@ -462,7 +457,7 @@ final class HtmlReportTests: XCTestCase {
         XCTAssertEqual(HtmlSectionTests.bodyRows(html), 10)
         XCTAssertFalse(html.contains("<details class=\"show-all\""))
         XCTAssertTrue(html.contains("10 more rows are in the workbook."))
-        XCTAssertTrue(html.contains("Top non-compliant devices (20)"))
+        XCTAssertTrue(html.contains("Top non-compliant computers (20)"))
     }
 
     // MARK: - Task 3: Light mode default + print CSS
@@ -580,14 +575,23 @@ final class HtmlReportTests: XCTestCase {
         XCTAssertEqual(days, 1)
     }
 
-    func testDaysAgoFromEmptyStringReturnsNegative() {
-        let report = makeReport()
-        XCTAssertEqual(report.daysAgo(from: ""), -1)
+    func testDaysAgoFromEmptyStringIsNil() {
+        XCTAssertNil(makeReport().daysAgo(from: ""))
     }
 
-    func testDaysAgoFromUnparseable() {
+    func testDaysAgoFromUnparseableIsNil() {
+        XCTAssertNil(makeReport().daysAgo(from: "not-a-date"))
+    }
+
+    func testDaysAgoReadsTheFormatsTheOtherReadersDo() {
         let report = makeReport()
-        XCTAssertEqual(report.daysAgo(from: "not-a-date"), -1)
+        let past = Date().addingTimeInterval(-3 * 86_400 - 3_600)
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "MM/dd/yyyy HH:mm:ss"] {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = format
+            XCTAssertEqual(report.daysAgo(from: formatter.string(from: past)), 3, format)
+        }
     }
 
     // MARK: - Charts are HTML
@@ -711,7 +715,7 @@ final class HtmlReportTests: XCTestCase {
         for templated in [false, true] {
             let tiles = try await renderedTiles(dataDir: dir, templated: templated)
             XCTAssertEqual(tiles.map(\.label),
-                           ["Total Devices", "FileVault", "SIP", "Firewall", "Gatekeeper"])
+                           ["Computers", "FileVault", "SIP", "Firewall", "Gatekeeper"])
             XCTAssertEqual(tiles.map(\.value), ["101", "99.0%", "1.0%", "0.0%", "99.0%"])
             // SIP is NOT_COLLECTED on 100 of the 101 rows: the one Mac that reported it is on.
             XCTAssertEqual(tiles.map(\.cssClass), ["", "ok", "ok", "bad", "ok"],
@@ -732,7 +736,7 @@ final class HtmlReportTests: XCTestCase {
                 firewall: ignore
             """, dataDir: dir, templated: templated)
             XCTAssertEqual(tiles.map(\.label), [
-                "Total Devices", "FileVault", "SIP", "Firewall (not counted)", "Gatekeeper",
+                "Computers", "FileVault", "SIP", "Firewall (not counted)", "Gatekeeper",
             ])
             XCTAssertEqual(tiles.map(\.value), ["101", "99.0%", "1.0%", "0.0%", "99.0%"])
             XCTAssertEqual(tiles.map(\.cssClass), ["", "ok", "ok", "", "ok"],

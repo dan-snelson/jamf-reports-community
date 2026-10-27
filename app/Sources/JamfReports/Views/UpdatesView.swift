@@ -34,7 +34,9 @@ struct UpdatesView: View {
                     expectedKinds: ["update-status", "update-device-failures"]
                 )
             }
-            if snapshot.total == 0 {
+            if snapshot.collectedWithNoData {
+                noUpdateDataState
+            } else if snapshot.total == 0 {
                 emptyState
             } else {
                 kpiGrid
@@ -59,9 +61,13 @@ struct UpdatesView: View {
         }
     }
 
-    private var subtitle: String? {
-        guard snapshot.total > 0 else { return nil }
-        return "\(snapshot.total) device\(snapshot.total == 1 ? "" : "s") tracked for update management."
+    private var subtitle: String? { Self.subtitle(total: snapshot.total) }
+
+    /// `total` counts jamf-cli's update-status records, one per device and update (it
+    /// fetches `/v1/managed-software-updates/update-statuses`), so it is not a device count.
+    nonisolated static func subtitle(total: Int) -> String? {
+        guard total > 0 else { return nil }
+        return "\(total) update status\(total == 1 ? "" : "es"), one per device and update."
     }
 
     // MARK: - Data loading
@@ -113,6 +119,17 @@ struct UpdatesView: View {
 
     // MARK: - Sections
 
+    private var noUpdateDataState: some View {
+        Card(padding: 24) {
+            EmptyStateView(
+                systemImage: "arrow.triangle.2.circlepath",
+                title: "Jamf Pro reports no managed software updates",
+                message: "The latest collection found no update statuses and no update plans, "
+                    + "so there is nothing to chart here."
+            )
+        }
+    }
+
     private var emptyState: some View {
         Card(padding: 24) {
             EmptyStateView(
@@ -120,24 +137,19 @@ struct UpdatesView: View {
                 title: "No update status data yet",
                 message: "Collect data for this screen with the Collect now banner when it "
                     + "shows, or collect the Inventory and Scan tiers from the command line.",
-                commands: [Self.collectCommand(profile: workspace.profile)]
+                commands: [EmptyStateView.collectCommand(
+                    profile: workspace.profile, kinds: ["update-status", "update-device-failures"])]
             )
         }
-    }
-
-    /// `collect` has no default profile; without the flag the pasted command fails
-    /// on a missing `--profile`.
-    nonisolated static func collectCommand(profile: String) -> String {
-        "jamf-reports collect \(ProfileName.profileOption(profile)) --tiers inventory,scan"
     }
 
     private var kpiGrid: some View {
         let columns = [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 12)]
         return LazyVGrid(columns: columns, spacing: 12) {
             StatTile(
-                label: "Total Devices",
+                label: "Update Statuses",
                 value: "\(snapshot.total)",
-                sub: "Tracked for updates"
+                sub: "One per device and update"
             )
             // plan_total is every plan, completed and failed ones included (the
             // donut's percentages divide by it); "Plans Active" misnamed it.
@@ -271,7 +283,7 @@ struct UpdatesView: View {
         if !snapshot.statusBreakdown.isEmpty {
             Card {
                 VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Device Status Summary")
+                    SectionHeader(title: "Update Status Summary")
                     ForEach(snapshot.statusBreakdown) { slice in
                         statusBar(for: slice)
                     }
@@ -297,7 +309,7 @@ struct UpdatesView: View {
                         .foregroundStyle(Theme.Colors.fg)
                 }
                 Spacer()
-                Text("\(slice.count) devices")
+                Text("\(slice.count) status\(slice.count == 1 ? "" : "es")")
                     .font(Theme.Fonts.mono(11))
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                 Text(String(format: "%.1f%%", pct))
@@ -319,7 +331,7 @@ struct UpdatesView: View {
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(slice.label) device status, \(String(format: "%.1f", snapshot.total > 0 ? (Double(slice.count) / Double(snapshot.total)) * 100 : 0)) percent, \(slice.count) devices")
+        .accessibilityLabel("\(slice.label) update status, \(String(format: "%.1f", snapshot.total > 0 ? (Double(slice.count) / Double(snapshot.total)) * 100 : 0)) percent, \(slice.count) update statuses")
     }
 
     private func statusIcon(for status: String) -> String {
@@ -334,7 +346,17 @@ struct UpdatesView: View {
     private var failedPlansCard: some View {
         Card {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Failed Plans", trailing: "\(snapshot.failedPlans.count) total")
+                SectionHeader(
+                    title: "Failed Plans",
+                    trailing: Self.failedPlansTrailing(
+                        listed: snapshot.failedPlans.count, failing: failingPlansCount))
+                if snapshot.failedPlans.count < failingPlansCount {
+                    Text("jamf-cli looks up a random sample of failing plans, not all of them. "
+                        + "The Failing Plans tile counts every one.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Table(Array(snapshot.failedPlans.prefix(50))) {
                     TableColumn("Device") { plan in
                         Text(plan.name)
@@ -438,6 +460,11 @@ struct UpdatesView: View {
     }
 
     // MARK: - Helpers
+
+    /// jamf-cli's --scan-failures samples failing plans (max(10%, 100) by default).
+    nonisolated static func failedPlansTrailing(listed: Int, failing: Int) -> String {
+        listed < failing ? "\(listed) sampled of \(failing)" : "\(listed) total"
+    }
 
     private func pillTone(for state: String) -> Pill.Tone {
         let upper = state.uppercased()

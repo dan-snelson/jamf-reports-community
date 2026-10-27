@@ -1,7 +1,7 @@
 import SwiftUI
 import TipKit
 
-/// Tips for the CSV → Extension Attribute adoption sheet (`CSVEAWalkthroughSheet`).
+/// Tips for the Extension Attribute adoption sheet (`CSVEAWalkthroughSheet`).
 enum WalkthroughTips {
     static let adoptTarget = AdoptTargetTip()
     static let connectedValue = ConnectedValueTip()

@@ -19,7 +19,7 @@ struct MobileFleetView: View {
         PageScaffold {
             PageHeader(
                 kicker: "Mobile",
-                title: "Mobile Fleet",
+                title: "Mobile Devices",
                 subtitle: subtitle,
                 // The demo dataset is frozen on purpose; an age warning on it is noise.
                 lastModified: workspace.demoMode ? nil : snapshot.snapshotDate
@@ -43,8 +43,10 @@ struct MobileFleetView: View {
                 )
             }
 
-            if !snapshot.isDetected {
-                emptyState
+            if snapshot.totalDevices == 0 {
+                // Collected and empty reads differently from never collected.
+                if snapshot.collectedWithNoDevices { noDevicesState } else { emptyState }
+                if !snapshot.profiles.isEmpty { profilesTable }
             } else {
                 kpiGrid
                 supervisionCard
@@ -210,8 +212,26 @@ struct MobileFleetView: View {
             EmptyStateView(
                 systemImage: "ipad.and.iphone",
                 title: "No mobile device data detected",
-                message: "Run `jamf-cli pro mobile-devices list` (and optionally ios-profiles) "
-                    + "to populate this dashboard."
+                message: "Collect data for this screen with the Collect now banner when it shows, "
+                    + "or run this command.",
+                commands: [EmptyStateView.collectCommand(
+                    profile: workspace.profile, kinds: ["mobile-devices-list", "classic-ios-profiles"])]
+            )
+        }
+    }
+
+    private var collectInventoryCommand: String {
+        EmptyStateView.collectCommand(
+            profile: workspace.profile, kinds: [MobileFleetService.deviceKind])
+    }
+
+    private var noDevicesState: some View {
+        Card(padding: 24) {
+            EmptyStateView(
+                systemImage: "ipad.and.iphone",
+                title: "Jamf Pro reports no mobile devices",
+                message: "The latest mobile device collection found none, so there is "
+                    + "nothing to chart here."
             )
         }
     }
@@ -305,8 +325,9 @@ struct MobileFleetView: View {
                     EmptyStateView(
                         systemImage: "questionmark.circle",
                         title: "Collect inventory for KPIs",
-                        message: "Supervision and ownership signals come from "
-                            + "`pro mobile-devices list`."
+                        message: "Supervision and ownership signals come from the full "
+                            + "mobile device inventory.",
+                        commands: [collectInventoryCommand]
                     )
                 } else {
                     HStack(alignment: .top, spacing: 28) {
@@ -339,7 +360,7 @@ struct MobileFleetView: View {
                 outerRadius: .ratio(sliceOuterRatio(for: slice.role)),
                 angularInset: 1.6
             )
-            .foregroundStyle(supervisionColor(for: slice.role))
+            .foregroundStyle(Self.supervisionColor(for: slice.role))
             .opacity(sliceOpacity(for: slice.role))
             .accessibilityLabel(slice.role.label)
             .accessibilityValue("\(slice.count) devices")
@@ -387,7 +408,7 @@ struct MobileFleetView: View {
                 } label: {
                     HStack(spacing: 10) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(supervisionColor(for: slice.role))
+                            .fill(Self.supervisionColor(for: slice.role))
                             .opacity(sliceOpacity(for: slice.role))
                             .frame(width: 12, height: 12)
                         Text(slice.label)
@@ -442,10 +463,11 @@ struct MobileFleetView: View {
         selectedDeviceID = nil
     }
 
-    private func supervisionColor(for role: MobileFleetService.SupervisionRole) -> Color {
+    /// Blue vs orange stays apart for color-blind readers; warn is a status color, not a series.
+    static func supervisionColor(for role: MobileFleetService.SupervisionRole) -> Color {
         switch role {
-        case .supervised: return Theme.Colors.goldBright
-        case .unsupervised: return Theme.Colors.warn
+        case .supervised: return Theme.ChartPalette.supervised
+        case .unsupervised: return Theme.ChartPalette.unsupervised
         // A mid grey rather than a hairline tone: at 12% white the slice
         // almost vanished, and selected it read dimmer than the dimmed ones.
         case .unmanaged: return Theme.Colors.fgMuted
@@ -479,7 +501,8 @@ struct MobileFleetView: View {
                     EmptyStateView(
                         systemImage: "questionmark.circle",
                         title: "Collect inventory for KPIs",
-                        message: "Enrollment method comes from `general.deviceOwnershipType`."
+                        message: "Enrollment method comes from the full mobile device inventory.",
+                        commands: [collectInventoryCommand]
                     )
                 } else if snapshot.enrollmentMethodDistribution.isEmpty {
                     Text("No enrollment method values reported by Jamf Pro for this fleet.")
@@ -557,7 +580,7 @@ struct MobileFleetView: View {
         let total = snapshot.totalDevices
         let result = DashboardChartExport.run(
             title: "iOS / iPadOS Version Distribution",
-            subtitle: "Mobile Fleet",
+            subtitle: "Mobile Devices",
             footnote: "Source: pro mobile-devices · \(total) mobile devices",
             suggestedFilename: DashboardChartExport.filename(for: "mobile-os-distribution", profile: workspace.profile)
         ) {

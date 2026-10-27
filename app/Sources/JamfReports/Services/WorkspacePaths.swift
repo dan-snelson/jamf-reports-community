@@ -39,6 +39,10 @@ enum WorkspacePaths {
         do {
             return try outputDir(for: profile)
         } catch {
+            // A peer can plant a link at the fallback's name; refused, nothing is written.
+            guard let fallback = confinedFolderOrWarn(
+                [generatedReportsDirName], under: workspace,
+                onLine: onLine ?? CLIBridge.noOpOnLine) else { return nil }
             let typed = ((try? configValue(workspace: workspace, section: "output",
                                            key: "output_dir")) ?? nil) as? String ?? ""
             let reason = refusal(of: error, workspace: workspace)
@@ -47,7 +51,7 @@ enum WorkspacePaths {
                 + "workspace instead."
             AppLogger.report.warning("\(msg, privacy: .private)")
             onLine?(.init(timestamp: Date(), level: .warn, text: msg))
-            return workspace.appendingPathComponent(generatedReportsDirName, isDirectory: true)
+            return fallback
         }
     }
 
@@ -100,10 +104,7 @@ enum WorkspacePaths {
             as? String
         let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            let output = try outputDir(for: profile)
-            return output.appendingPathComponent("archive", isDirectory: true)
-                .resolvingSymlinksInPath()
-                .standardizedFileURL
+            return try confinedFolder(["archive"], under: try outputDir(for: profile))
         }
         return try resolve(
             rawValue: trimmed,

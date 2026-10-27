@@ -103,4 +103,50 @@ final class CLIInstallerTests: XCTestCase {
                 + "'/tmp/$(touch pwned)/`id`/a\"b'\\''c/JamfReports' "
                 + "'/opt/$(id)/bin/jamf-reports'")
     }
+
+    // MARK: - relaunchPath
+
+    private func makeApp() throws -> (link: String, real: String) {
+        let macOS = tmp.appendingPathComponent("JamfReports.app/Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        let exe = macOS.appendingPathComponent("JamfReports")
+        try Data().write(to: exe)
+        let link = tmp.appendingPathComponent(CLIInstaller.linkName)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: exe)
+        let real = try XCTUnwrap(realpath(exe.path, nil))
+        defer { free(real) }
+        return (link.path, String(cString: real))
+    }
+
+    func testRelaunchesThroughLinkIntoAppBundle() throws {
+        let app = try makeApp()
+        XCTAssertEqual(
+            CLIInstaller.relaunchPath(bundleIdentifier: nil, executablePath: app.link), app.real)
+    }
+
+    func testNoRelaunchWhenBundleIdentifierIsKnown() throws {
+        let app = try makeApp()
+        XCTAssertNil(CLIInstaller.relaunchPath(
+            bundleIdentifier: "com.tonyyo.jamfreports", executablePath: app.link))
+    }
+
+    func testNoRelaunchForTheRealExecutable() throws {
+        let app = try makeApp()
+        XCTAssertNil(CLIInstaller.relaunchPath(bundleIdentifier: nil, executablePath: app.real))
+    }
+
+    func testNoRelaunchForLinkOutsideAnApp() throws {
+        // `swift run`: .build/debug is a link to the arch folder, with no bundle around it.
+        let link = tmp.appendingPathComponent("debug-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: source)
+        XCTAssertNil(CLIInstaller.relaunchPath(bundleIdentifier: nil, executablePath: link.path))
+    }
+
+    func testNoRelaunchForDanglingLink() throws {
+        let link = tmp.appendingPathComponent("moved")
+        try FileManager.default.createSymbolicLink(
+            at: link, withDestinationURL: tmp.appendingPathComponent("Gone.app/Contents/MacOS/X"))
+        XCTAssertNil(CLIInstaller.relaunchPath(bundleIdentifier: nil, executablePath: link.path))
+        XCTAssertNil(CLIInstaller.relaunchPath(bundleIdentifier: nil, executablePath: nil))
+    }
 }

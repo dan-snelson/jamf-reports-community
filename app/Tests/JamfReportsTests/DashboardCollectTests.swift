@@ -48,7 +48,7 @@ final class DashboardCollectTests: XCTestCase {
     }
 
     func testMatrixRowAndTier() {
-        let row = ReportEngine.collectCommandMatrix(profile: "p", specNames: true, staleDays: 30)
+        let row = ReportEngine.collectCommandMatrix(profile: "p", staleDays: 30)
             .first { $0.kind == ReportEngine.dashboardKind }
         XCTAssertEqual(row?.args, ["-p", "p", "dashboard", "--output", "json"])
         XCTAssertEqual(CollectionTier.tier(forReport: "dashboard"), .inventory)
@@ -73,6 +73,32 @@ final class DashboardCollectTests: XCTestCase {
                        "a name the app can't use is left out")
         XCTAssertEqual(args(ProtectConfig(enabled: true, profile: " prod-protect ")),
                        base + ["--include-profile=prod-protect"])
+    }
+
+    /// A `protect.profile` jamf-cli files under another product is left out with one `[warn]`;
+    /// a Protect login, or one nothing is known about, stays.
+    func testTheDashboardLeavesOutAProtectProfileOfAnotherProduct() async throws {
+        ProfileAuthMethod.invalidateCache()
+        addTeardownBlock { ProfileAuthMethod.invalidateCache() }
+        let protect = ProtectConfig(enabled: true, profile: "dashprof-protect")
+        let bin = binDir.appendingPathComponent("unused")
+
+        try ProductGuardSeed.seed(profile: "dashprof-protect", product: "pro", in: binDir)
+        let lines = ProductGuardLines()
+        let left = await ReportEngine.dashboardProtect(protect, bin: bin, onLine: lines.add)
+        XCTAssertNil(left)
+        XCTAssertEqual(lines.all, ["[warn] dashboard: Protect left out: 'dashprof-protect' is a "
+            + "Jamf Pro profile, not a Jamf Protect profile"])
+
+        ProfileAuthMethod.invalidateCache()
+        try ProductGuardSeed.seed(profile: "dashprof-protect", product: "protect", in: binDir)
+        let kept = await ReportEngine.dashboardProtect(protect, bin: bin, onLine: lines.add)
+        XCTAssertEqual(kept?.profile, "dashprof-protect")
+
+        ProfileAuthMethod.invalidateCache()
+        let unresolved = await ReportEngine.dashboardProtect(protect, bin: bin, onLine: lines.add)
+        XCTAssertEqual(unresolved?.profile, "dashprof-protect", "could not ask is not a refusal")
+        XCTAssertEqual(lines.all.count, 1)
     }
 
     func testTheProtectArgumentIsTheTrailingOneAndOnlyWhenAppended() {
@@ -148,6 +174,17 @@ final class DashboardCollectTests: XCTestCase {
         let store = StateFileStore(directory: try WorkspacePaths.stateDir(for: profile))
         XCTAssertNil(store.lastRun(report: "dashboard"))
         XCTAssertNil(store.failures(report: "dashboard"))
+    }
+
+    func testAJamfCLIBelowTheFloorCollectsNothing() async throws {
+        try answer("version", "jamf-cli version 1.28.0")
+        do {
+            _ = try await runCollect()
+            XCTFail("a jamf-cli below 1.29.0 must not collect")
+        } catch ReportEngineError.jamfCLITooOld(let installed) {
+            XCTAssertEqual(installed, "1.28.0")
+        }
+        XCTAssertFalse(callsLog().contains(" pro "), callsLog())
     }
 
     func testExitSevenLandsThePageWithAWarning() async throws {
@@ -313,6 +350,7 @@ final class DashboardCollectTests: XCTestCase {
         let url = binDir.appendingPathComponent("stub-cli")
         let script = """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         A="\(answers.path)"
         printf '%s\\n' "$*" >> "$A/calls.log"
         case "$*" in

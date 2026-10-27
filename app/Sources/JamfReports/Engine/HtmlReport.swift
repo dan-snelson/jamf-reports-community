@@ -147,7 +147,7 @@ struct HtmlReport: Sendable {
         fleet: SecurityFleetCounts?
     ) -> String {
         let tiles: [(String, String, Double?, SecurityControl?)] = [
-            ("Total Devices", "\(total)", nil, nil),
+            ("Computers", "\(total)", nil, nil),
             ("FileVault", String(format: "%.1f%%", fileVaultPct), fileVaultPct, .fileVault),
             ("SIP", String(format: "%.1f%%", sipPct), sipPct, .sip),
             ("Firewall", String(format: "%.1f%%", firewallPct), firewallPct, .firewall),
@@ -263,7 +263,8 @@ struct HtmlReport: Sendable {
                        : pct >= 80 ? "compliance-hero-amber"
                        : "compliance-hero-red"
         let pctStr = String(format: "%.0f%%", pct)
-        let label = "\(pctStr) Device Compliance &middot; \(failing) of \(total) device\(total == 1 ? "" : "s") have failures"
+        let label = "\(pctStr) Computer Compliance &middot; \(failing) of \(total) "
+            + "computer\(total == 1 ? "" : "s") have failures"
         return """
         <div class="compliance-hero \(colorCls)">
           <div class="compliance-hero-value">\(pctStr)</div>
@@ -277,7 +278,7 @@ struct HtmlReport: Sendable {
     private struct NonCompliantDevice {
         let name: String
         let serial: String
-        let daysSinceCheckin: Int
+        let daysSinceCheckin: Int?
         let failureCount: Int
         let topFailure: String
     }
@@ -351,46 +352,28 @@ struct HtmlReport: Sendable {
         }
         .sorted { lhs, rhs -> Bool in
             if lhs.failureCount != rhs.failureCount { return lhs.failureCount > rhs.failureCount }
-            return lhs.daysSinceCheckin > rhs.daysSinceCheckin
+            return (lhs.daysSinceCheckin ?? -1) > (rhs.daysSinceCheckin ?? -1)
         }
 
         let rows = devices.map { d -> [String] in
-            let daysLabel = d.daysSinceCheckin >= 0 ? "\(d.daysSinceCheckin)" : "—"
+            let daysLabel = d.daysSinceCheckin.map { "\($0)" } ?? "—"
             return [d.name, d.serial, daysLabel, "\(d.failureCount)", d.topFailure]
         }
 
         return HtmlSectionFormatters.block(
             id: "top-noncompliant",
-            title: "Top non-compliant devices (\(devices.count))",
+            title: "Top non-compliant computers (\(devices.count))",
             body: HtmlSectionFormatters.renderCappedTable(
-                headers: ["Device Name", "Serial", "Days Since Check-in", "Failure Count",
+                headers: ["Computer", "Serial", "Days Since Check-in", "Failure Count",
                           "Top Failure"],
                 rows: rows, maxRows: HtmlSectionFormatters.maxNonCompliantRows,
                 expanded: expandAll))
     }
 
-    /// Parse an ISO-8601 or `yyyy-MM-dd` date string and return the number of days since today.
-    /// Returns -1 when the string cannot be parsed.
-    func daysAgo(from raw: String) -> Int {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return -1 }
-        let fmts = ["yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd"]
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        for fmt in fmts {
-            df.dateFormat = fmt
-            if let date = df.date(from: trimmed) {
-                let days = Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? -1
-                return max(days, 0)
-            }
-        }
-        // ISO8601DateFormatter fallback
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso.date(from: trimmed) {
-            return max(Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? -1, 0)
-        }
-        return -1
+    /// Whole days from the date in `raw` to today (0 for a future date); nil when it does not read.
+    func daysAgo(from raw: String) -> Int? {
+        guard let date = DateParser().parse(raw) else { return nil }
+        return Calendar.current.dateComponents([.day], from: date, to: Date()).day.map { max($0, 0) }
     }
 
     // MARK: - Charts
@@ -841,16 +824,6 @@ struct HtmlReport: Sendable {
         if pct >= 95 { return "ok" }
         if pct >= 80 { return "warn" }
         return "bad"
-    }
-
-    func asInt(_ value: Any?) -> Int? {
-        switch value {
-        case let n as Int: return n
-        case let d as Double: return Int(exactly: d.rounded())
-        case let s as String: return Int(s)
-        case let n as NSNumber: return n.intValue
-        default: return nil
-        }
     }
 
     func formattedNow() -> String {

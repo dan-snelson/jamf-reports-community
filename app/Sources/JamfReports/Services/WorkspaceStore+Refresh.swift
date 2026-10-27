@@ -403,21 +403,28 @@ extension WorkspaceStore {
                 "Collect run recorder unavailable — this run will not appear in Run History"
             )
         }
-        do {
-            let exit = try await run(observing(honesty, then: { line in
-                CLIBridge.bufferingOnLine(line)
-                recorder?.record(line.text)
-            }))
-            recorder?.finish(exitCode: exit)
-            return (exit, recorder != nil)
-        } catch {
-            if CLIBridgeError.isCollectRefusal(error) {
-                recorder?.discard()
-            } else {
-                recorder?.record("[error] \(error.localizedDescription)")
-                recorder?.finish(exitCode: 1)
+        // The collect's attention items name this run, so Run History can open on it.
+        return try await AttentionLog.recording(profile: profile) {
+            if let recorder {
+                AttentionLog.current?.record(
+                    into: recorder.statusURL, runLog: recorder.logURL.lastPathComponent)
             }
-            throw error
+            do {
+                let exit = try await run(observing(honesty, then: { line in
+                    CLIBridge.bufferingOnLine(line)
+                    recorder?.record(line.text)
+                }))
+                recorder?.finish(exitCode: exit)
+                return (exit, recorder != nil)
+            } catch {
+                if CLIBridgeError.isCollectRefusal(error) {
+                    recorder?.discard()
+                } else {
+                    recorder?.record("[error] \(error.localizedDescription)")
+                    recorder?.finish(exitCode: 1)
+                }
+                throw error
+            }
         }
     }
 
@@ -568,24 +575,37 @@ extension WorkspaceStore {
 
     /// The kinds `profile` is expected to collect, from the inputs the health
     /// strip reads: the skip-expensive toggle, `jamf_cli.collect_skip`, the
-    /// profile's auth method and the jamf-cli version (for the dashboard).
+    /// profile's auth method and the jamf-cli version (for the dashboard). The Protect kinds are
+    /// expected only where `collect` would run Protect: the pin allows `protect.profile` and
+    /// that login is not another product. Off the main actor: resolving can run `config list`.
     nonisolated static func expectedKinds(
-        profile: String, jamfCLIVersion: String?, auth: ProfileAuthMethod.Resolved?
+        profile: String, jamfCLIVersion: String?, auth: ProfileAuthMethod.Resolved?,
+        protectResolved: (String) -> ProfileAuthMethod.Resolved? = { ProfileAuthMethod.resolve(profile: $0) },
+        protectPinAllows: (String) -> Bool = { SharedConfigPin.protectAllowed(profile: $0) }
     ) -> [String] {
         let config = ProfileService.workspaceURL(for: profile).flatMap {
             try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
         }
-        // A Jamf School workspace runs `schoolCollect`, which lands none of these kinds and
-        // records no per-kind state, so judging it by them only raised alarms (2.10).
+        let protectProfile = ConnectedProducts.read(profile: profile).protectProfile
+        let protectCollected = protectProfile.map {
+            protectPinAllows(profile) && protectResolved($0)?.protectRefusal(profile: $0) == nil
+        } ?? false
+        // A Jamf School workspace runs `schoolCollect`, which lands none of the Jamf Pro kinds,
+        // so judging it by them only raised alarms (2.10). Protect follows a School collect as
+        // it follows a Pro one (2.11), so its kinds still count, and so does `sofa`, which a
+        // School collect fetches as a Pro one does unless `collect_skip` lists it.
         if ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool {
-            return []
+            let skipped = ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip)
+            return (skipped.contains(ReportEngine.sofaKind) ? [] : [ReportEngine.sofaKind])
+                + (protectCollected ? DataFreshnessHealth.protectKinds : [])
         }
         return expectedKinds(
             skipExpensive: UserDefaults.standard.bool(forKey: "skipExpensiveCollections"),
             authMethod: auth?.authMethod,
             tenantLevel: auth?.isTenantLevel == true,
             collectSkip: ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip),
-            dashboardSupported: JamfCLIInstaller.supportsDashboard(jamfCLIVersion)
+            dashboardSupported: JamfCLIInstaller.supportsDashboard(jamfCLIVersion),
+            protectConnected: protectCollected
         )
     }
 
@@ -723,26 +743,5 @@ extension WorkspaceStore {
             .OBJC_ASSOCIATION_RETAIN_NONATOMIC
         )
         return true
-    }
-}
-
-// MARK: - Data-driven tab set
-
-extension Tab {
-    /// True when switching to this tab should trigger a `.refresh`-tier data refresh.
-    ///
-    /// Configuration and log surfaces are excluded: refreshing when the user
-    /// navigates to Schedules or Runs would be noisy and misleading.
-    var isDataDriven: Bool {
-        switch self {
-        case .overview, .fleet, .devices, .deviceLookup, .trends, .audit, .reports,
-             .securityPosture, .compliancePosture, .complianceBenchmarks,
-             .patch, .updates, .ddmBlueprints,
-             .policyProfile, .extensionAttributes,
-             .outreach, .protectDashboard, .mobileFleet, .groupInventory:
-            return true
-        case .schedules, .runs, .config, .customize, .sources, .backups, .settings, .onboarding:
-            return false
-        }
     }
 }

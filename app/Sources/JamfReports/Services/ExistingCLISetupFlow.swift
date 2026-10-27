@@ -278,13 +278,10 @@ final class ExistingCLISetupFlow {
         for name in twinsLeftOut where !policy.excludedProfiles.contains(name) {
             policy.excludedProfiles.append(name)
         }
-        guard enableAutomation else { return policy }
-        policy.isManaged = true
-        policy.scanWeekday = scanWeekday
-        policy.reportsCadence = reportsCadence
-        policy.reportsWeekday = scanWeekday
-        policy.runTime = runTime
-        return policy
+        return AutomationSetupChoice(
+            enabled: enableAutomation, scanWeekday: scanWeekday,
+            reportsCadence: reportsCadence, runTime: runTime
+        ).applied(to: policy)
     }
 
     // MARK: - Run

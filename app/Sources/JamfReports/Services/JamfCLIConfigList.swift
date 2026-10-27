@@ -23,6 +23,12 @@ enum JamfCLIConfigList {
         return !tenant.isEmpty && field("environment-id", in: entry).isEmpty
     }
 
+    /// True when the matching profile names a tenant, whatever its environment. nil when the
+    /// response is unreadable or the profile is absent.
+    nonisolated static func hasTenantID(data: Data, profile: String) -> Bool? {
+        entry(data: data, profile: profile).map { !field("tenant-id", in: $0).isEmpty }
+    }
+
     /// The level of a Platform API profile: environment, tenant, or organization when it names
     /// neither ID (a Jamf Account-only integration, which reaches no Jamf Pro data). nil when
     /// the response is unreadable, the profile is absent, or it is not a platform profile.
@@ -33,6 +39,12 @@ enum JamfCLIConfigList {
         return PlatformScopeLevel.level(
             environmentID: field("environment-id", in: entry),
             tenantID: field("tenant-id", in: entry))
+    }
+
+    /// Every profile name `config list` lists, or nil when the response is unreadable.
+    nonisolated static func names(data: Data) -> [String]? {
+        ((try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]])?
+            .compactMap { $0["name"] as? String }
     }
 
     /// The `config list` row for `profile`, or the `default: true` row when `profile` is empty.

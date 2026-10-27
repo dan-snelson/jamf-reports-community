@@ -9,27 +9,62 @@ final class CollectSourcesPlanTests: XCTestCase {
 
     private func plan(
         _ product: ProfileProductType = .jamfPro, auth: String? = "oauth2",
-        tenantLevel: Bool = false, protect: String? = nil, skip: Set<String> = [],
+        tenantLevel: Bool = false, hasTenantID: Bool = false, protect: String? = nil,
+        skip: Set<String> = [],
         skipExpensive: Bool = false
     ) -> Plan {
         Plan.build(.init(
             product: product, profile: "prod", protectProfile: protect,
             installedVersion: "1.33.0", skipExpensive: skipExpensive, authMethod: auth,
-            tenantLevel: tenantLevel, collectSkip: skip))
+            tenantLevel: tenantLevel, hasTenantID: hasTenantID, collectSkip: skip))
     }
 
-    func testASchoolWorkspaceListsSchoolCommandsOnly() {
-        let school = plan(.jamfSchool, protect: "prod-protect")
+    /// The one other source is SOFA, which a School collect fetches for OS currency.
+    func testASchoolWorkspaceListsSchoolCommandsAndSOFAOnly() {
+        let school = plan(.jamfSchool)
         XCTAssertEqual(school.sources.map(\.kind),
-                       ReportEngine.schoolCommandMatrix(profile: "prod").map(\.kind))
-        XCTAssertTrue(school.sources.allSatisfy { $0.product == .school })
+                       ReportEngine.schoolCommandMatrix(profile: "prod").map(\.kind) + ["sofa"])
+        XCTAssertEqual(plan(.jamfSchool, skip: ["sofa"]).sources.last?.skipReason,
+                       "listed in jamf_cli.collect_skip")
+        XCTAssertEqual(school.sources.filter { $0.product == .platformAPI }.map(\.kind),
+                       [ReportEngine.schoolBlueprintsKind])
+        XCTAssertTrue(school.sources.filter { $0.product != .platformAPI && $0.kind != "sofa" }
+            .allSatisfy { $0.product == .school })
         XCTAssertTrue(school.sources.contains { $0.command == "school devices list" })
         XCTAssertFalse(school.sources.contains { $0.command.hasPrefix("pro ") })
     }
 
+    /// Protect follows a School collect (2.11), so a connected Protect is listed after School.
+    func testASchoolWorkspaceWithProtectListsTheProtectCommands() {
+        let school = plan(.jamfSchool, protect: "prod-protect")
+        XCTAssertEqual(
+            school.sources(for: .protect).map(\.kind),
+            ReportEngine.protectCommandMatrix(profile: "prod-protect").map(\.kind))
+        XCTAssertEqual(school.sources.prefix(ReportEngine.schoolCommandMatrix(profile: "prod")
+            .count).map(\.product).contains(.protect), false)
+    }
+
+    func testSchoolBlueprintsAreSkippedOnlyWhenTheProfileLacksPlatformFields() {
+        func reason(auth: String?, tenant: Bool) -> String?? {
+            plan(.jamfSchool, auth: auth, hasTenantID: tenant).sources
+                .first { $0.kind == ReportEngine.schoolBlueprintsKind }?.skipReason
+        }
+        XCTAssertEqual(
+            reason(auth: "apikey", tenant: false) ?? nil,
+            "the Jamf School profile has no Platform API fields (Data Sources › Add Platform API)")
+        XCTAssertEqual(reason(auth: "apikey", tenant: true), .some(nil))
+        let both = plan(.jamfSchool, auth: "apikey", tenantLevel: false, hasTenantID: true)
+        XCTAssertNil(both.sources.first { $0.kind == ReportEngine.schoolBlueprintsKind }?.skipReason,
+                     "a tenant-id with an environment-id is still a Platform profile for School")
+        XCTAssertEqual(reason(auth: nil, tenant: false), .some(nil), "unresolved collects")
+        let school = plan(.jamfSchool, auth: "apikey")
+        XCTAssertTrue(school.sources.filter { $0.product == .school }
+            .allSatisfy { $0.skipReason == nil })
+    }
+
     func testTheJamfProListIsTheCollectMatrixPlusTheScanAndTheLateSources() {
         let pro = plan()
-        let matrix = ReportEngine.collectCommandMatrix(profile: "prod", specNames: true, staleDays: 30)
+        let matrix = ReportEngine.collectCommandMatrix(profile: "prod", staleDays: 30)
         XCTAssertEqual(
             Array(pro.sources.map(\.kind).prefix(matrix.count)), matrix.map(\.kind),
             "the matrix as collect runs it, in order")
@@ -63,6 +98,17 @@ final class CollectSourcesPlanTests: XCTestCase {
         XCTAssertEqual(protect.map(\.kind),
                        ReportEngine.protectCommandMatrix(profile: "x").map(\.kind))
         XCTAssertEqual(protect.first?.command, "protect overview")
+    }
+
+    func testProtectIsSkippedWithTheReasonWhenTheProfileIsAnotherProduct() {
+        let reason = "'prod-protect' is a Jamf Pro profile, not a Jamf Protect profile"
+        let protect = Plan.build(.init(
+            product: .jamfPro, profile: "prod", protectProfile: "prod-protect",
+            protectRefusal: reason)).sources(for: .protect)
+        XCTAssertFalse(protect.isEmpty)
+        XCTAssertTrue(protect.allSatisfy { $0.skipReason == reason })
+        XCTAssertTrue(plan(protect: "prod-protect").sources(for: .protect)
+            .allSatisfy { $0.skipReason == nil })
     }
 
     func testCollectSkipAndTheSettingsSwitchShowAsSkipped() {

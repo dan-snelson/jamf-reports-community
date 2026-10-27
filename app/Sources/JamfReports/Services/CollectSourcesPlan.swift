@@ -31,12 +31,16 @@ struct CollectSourcesPlan: Equatable, Sendable {
         var product: ProfileProductType
         var profile: String
         var protectProfile: String?
+        /// Why `protectProfile` is not collected (a login of another product), or nil.
+        var protectRefusal: String?
         var staleDays: Int = 30
         var installedVersion: String?
         var skipExpensive = false
         /// `ProfileAuthMethod`'s answer; nil when it could not ask, which skips nothing.
         var authMethod: String?
         var tenantLevel = false
+        /// The profile names a tenant, as a School profile needs for the Platform API.
+        var hasTenantID = false
         var collectSkip: Set<String> = []
     }
 
@@ -47,10 +51,15 @@ struct CollectSourcesPlan: Equatable, Sendable {
     static func build(_ inputs: Inputs) -> CollectSourcesPlan {
         switch inputs.product {
         case .jamfSchool:
-            return CollectSourcesPlan(sources: ReportEngine.schoolCommandMatrix(
-                profile: inputs.profile
-            ).map { Source(product: .school, kind: $0.kind, command: command($0.args),
-                           skipReason: nil) })
+            let plan = ReportEngine.planSchoolCollect(
+                profile: inputs.profile, tiers: Set(CollectionTier.allCases), force: true,
+                platformFieldsMissing: inputs.authMethod != nil && !inputs.hasTenantID
+            ) { _ in nil }
+            return CollectSourcesPlan(sources: plan.map {
+                Source(product: $0.kind == ReportEngine.schoolBlueprintsKind
+                        ? .platformAPI : .school,
+                       kind: $0.kind, command: command($0.args), skipReason: $0.skip.map(text))
+            } + [sofa(inputs)] + protect(inputs))
         case .jamfPro:
             return CollectSourcesPlan(
                 sources: matrix(inputs) + deviceScan(inputs) + afterMatrix(inputs)
@@ -60,9 +69,7 @@ struct CollectSourcesPlan: Equatable, Sendable {
 
     private static func matrix(_ inputs: Inputs) -> [Source] {
         let commands = ReportEngine.collectCommandMatrix(
-            profile: inputs.profile,
-            specNames: JamfCLIInstaller.supportsSpecDerivedNames(inputs.installedVersion),
-            staleDays: inputs.staleDays)
+            profile: inputs.profile, staleDays: inputs.staleDays)
         let plan = ReportEngine.planCollect(
             commands: commands,
             inputs: ReportEngine.CollectPlanInputs(
@@ -85,11 +92,10 @@ struct CollectSourcesPlan: Equatable, Sendable {
     private static func deviceScan(_ inputs: Inputs) -> [Source] {
         let off = inputs.skipExpensive
             ? text(.settingsSkipExpensive) : nil
-        let resource = JamfCLIInstaller.supportsSpecDerivedNames(inputs.installedVersion)
-            ? "declarative-device-management" : "ddm-status"
         return [
             Source(product: .jamfPro, kind: ReportEngine.ddmDeviceStatusKind,
-                   command: "pro \(resource) status-items <management ID>, each DDM-enabled Mac",
+                   command: "pro declarative-device-management status-items <management ID>, "
+                       + "each DDM-enabled Mac",
                    skipReason: off),
             Source(product: .jamfPro, kind: ReportEngine.mdmCommandHealthKind,
                    command: "pro classic-computer-history get <id> --subset commands, each Mac",
@@ -98,22 +104,29 @@ struct CollectSourcesPlan: Equatable, Sendable {
     }
 
     private static func afterMatrix(_ inputs: Inputs) -> [Source] {
-        let reason = text(.collectSkip)
-        func skip(_ kind: String) -> String? { inputs.collectSkip.contains(kind) ? reason : nil }
-        return [
+        [
             Source(product: .jamfPro, kind: ReportEngine.patchReleaseDatesKind,
                    command: "pro patch-software-title-configurations definitions <id>, each title",
-                   skipReason: skip(ReportEngine.patchReleaseDatesKind)),
-            Source(product: .other, kind: ReportEngine.sofaKind,
-                   command: "SOFA macOS and iOS feeds (sofafeed.macadmins.io)",
-                   skipReason: skip(ReportEngine.sofaKind)),
+                   skipReason: inputs.collectSkip.contains(ReportEngine.patchReleaseDatesKind)
+                       ? text(.collectSkip) : nil),
+            sofa(inputs),
         ]
+    }
+
+    /// The one fetch from a third-party host; a Jamf School collect makes it too, for OS
+    /// currency in its daily summary.
+    private static func sofa(_ inputs: Inputs) -> Source {
+        Source(product: .other, kind: ReportEngine.sofaKind,
+               command: "SOFA macOS and iOS feeds (sofafeed.macadmins.io)",
+               skipReason: inputs.collectSkip.contains(ReportEngine.sofaKind)
+                   ? text(.collectSkip) : nil)
     }
 
     private static func protect(_ inputs: Inputs) -> [Source] {
         guard let profile = inputs.protectProfile else { return [] }
         return ReportEngine.protectCommandMatrix(profile: profile).map {
-            Source(product: .protect, kind: $0.kind, command: command($0.args), skipReason: nil)
+            Source(product: .protect, kind: $0.kind, command: command($0.args),
+                   skipReason: inputs.protectRefusal)
         }
     }
 

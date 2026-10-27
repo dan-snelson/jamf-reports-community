@@ -15,7 +15,8 @@ struct Generate: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Generate an xlsx workbook for a profile.",
         discussion: "With html.with_workbook: true in the profile's config.yaml, the HTML "
-            + "report is written beside the workbook, with the same name and a .html extension.")
+            + "report is written beside the workbook, with the same name and a .html extension. "
+            + "A Jamf School workspace writes the School workbook and ignores --template.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Output .xlsx path (default: the workspace's Generated Reports dir).") var output: String?
     @Option(help: "Report template id (default: full-instance).") var template: String?
@@ -40,22 +41,35 @@ struct Generate: AsyncParsableCommand {
         config: ReportConfig, dataDir: URL, template resolved: any ReportTemplate
     ) async throws -> Int {
         let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
+        // A School workspace writes the School workbook whatever the template: the Pro
+        // engine would skip every sheet.
+        let isSchool = ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool
         // Trust signals (Run History record + webhook digest) — best-effort,
         // additive, and mode-consistent with a scheduled jamf-cli-only run.
         // generate does not collect, so it never evaluates metric alerts.
         let signals = CLIRunSignals.begin(profile: profile, kind: .generate, config: config)
-        let outputURL = output.map { URL(fileURLWithPath: $0) }
-            ?? engine.resolveOutputURL(stem: "report", profile: profile,
-                                       onLine: signals.teeing(CLIRun.printLogLine))
+        let outputURL = try output.map { URL(fileURLWithPath: $0) }
+            ?? engine.resolveOutputURL(
+                stem: ExportNaming.reportKind(for: .xlsx, schoolMode: isSchool), profile: profile,
+                onLine: signals.teeing(CLIRun.printLogLine))
         do {
-            let failures = try await engine.generate(
-                csvURL: nil, outputURL: outputURL, template: resolved,
-                onLine: signals.teeing(CLIRun.printLogLine))
+            let onLine = signals.teeing(CLIRun.printLogLine)
+            let failures: [SheetFailure]
+            if isSchool {
+                failures = try await ReportEngine.schoolGenerate(
+                    config: config, dataDir: dataDir, outputURL: outputURL, profile: profile,
+                    onLine: onLine)
+            } else {
+                failures = try await engine.generate(
+                    outputURL: outputURL, template: resolved, onLine: onLine)
+            }
             // html.with_workbook. Before the path below, which stays the last line of
-            // stdout for a script that reads it.
-            await engine.writeHTMLWithWorkbook(
-                besideWorkbook: outputURL, template: resolved,
-                onLine: signals.teeing(CLIRun.printLogLine))
+            // stdout for a script that reads it. There is no School HTML report.
+            if !isSchool {
+                await engine.writeHTMLWithWorkbook(
+                    besideWorkbook: outputURL, template: resolved,
+                    onLine: signals.teeing(CLIRun.printLogLine))
+            }
             // The workbook is written even when some sheets error, so always emit
             // the path (scripts can still find the artifact); exit non-zero to
             // flag partial.
@@ -76,14 +90,26 @@ struct Generate: AsyncParsableCommand {
 }
 
 struct Collect: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Collect jamf-cli snapshots for a profile.")
+    static let configuration = CommandConfiguration(
+        abstract: "Collect jamf-cli snapshots for a profile. A Jamf School workspace collects "
+            + "School data and a Protect-enabled Jamf Pro one also collects Protect; a profile "
+            + "of another product is refused.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Comma-separated collection tiers (refresh,inventory,scan). Default: all.") var tiers: String?
-    @Flag(help: "Collect even if a snapshot was already taken today.") var force = false
+    @Flag(help: ArgumentHelp(
+        "Collect even if the profile was collected recently (Jamf Pro: today; Jamf School: "
+            + "within 12 hours).")) var force = false
+
+    static func refusal(profile: String, config: ReportConfig?) -> String? {
+        CollectRouter.proRunRefusal(profile: profile, operation: "Collect", config: config)
+    }
 
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
         let config = collectRoutingConfig(profile: profile)
+        // Before the run record, the signals and the tick lock: nothing is created for a
+        // profile that belongs to another product.
+        if let refusal = Self.refusal(profile: profile, config: config) { CLIRun.fail(refusal) }
         try await CLIRun.exclusively {
             // Trust signals — a CLI collect now records to Run History, evaluates
             // metric alerts, and posts the notify digest exactly like a snapshot-only
@@ -114,17 +140,27 @@ struct Collect: AsyncParsableCommand {
 
 struct Html: AsyncParsableCommand {
     static let configuration =
-        CommandConfiguration(abstract: "Generate the self-contained HTML report for a profile.")
+        CommandConfiguration(
+            abstract: "Generate the self-contained HTML report for a profile. Refuses a Jamf "
+                + "School workspace, which has no HTML report.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Output .html path (default: the workspace's Generated Reports dir).") var output: String?
+
+    static func refusal(config: ReportConfig, profile: String) -> String? {
+        guard ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool
+        else { return nil }
+        return "'\(profile)' is a Jamf School workspace, which has no HTML report; "
+            + "use `jamf-reports generate` for the School workbook"
+    }
 
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
         if let output { CLIRun.requireSafeOutput(output) }
         let (config, dataDir) = try CLIRun.loadProfile(profile)
+        if let refusal = Self.refusal(config: config, profile: profile) { CLIRun.fail(refusal) }
         // Reuse the xlsx naming convention (timestamp + profile attribution),
         // swapping the extension — there's no HTML-specific path resolver.
-        let defaultURL = ReportEngine(config: config, dataDir: dataDir)
+        let defaultURL = try ReportEngine(config: config, dataDir: dataDir)
             .resolveOutputURL(stem: "report", profile: profile,
                               onLine: output == nil ? CLIRun.printLogLine : nil)
             .deletingPathExtension().appendingPathExtension("html")

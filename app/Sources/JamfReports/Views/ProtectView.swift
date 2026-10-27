@@ -13,6 +13,14 @@ struct ProtectView: View {
     @State private var selectedTimelineDevice: String?
     @State private var connectedProducts = ConnectedProducts.none
     @State private var showingConnect = false
+    @State private var proMatch = ProMatchState.pending
+    @State private var proMatchTask: Task<Void, Never>?
+
+    /// The "Jamf Pro match" card ("Jamf School match" on a School workspace): nothing until the
+    /// match has run, then either the result or the reason there is none.
+    private enum ProMatchState {
+        case pending, noInventory(ProtectProCorrelation.Inventory), ready(ProtectProCorrelation)
+    }
 
     /// Protect is connected to this workspace (`protect.enabled` with a profile). Before 2.10
     /// the screen decided from snapshots on disk alone, so an unconnected workspace was told
@@ -115,6 +123,27 @@ struct ProtectView: View {
             : ProtectDashboardService.load(profile: workspace.profile)
         connectedProducts = workspace.demoMode
             ? .none : ConnectedProducts.read(profile: workspace.profile)
+        reloadProMatch()
+    }
+
+    /// Off the main actor: the `computers` snapshot can be about 13 MB.
+    private func reloadProMatch() {
+        proMatchTask?.cancel()
+        proMatch = .pending
+        guard !snapshot.computers.isEmpty else { return }
+        let protect = snapshot.computers
+        let profile = workspace.profile
+        let demo = workspace.demoMode
+        let school = workspace.isSchoolWorkspace
+        proMatchTask = Task {
+            let result = await Task.detached {
+                ProtectProCorrelation.load(
+                    protect: protect, profile: profile, demoMode: demo, school: school)
+            }.value
+            guard !Task.isCancelled else { return }
+            proMatch = result.map(ProMatchState.ready)
+                ?? .noInventory(school ? .jamfSchool : .jamfPro)
+        }
     }
 
     // MARK: - Sections
@@ -140,6 +169,7 @@ struct ProtectView: View {
         }
         if !snapshot.computers.isEmpty {
             computersCard
+            proMatchCard
         }
         if !snapshot.insights.isEmpty {
             insightsCard
@@ -149,7 +179,7 @@ struct ProtectView: View {
         }
     }
 
-    /// Connected, nothing collected yet: Protect follows each Jamf Pro collect.
+    /// Connected, nothing collected yet: Protect follows each Jamf Pro or Jamf School collect.
     private var emptyState: some View {
         Card(padding: 24) {
             EmptyStateView(
@@ -695,6 +725,132 @@ struct ProtectView: View {
                     .background(Theme.Colors.hairline)
             }
         }
+    }
+
+    // MARK: - Jamf Pro (or Jamf School) match
+
+    private static let proMatchRowLimit = 50
+
+    @ViewBuilder
+    private var proMatchCard: some View {
+        switch proMatch {
+        case .pending:
+            EmptyView()
+        case .noInventory(let inventory):
+            Card {
+                VStack(alignment: .leading, spacing: 8) {
+                    SectionHeader(title: "\(inventory.product) match")
+                    matchExperimentalNote(inventory)
+                    Text(Self.noInventoryText(inventory))
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                }
+            }
+        case .ready(let match):
+            let product = match.inventory.product
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionHeader(title: "\(product) match")
+                    matchExperimentalNote(match.inventory)
+                    Text(Self.matchSummary(match))
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(Theme.Colors.fg)
+                    ForEach(Self.matchNotes(match), id: \.self) { note in
+                        Text(note)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.Text.tertiary(contrast))
+                    }
+                    Text(Self.matchFootnote)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                    if !match.notInPro.isEmpty {
+                        unmatchedList(
+                            title: "Not in \(product)", total: match.notInPro.count,
+                            rows: match.notInPro.prefix(Self.proMatchRowLimit).map {
+                                ($0.hostName ?? "Unknown", $0.serial ?? "—")
+                            })
+                    }
+                    if !match.proWithoutProtect.isEmpty {
+                        unmatchedList(
+                            title: "\(product) Macs without Protect",
+                            total: match.proWithoutProtect.count,
+                            rows: match.proWithoutProtect.prefix(Self.proMatchRowLimit).map {
+                                ($0.displayName, $0.serial.isEmpty ? "—" : $0.serial)
+                            })
+                    }
+                }
+            }
+        }
+    }
+
+    private func unmatchedList(
+        title: String, total: Int, rows: [(name: String, serial: String)]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionHeader(
+                title: title,
+                trailing: total > rows.count ? "Showing \(rows.count) of \(total)" : nil,
+                style: .headline)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 12) {
+                    Text(row.name)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.fg)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(row.serial)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func matchExperimentalNote(_ inventory: ProtectProCorrelation.Inventory) -> some View {
+        if inventory == .jamfSchool {
+            Text(Self.schoolMatchExperimentalText)
+                .font(.caption)
+                .foregroundStyle(Theme.Text.tertiary(contrast))
+        }
+    }
+
+    nonisolated static let schoolMatchExperimentalText =
+        "Experimental: Jamf Protect with Jamf School."
+
+    nonisolated static func noInventoryText(
+        _ inventory: ProtectProCorrelation.Inventory
+    ) -> String {
+        "Collect \(inventory.product) inventory to match Protect computers to "
+            + "\(inventory.product)."
+    }
+    nonisolated static let matchFootnote =
+        "Matched by hardware UUID or serial number, never by name."
+
+    nonisolated static func matchSummary(_ match: ProtectProCorrelation) -> String {
+        let many = match.protectCount != 1
+        return "\(match.matched) of \(match.protectCount) Protect computer\(many ? "s" : "") "
+            + "match\(many ? "" : "es") a \(match.inventory.product) computer."
+    }
+
+    /// One line per nonzero count, singular or plural.
+    nonisolated static func matchNotes(_ match: ProtectProCorrelation) -> [String] {
+        func protectLine(_ count: Int, one: String, many: String) -> String? {
+            count == 0 ? nil : "\(count) Protect computer\(count == 1 ? " " + one : "s " + many)"
+        }
+        let proCount = match.proWithoutProtect.count
+        let product = match.inventory.product
+        return [
+            protectLine(match.notInPro.count, one: "has no \(product) record.",
+                        many: "have no \(product) record."),
+            proCount == 0 ? nil : "\(proCount) \(product) Mac\(proCount == 1 ? " has" : "s have") "
+                + "no Protect record.",
+            protectLine(match.ambiguous,
+                        one: "matches more than one \(product) computer and is not counted.",
+                        many: "match more than one \(product) computer and are not counted."),
+            protectLine(match.noIdentifier, one: "reports no UUID or serial.",
+                        many: "report no UUID or serial."),
+        ].compactMap { $0 }
     }
 
     private func booleanPill(_ value: Bool?, trueLabel: String, falseLabel: String) -> some View {

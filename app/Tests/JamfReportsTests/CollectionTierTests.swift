@@ -7,51 +7,30 @@ final class CollectionTierLookupTests: XCTestCase {
 
     // MARK: - jamf-cli 1.29 resource names
 
-    /// The device-enrollments row switches spelling with the installed version; its on-disk
-    /// kind never does. The 1.29 name exits 2 on older binaries and the old name
-    /// stops working after 2027-03-09, so both spellings must be reachable.
-    func testMatrixUsesSpecDerivedNamesOnlyWhenSupported() {
-        func argv(_ kind: String, specNames: Bool) -> [String]? {
-            ReportEngine.collectCommandMatrix(profile: "p", specNames: specNames, staleDays: 30)
-                .first { $0.kind == kind }?.args
-        }
-        XCTAssertEqual(argv("device-enrollment-instances", specNames: true),
-                       ["-p", "p", "pro", "device-enrollments", "list", "--output", "json"])
-        XCTAssertEqual(argv("device-enrollment-instances", specNames: false),
-                       ["-p", "p", "pro", "device-enrollment-instances", "list",
-                        "--output", "json"])
-        let kinds = { (specNames: Bool) in
-            ReportEngine.collectCommandMatrix(
-                profile: "p", specNames: specNames, staleDays: 30).map(\.kind)
-        }
-        XCTAssertEqual(kinds(true), kinds(false), "the flag changes argv, never a kind name")
+    /// The device-enrollments row uses jamf-cli 1.29's name; its on-disk kind keeps the old one.
+    func testMatrixUsesSpecDerivedNames() {
+        XCTAssertEqual(
+            ReportEngine.collectCommandMatrix(profile: "p", staleDays: 30)
+                .first { $0.kind == "device-enrollment-instances" }?.args,
+            ["-p", "p", "pro", "device-enrollments", "list", "--output", "json"])
     }
 
-    /// Mobile devices are fetched once, with the sections the readers use, by the one
-    /// spelling every supported jamf-cli has (`pro mobile-devices list --section ...` was
-    /// verified on 1.18 through 1.29), so the row is not gated on the version.
+    /// Mobile devices are fetched once, with the sections the readers use.
     /// APPLICATIONS is not requested.
     func testMobileDevicesAreFetchedOnceWithTheSectionsTheReadersUse() {
         let sections = ["--section", "GENERAL", "--section", "HARDWARE",
                         "--section", "SECURITY", "--section", "USER_AND_LOCATION"]
-        let argv = { (specNames: Bool) -> [String]? in
-            ReportEngine.collectCommandMatrix(profile: "p", specNames: specNames, staleDays: 30)
-                .first { $0.kind == "mobile-devices-list" }?.args
-        }
+        let matrix = ReportEngine.collectCommandMatrix(profile: "p", staleDays: 30)
         let expected = ["-p", "p", "pro", "mobile-devices", "list"] + sections
             + ["--output", "json"]
-        XCTAssertEqual(argv(true), expected)
-        XCTAssertEqual(argv(false), expected, "no spelling gate: `specNames` never matters here")
+        XCTAssertEqual(matrix.first { $0.kind == "mobile-devices-list" }?.args, expected)
         XCTAssertEqual(ReportEngine.mobileInventorySections,
                        ["GENERAL", "HARDWARE", "SECURITY", "USER_AND_LOCATION"])
-        for specNames in [true, false] {
-            let mobileRows = ReportEngine.collectCommandMatrix(
-                profile: "p", specNames: specNames, staleDays: 30)
-                .filter { $0.args.contains("mobile-devices")
-                    || $0.args.contains("mobile-device-inventory-details") }
-            XCTAssertEqual(mobileRows.map(\.kind), ["mobile-devices-list"],
-                           "one mobile fetch, specNames \(specNames)")
+        let mobileRows = matrix.filter {
+            $0.args.contains("mobile-devices")
+                || $0.args.contains("mobile-device-inventory-details")
         }
+        XCTAssertEqual(mobileRows.map(\.kind), ["mobile-devices-list"], "one mobile fetch")
     }
 
     /// The `mobile-device-inventory-details` kind is gone from collect, the tier map and the
@@ -67,7 +46,7 @@ final class CollectionTierLookupTests: XCTestCase {
     }
 
     func testComputersListAsksForTheSectionsTheDevicesScreenReads() {
-        let argv = ReportEngine.collectCommandMatrix(profile: "p", specNames: true, staleDays: 30)
+        let argv = ReportEngine.collectCommandMatrix(profile: "p", staleDays: 30)
             .first { $0.kind == "computers" }?.args ?? []
         XCTAssertEqual(argv, ["-p", "p", "pro", "computers", "list", "--section",
                               ReportEngine.computerInventorySections, "--output", "json"])
@@ -76,14 +55,11 @@ final class CollectionTierLookupTests: XCTestCase {
         }
     }
 
-    func testStatusItemsArgumentsFollowTheSameGate() {
+    func testStatusItemsArgumentsUseSpecDerivedNames() {
         XCTAssertEqual(
-            ReportEngine.statusItemsArguments(profile: "p", managementId: "m", specNames: true),
+            ReportEngine.statusItemsArguments(profile: "p", managementId: "m"),
             ["-p", "p", "pro", "declarative-device-management", "status-items", "m",
              "--output", "json"])
-        XCTAssertEqual(
-            ReportEngine.statusItemsArguments(profile: "p", managementId: "m", specNames: false),
-            ["-p", "p", "pro", "ddm-status", "status-items", "m", "--output", "json"])
     }
 
     // MARK: - Total lookup contract

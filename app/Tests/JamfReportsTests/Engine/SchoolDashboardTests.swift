@@ -117,26 +117,6 @@ final class SchoolDashboardTests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, "No unexpected failures expected for valid fixture data")
     }
 
-    // MARK: - SchoolCSVDashboard nil-init on empty data
-
-    func testSchoolCSVDashboardNilOnEmpty() {
-        let result = SchoolCSVDashboard(
-            config: ReportConfig(),
-            csvData: Data(),
-            workbook: Workbook()
-        )
-        XCTAssertNil(result)
-    }
-
-    func testSchoolCSVDashboardNonNilOnData() {
-        let result = SchoolCSVDashboard(
-            config: ReportConfig(),
-            csvData: Data("name,serial\nfoo,bar".utf8),
-            workbook: Workbook()
-        )
-        XCTAssertNotNil(result)
-    }
-
     // MARK: - iBeacons fixture data validates expected columns
 
     func testIBeaconsFixtureDecodesExpectedFields() throws {
@@ -489,6 +469,23 @@ final class SchoolDashboardTests: XCTestCase {
                        "days-since-checkin parses jamf-cli's \"yyyy-MM-dd HH:mm:ss\" format")
     }
 
+    func testStaleDevicesLeavesOutACheckinThatDoesNotRead() throws {
+        let json = """
+        [{"name": "Odd-1", "serialNumber": "S1", "lastCheckin": "yesterday-ish"},
+         {"name": "Blank-2", "serialNumber": "S2", "lastCheckin": ""},
+         {"name": "Old-3", "serialNumber": "S3", "lastCheckin": "\(schoolCheckinString(daysAgo: 60))"}]
+        """
+        let dataDir = try tempDataDir(writing: json, kind: "school-devices")
+        let workbook = Workbook()
+        let dash = SchoolDashboard(config: ReportConfig(), dataDir: dataDir, workbook: workbook)
+        XCTAssertNoThrow(try dash.writeSchoolStaleDevices())
+        let cells = strings(in: "Stale Devices", of: workbook)
+        XCTAssertTrue(cells.contains("Old-3"))
+        XCTAssertFalse(cells.contains("Odd-1"), "an unknown age is not 0 days or stale")
+        XCTAssertFalse(cells.contains("Blank-2"))
+        XCTAssertEqual(ints(in: "Stale Devices", of: workbook).filter { $0 == 0 }, [])
+    }
+
     func testClassesCountOutsideIntRangeReadsAsZero() throws {
         let json = #"[{"name": "A", "studentCount": 1e30, "teacherCount": 2.9}]"#
         let dataDir = try tempDataDir(writing: json, kind: "school-classes")
@@ -498,5 +495,190 @@ final class SchoolDashboardTests: XCTestCase {
         let counts = ints(in: "Classes", of: workbook)
         XCTAssertTrue(counts.contains(0), "1e30 is no count; Int(_:) would trap")
         XCTAssertTrue(counts.contains(2), "a fractional count still truncates")
+    }
+}
+
+final class SchoolDashboardSheetNamesTests: XCTestCase {
+    /// The Generate sheet lists `sheetNames`; the workbook writes `sheetPlan`.
+    func test_sheetNames_matchTheSheetPlan() {
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
+            workbook: Workbook())
+        XCTAssertEqual(dash.sheetPlan.map(\.name), SchoolDashboard.sheetNames)
+    }
+}
+
+/// Experimental: the Blueprints tab reads `school-blueprints` (BlueprintOverview rows).
+final class SchoolBlueprintsSheetTests: XCTestCase {
+    private func dataDir(_ json: String) throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-bp-\(UUID().uuidString)")
+        let kind = tmp.appendingPathComponent("school-blueprints", isDirectory: true)
+        try FileManager.default.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data(json.utf8).write(to: kind.appendingPathComponent("school-blueprints_fixture.json"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: tmp) }
+        return tmp
+    }
+
+    func test_blueprintsSheet_readsOverviewRows_andToleratesMissingOptionals() throws {
+        let json = """
+        [
+          {"id": "b1", "name": "Update software", "description": "Keep current",
+           "deploymentState": {"state": "OUT_OF_DATE",
+             "lastDeployment": {"started": "2026-10-01T16:35:00Z", "state": "SUCCEEDED"}},
+           "created": "2026-09-01T12:00:00Z", "updated": "2026-10-02T09:00:00Z"},
+          {"id": "b2", "name": "Fresh",
+           "deploymentState": {"state": "NOT_DEPLOYED"},
+           "created": "2026-10-03T12:00:00Z", "updated": "2026-10-03T12:00:00Z"}
+        ]
+        """
+        let workbook = Workbook()
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: try dataDir(json), workbook: workbook)
+        XCTAssertNoThrow(try dash.writeSchoolBlueprints())
+        let cells = (workbook.sheet(named: "Blueprints")?.dedupedCells ?? []).compactMap {
+            if case let .string(s) = $0.value { return s } else { return nil }
+        }
+        for expected in ["Name", "State", "Last deployed", "Created", "Updated",
+                         "Update software", "Out of date", "2026-10-01T16:35:00Z",
+                         "Fresh", "Not deployed", "2026-10-03T12:00:00Z"] {
+            XCTAssertTrue(cells.contains(expected), expected)
+        }
+    }
+
+    func test_blueprintsSheet_isSkippedWithoutASnapshot() {
+        let empty = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-bp-none-\(UUID().uuidString)")
+        let dash = SchoolDashboard(config: ReportConfig(), dataDir: empty, workbook: Workbook())
+        XCTAssertThrowsError(try dash.writeSchoolBlueprints())
+    }
+
+    func test_sheetNames_areTheOldListPlusBlueprintsAndTrends() {
+        let old = ["School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles",
+                   "Locations", "DEP Devices", "iBeacons", "Device Inventory", "OS Versions",
+                   "Device Status", "Stale Devices"]
+        var expected = old
+        expected.insert("Blueprints", at: old.firstIndex(of: "Device Inventory") ?? 0)
+        XCTAssertEqual(SchoolDashboard.sheetNames,
+                       expected + ["Trends"] + CoreDashboard.protectSheetNames)
+    }
+}
+
+/// Protect works with Jamf School (2.11): the School workbook carries the Jamf Pro workbook's
+/// Protect tabs, under the same names and the same protect.enabled gate.
+final class SchoolDashboardProtectSheetTests: XCTestCase {
+    private func dataDir() throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-school-protect-\(UUID().uuidString)")
+        let kind = tmp.appendingPathComponent("protect-alerts", isDirectory: true)
+        try FileManager.default.createDirectory(at: kind, withIntermediateDirectories: true)
+        try Data(#"""
+        [{"computer":"lab-mac-01","created":"2026-10-01T08:00:00.000Z","eventType":"GPFSEvent",
+          "severity":"High","status":"New","uuid":"a1"}]
+        """#.utf8).write(to: kind.appendingPathComponent("protect-alerts_fixture.json"))
+        addTeardownBlock { try? FileManager.default.removeItem(at: tmp) }
+        return tmp
+    }
+
+    func test_protectTabs_haveTheProWorkbookNames() {
+        let pro = CoreDashboard(config: ReportConfig(), dataDir: FileManager.default
+            .temporaryDirectory, workbook: Workbook()).sheetPlan.map(\.name)
+        XCTAssertEqual(pro.filter { $0.hasPrefix("Protect ") }, CoreDashboard.protectSheetNames)
+        XCTAssertEqual(Array(SchoolDashboard.sheetNames.suffix(6)), CoreDashboard.protectSheetNames)
+    }
+
+    func test_protectTabs_areWrittenOnlyWhileProtectIsEnabled() throws {
+        let dir = try dataDir()
+        let on = Workbook()
+        let config = try ConfigLoader.loadFromString(
+            "school_cli:\n  enabled: true\nprotect:\n  enabled: true\n  profile: p\n")
+        SchoolDashboard(config: config, dataDir: dir, workbook: on).writeAll()
+        XCTAssertNotNil(on.sheet(named: "Protect Alerts"))
+        XCTAssertNotNil(on.sheet(named: "Protect Threat Overview"))
+
+        let off = Workbook()
+        let schoolOnly = try ConfigLoader.loadFromString("school_cli:\n  enabled: true\n")
+        let (_, failures) = SchoolDashboard(config: schoolOnly, dataDir: dir, workbook: off)
+            .writeAll()
+        XCTAssertNil(off.sheet(named: "Protect Alerts"))
+        XCTAssertEqual(failures.map(\.sheet), [])
+    }
+
+    // MARK: - Trends
+
+    private func trendDay(
+        _ date: String, macs: Int, stale: Int?, osCurrent: Double?, mobile: MobileSummary?
+    ) -> DailySummary {
+        DailySummary(
+            date: date, totalDevices: macs, fileVaultPct: nil, compliancePct: nil,
+            staleCount: stale, osCurrentPct: osCurrent, crowdstrikePct: nil, patchPct: nil,
+            source: "jamf-cli", mobileDeviceCount: mobile.map { $0.managed + $0.unmanaged },
+            mobile: mobile)
+    }
+
+    /// Row cells of the Trends tab below its header, by row, as written.
+    private func trendRows(_ workbook: Workbook) throws -> [[CellValue]] {
+        let cells = try XCTUnwrap(workbook.sheet(named: "Trends")).dedupedCells
+        let header = try XCTUnwrap(cells.first { cell in
+            if case .string("Date") = cell.value { return true } else { return false }
+        }).row
+        return Dictionary(grouping: cells.filter { $0.row > header }, by: \.row)
+            .sorted { $0.key < $1.key }
+            .map { $0.value.sorted { $0.col < $1.col }.map(\.value) }
+    }
+
+    func testTrendsTabHasOneRowPerSummaryNewestFirstWithEachTypeApart() throws {
+        let workbook = Workbook()
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
+            workbook: workbook, summaries: [
+                trendDay("2026-10-18", macs: 0, stale: nil, osCurrent: nil, mobile: MobileSummary(
+                    managed: 4, unmanaged: 0, supervised: .init(met: 3, of: 4), stale: 1)),
+                trendDay("2026-10-19", macs: 2, stale: 1, osCurrent: 50, mobile: nil),
+            ])
+        try dash.writeSchoolTrends()
+
+        let rows = try trendRows(workbook)
+        XCTAssertEqual(rows.count, 2)
+        guard case .string("2026-10-19") = rows[0][0] else { return XCTFail("\(rows[0])") }
+        func describe(_ row: [CellValue]) -> [String] {
+            row.map {
+                switch $0 {
+                case .blank: return "-"
+                case .int(let n): return "\(n)"
+                case .double(let d): return "\(d)"
+                case .string(let t): return t
+                case .bool(let b): return "\(b)"
+                }
+            }
+        }
+        XCTAssertEqual(describe(rows[0]),
+                       ["2026-10-19", "2", "1", "0.5", "-", "-", "-", "-", "-", "-", "-"],
+                       "a Mac-only day leaves every mobile column blank")
+        XCTAssertEqual(describe(rows[1]),
+                       ["2026-10-18", "-", "-", "-", "4", "4", "1", "3", "4", "0.75", "-"],
+                       "a mobile-only day leaves the Mac columns blank, never 0")
+        XCTAssertEqual(rows[0].count, SchoolDashboard.trendColumns.count)
+    }
+
+    func testTrendsTabIsSkippedWithNoSummaries() throws {
+        let workbook = Workbook()
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
+            workbook: workbook)
+        XCTAssertThrowsError(try dash.writeSchoolTrends()) { XCTAssertTrue($0 is SheetSkippable) }
+        XCTAssertNil(workbook.sheet(named: "Trends"))
+    }
+
+    func testTrendsTabComesAfterTheExistingSchoolTabsAndFollowsSheetsSkip() throws {
+        let dash = SchoolDashboard(
+            config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
+            workbook: Workbook())
+        let names = dash.sheetPlan.map(\.name)
+        XCTAssertEqual(names, SchoolDashboard.sheetNames)
+        XCTAssertEqual(names.firstIndex(of: "Trends"), names.firstIndex(of: "Stale Devices")! + 1)
+        let skipped = SheetsConfig(only: nil, skip: ["Trends"], order: nil)
+            .applyTo(dash.sheetPlan).map(\.name)
+        XCTAssertFalse(skipped.contains("Trends"))
     }
 }

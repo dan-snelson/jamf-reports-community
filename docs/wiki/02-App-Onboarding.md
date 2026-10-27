@@ -31,10 +31,18 @@ that existed before setup is never touched. When the profile cannot be removed, 
 open and names the command to run. The cards already chose the connection type, so the
 Authenticate step does not ask for it again on this path.
 
-After setup finishes the chooser does not reappear. To set up additional tenants
-later, open the **workspace switcher** at the bottom of the sidebar and choose **Add
-workspace…**, or click **Settings → jamf-cli → Connections → Add connection**. Both
-routes start the same onboarding flow.
+After setup finishes the chooser does not reappear. To add more later, open the **workspace
+switcher** at the bottom of the sidebar and choose **Add workspace or product…**, or click
+**Settings → jamf-cli → Connections → Add connection**. Both open the same **Add** sheet:
+
+- **New workspace**: Jamf Pro (OAuth2), Platform API or Jamf School. **Connect new** starts
+  that product's onboarding.
+- **Add to** the current workspace: Jamf Protect, on a Jamf Pro or (experimental) Jamf School
+  workspace.
+- **Profiles jamf-cli already has**: the sheet reads jamf-cli's profiles when it opens and on
+  **Re-check**, and lists the ones no workspace uses, including profiles made in Terminal since
+  the app started. **Set up workspace** creates the workspace and runs its first collection; a
+  Jamf Protect profile is added to the current workspace.
 
 ## When jamf-cli is already set up
 
@@ -105,8 +113,8 @@ profile has a workspace, for example after the workspace folder is emptied.
    collects one profile per fleet: when both reach the same Jamf Pro, setup keeps the Platform
    API profile, notes the OAuth one as "same Jamf Pro as ...", and leaves it out unless you tick
    it. The secret is passed to `jamf-cli` over a controlling TTY and cleared immediately; the
-   app never persists it. `jamf-cli` keeps the credentials in the macOS keychain and caches
-   tokens on disk. An organization-level integration is not accepted: it reaches only Jamf
+   app never persists it. Setup has `jamf-cli` store the credentials in the macOS keychain, and
+   tokens are cached on disk. An organization-level integration is not accepted: it reaches only Jamf
    Account, so create an environment-level one. For a Platform API connection, create the
    integration in Jamf
    Account first — at the platform environment level, scoped to one environment, with
@@ -119,23 +127,30 @@ profile has a workspace, for example after the workspace folder is emptied.
    with no Jamf Pro (probably a Jamf School tenant; the banner offers **Set up Jamf
    School**); see
    [Check the scope ID](https://github.com/tonyyo11/jamf-reports-community/wiki/13-Permissions-and-Access#check-the-scope-id).
-6. **CSV mapping** — optionally pick a Jamf Pro CSV export. The app scaffolds a
-   `config.yaml` with best-guess column mappings from the export's headers. You can also
-   **Skip for now** — the app writes a minimal config and works from `jamf-cli` data
-   alone (see [Running without a CSV](#running-without-a-csv)).
-7. **Add products (optional)** — if you use Jamf Protect, connect it here
+6. **Add products (optional)** — if you use Jamf Protect, connect it here
    (`protect setup`); it augments the Jamf Pro reports. You can also add
    it later from the **Data Sources** screen, where **Disconnect** turns it off again (it
    leaves the jamf-cli profile in jamf-cli). (Jamf School is never added to a Jamf Pro
    workspace; a Jamf School district should instead
    pick **Connect Jamf School** on the Welcome chooser, which runs the dedicated School path
    below — no Jamf Pro placeholder credentials.)
-8. **First report** — for Jamf Pro, the app collects a snapshot (refresh and inventory
+7. **First report** — for Jamf Pro, the app collects a snapshot (refresh and inventory
    data, not the per-device scans) and then generates a first report, so the
    dashboards have data to render; the per-device scans run later on schedule or via
    Collect now on Overview. For Jamf School, this step only generates. If the output
    looks off you can **Skip & finish setup** — the workspace is fully configured at this
    point and you can run reports later from the Reports tab.
+
+   The same step carries two last choices, applied when setup finishes (by the first
+   report or by **Skip & finish setup**). **Run automatically** is on by default and is the
+   same choice the adopt-existing-profiles screen offers: it turns on managed automation
+   (a daily collect, a weekly deep scan and reports on the day and time you pick) and
+   registers the background item, so you do not have to open Automation first. Untick it
+   to leave automation as it is; an automation setup you already have is never switched off
+   or changed. **Webhook (optional)** takes a Teams or Slack incoming-webhook URL; leave it
+   empty to skip. Only an `https://` URL is saved, as the workspace's `notify:` block with
+   full detail, and you can change it later under Automation › Notifications. Both apply
+   when setup was started from demo mode too, since setup creates a real profile.
 
 ### Adding more environments from the same integration
 
@@ -154,7 +169,7 @@ profile in none offers **Start a connection**).
    each profile the way onboarding does (the secret goes over a controlling TTY and is
    cleared when the run ends or the sheet closes) and runs the connection check for each ID.
 4. The list shows one result per ID. An environment where Jamf Pro answers gets a workspace
-   (the same minimal config.yaml as skipping CSV mapping) and joins the connection. An
+   (with a minimal config.yaml) and joins the connection. An
    environment where no Jamf Pro answers is not added: its MDM is probably Jamf School, which
    is read with a School API key in a Jamf School workspace (the result offers **Add Jamf
    School workspace…**). A rejected or unconfirmed ID is not added either.
@@ -170,14 +185,16 @@ credentials, and the app never keeps the secret.
 ### The Jamf School path
 
 Choosing **Connect Jamf School** on the Welcome chooser runs a shorter sequence — Welcome,
-Install CLI, Workspace, Workspace config, **Connect School**, First report — skipping the Jamf
-Pro Authenticate, Validate, and Add-products steps. Workspace config writes config.yaml and
-maps no CSV: Jamf School reports come from jamf-cli. The Connect School step registers a
+Install CLI, Workspace, **Connect School**, First report — skipping the Jamf
+Pro Authenticate, Validate, and Add-products steps. Jamf School reports come from jamf-cli.
+The Connect School step registers a
 `jamf-cli school` profile (School URL + Network ID + API key, passed over stdin and cleared)
 and wires `school_cli.enabled`/`profile` into the workspace config, so the first report and
 every later collect route to the Jamf School engine. jamf-cli must still be installed to get
-past the Install CLI step, but no Jamf Pro credentials are entered. Jamf School support ships
-community-validated — the maintainer has no Jamf School tenant to test against, so please
+past the Install CLI step, but no Jamf Pro credentials are entered. An optional, experimental
+switch on the same step, **Do you also have Platform API configured for Jamf School?**, adds
+the Platform API region, tenant ID, client ID and secret to the same School profile (never a
+profile of its own) and checks them by listing blueprints once. Please
 [open an issue or pull request](https://github.com/tonyyo11/jamf-reports-community/issues) if
 something looks off. See
 [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School) for the
@@ -192,7 +209,7 @@ whatever folder **Settings → Workspace location** points at, if you have moved
 
 ```text
 ~/Jamf-Reports/<profile>/
-├── config.yaml          # column mappings, thresholds, scoring weights
+├── config.yaml          # thresholds, scoring weights, Extension Attributes
 ├── jamf-cli-data/        # cached JSON snapshots from jamf-cli
 ├── snapshots/
 │   └── computers/
@@ -209,7 +226,7 @@ folder and re-authenticate that profile with `jamf-cli platform setup --profile-
 (a gateway profile) or `jamf-cli pro setup --url <url> --profile-name <profile>` (an OAuth
 profile). Changing the
 workspace location does **not** move existing data — copy `config.yaml` and `snapshots/`
-across yourself; Run check on the Config screen says when more history for a profile is
+across yourself; Config Doctor (Audit → Config) says when more history for a profile is
 sitting in the folder you left behind.
 
 ## First-run checklist
@@ -221,23 +238,25 @@ on an Intel Mac, build from source instead.
 - [ ] `jamf-cli` installed (`brew install Jamf-Concepts/tap/jamf-cli`)
 - [ ] Jamf Pro URL, API client ID, and secret on hand
 - [ ] `JamfReports.app` in `/Applications`, first launch past Gatekeeper
-- [ ] Profile created through **Add workspace…** → onboarding
+- [ ] Profile created through **Add connection** → New workspace → onboarding
 - [ ] Authentication succeeded (Validate step passed)
 - [ ] First report generated and opened cleanly
 - [ ] `~/Jamf-Reports/<profile>/jamf-cli-data/` contains JSON files
 
-## Running without a CSV
+## What the reports need
 
-A Jamf Pro CSV export is **optional**. With `jamf-cli` data alone the app renders Fleet
-Overview, Security Posture, Compliance Posture, Patch Compliance, OS Updates, Policies &
-Profiles, Extension Attributes, Mobile Fleet, and more — enough for every report
-template.
+Reports are built from `jamf-cli` data. The app renders Fleet Overview, Security Posture,
+Compliance Posture, Patch Compliance, OS Updates, Policies & Profiles, Extension
+Attributes, Mobile Devices, and more — enough for every report template. There is no CSV step
+in setup and no CSV report mode (retired in 2.11).
 
-A CSV export adds the sheets that depend on per-device export columns: Stale Devices,
-per-device Security Controls, the Security Agents matrix, per-device compliance
-failure lists, and custom Extension Attribute sheets. If your tenant has not configured
-those EAs in Jamf Pro, a CSV cannot add them either. Drop a CSV in any time from the
-**Data Sources** screen and regenerate.
+Custom Extension Attribute sheets and security agent coverage come from the Extension
+Attribute values jamf-cli collected. After the first collect, open **Extension Attributes → Adopt
+EAs…** (or **Data Sources → Adopt EAs**), pick the ones to track and the app adds them to
+`config.yaml`. If your tenant has not configured those EAs in Jamf Pro, there is nothing to
+adopt. The same sheet can import a Jamf Pro CSV export once to suggest EAs; the file is read
+once and only the `config.yaml` entries are kept. See
+[Custom EA Examples](https://github.com/tonyyo11/jamf-reports-community/wiki/12-Custom-EA-Examples).
 
 ## Running without jamf-cli credentials
 
@@ -252,9 +271,9 @@ local `jamf-cli` config write (on jamf-cli 1.29 and later the app passes `--no-v
 keep it that way; from a Terminal, add that flag yourself). The Validate step that follows
 runs a real connection check and will report failure against placeholder values — but
 advancing past it only requires that the profile registered, not that the check passed. So
-a CSV-only admin can complete onboarding with placeholder Jamf Pro values and map a CSV at
-the CSV-mapping step. (A Jamf School-only admin can skip this placeholder workaround
-entirely by choosing **Connect Jamf School** on the Welcome chooser.)
+you can finish onboarding with placeholder Jamf Pro values and add real credentials later.
+(A Jamf School-only admin can skip this placeholder workaround entirely by choosing
+**Connect Jamf School** on the Welcome chooser.)
 
 To add real credentials later, open **Data Sources → Connection health → Update
 credentials…** — it re-registers the profile's jamf-cli credentials (URL, client ID,

@@ -33,8 +33,6 @@ struct ConfigCustomEA: Identifiable, Equatable, Sendable {
 }
 
 struct ConfigState: Equatable, Sendable {
-    var columns: [String: String]
-    var mobileColumns: [String: String]
     var securityAgents: [ConfigSecurityAgent]
     var customEAs: [ConfigCustomEA]
     var staleDeviceDays: String
@@ -63,25 +61,6 @@ struct ConfigState: Equatable, Sendable {
     var logoPath: String
     var accentColor: String
 
-    /// The columns the Config screen has always listed. Each is written to config.yaml on
-    /// every save, an empty one as `key: ""`.
-    static let baseColumnKeys = [
-        "computer_name", "serial_number", "operating_system", "last_checkin", "department",
-        "manager", "email", "filevault", "sip", "firewall", "gatekeeper", "secure_boot",
-        "bootstrap_token", "disk_percent_full", "architecture", "model", "model_identifier",
-        "last_enrollment", "mdm_expiry",
-    ]
-
-    /// The rest of the `columns` keys the report engine reads (`ColumnConfig`). Written only
-    /// when set: a cleared or never-typed one is left out of config.yaml, not written as `key: ""`.
-    static let optionalColumnKeys = [
-        "full_name", "asset_tag", "building", "position", "last_logged_in_user",
-        "recovery_lock", "battery_health", "entra_sso_status", "purchase_date", "last_inventory",
-    ]
-
-    /// Every key the Config screen's column list shows, in order.
-    static let columnKeys = baseColumnKeys + optionalColumnKeys
-
     /// The stale rule the screen's thresholds describe.
     var staleRule: StaleRule {
         StaleRule(days: Int(staleDeviceDays.trimmingCharacters(in: .whitespaces)) ?? 30,
@@ -94,59 +73,7 @@ struct ConfigState: Equatable, Sendable {
             .flatMap { ContactGap.dayRange.contains($0) ? $0 : nil } ?? ContactGap.defaultDays
     }
 
-    static let mobileColumnKeys = [
-        "device_name", "serial_number", "operating_system", "last_checkin", "email",
-        "model", "device_family", "managed", "supervised",
-    ]
-
     static let defaultState = ConfigState(
-        columns: [
-            "computer_name": "Computer Name",
-            "serial_number": "Serial Number",
-            "operating_system": "Operating System Version",
-            "last_checkin": "Last Check-in",
-            "department": "Department",
-            // No universal Jamf "Manager" column — it's an org-specific EA, so leave
-            // it unmapped by default (matches Python DEFAULT_CONFIG).
-            "manager": "",
-            "email": "Email Address",
-            "filevault": "FileVault 2 Status",
-            "sip": "System Integrity Protection",
-            "firewall": "Firewall Enabled",
-            "gatekeeper": "Gatekeeper",
-            "secure_boot": "Secure Boot Level",
-            "bootstrap_token": "Bootstrap Token Escrowed",
-            "disk_percent_full": "Boot Drive Percentage Full",
-            "architecture": "Architecture Type",
-            "model": "Model",
-            "model_identifier": "Model Identifier",
-            "last_enrollment": "Last Enrollment",
-            "mdm_expiry": "MDM Profile Expiration Date",
-            "full_name": "",
-            "asset_tag": "",
-            "building": "",
-            "position": "",
-            "last_logged_in_user": "",
-            "recovery_lock": "",
-            "battery_health": "",
-            "entra_sso_status": "",
-            "purchase_date": "",
-            "last_inventory": "",
-        ],
-        // Mobile is opt-in — seed empty so a Mac-only fleet doesn't trip the
-        // config doctor with mappings it will never use (matches Python
-        // DEFAULT_CONFIG, where mobile_columns is all "").
-        mobileColumns: [
-            "device_name": "",
-            "serial_number": "",
-            "operating_system": "",
-            "last_checkin": "",
-            "email": "",
-            "model": "",
-            "device_family": "",
-            "managed": "",
-            "supervised": "",
-        ],
         securityAgents: [],
         customEAs: [],
         staleDeviceDays: "30",
@@ -331,9 +258,15 @@ enum ConfigService {
     }
 
     private static let managedTopLevelKeys: Set<String> = [
-        "columns", "mobile_columns", "security_agents", "custom_eas", "thresholds",
-        "compliance", "platform", "output", "jamf_cli", "branding",
+        "security_agents", "custom_eas", "thresholds", "compliance", "platform", "output",
+        "jamf_cli", "branding",
     ]
+
+    /// Retired keys that are a whole top-level block (`columns`, `school_columns`): a Config save
+    /// removes them, after copying the file.
+    private static var retiredTopLevelKeys: Set<String> {
+        Set(ConfigSchema.retiredKeys.keys.filter { !$0.contains(".") })
+    }
 
     static func load(profile: String, workspaceRoot: URL? = nil) throws -> LoadedConfig {
         let url = try configURL(for: profile, workspaceRoot: workspaceRoot)
@@ -388,11 +321,14 @@ enum ConfigService {
         let keys = managedTopLevelKeys.subtracting(report.keptBlocks)
         apply(state: state, to: &document)
         if case .mapping(var root) = document.root {
-            report.removedRetiredKeys = dropRetiredKeys(from: &root, inBlocks: keys)
+            report.removedRetiredKeys = dropRetiredKeys(
+                from: &root, inBlocks: keys.union(retiredTopLevelKeys))
             document.root = .mapping(root)
         }
         try backUpDropped(from: document, rewriting: keys, at: url, into: &report)
-        let encoded = try YAMLCodec.encode(document, replacingTopLevelKeys: keys)
+        let encoded = try YAMLCodec.encode(
+            document, replacingTopLevelKeys: keys,
+            removingTopLevelKeys: Set(report.removedRetiredKeys).intersection(retiredTopLevelKeys))
         let writtenStamp = try replace(url, with: encoded)
 
         let written = try YAMLCodec.decode(encoded)
@@ -477,9 +413,15 @@ enum ConfigService {
         var removed: [String] = []
         for path in ConfigSchema.retiredKeys.keys.sorted() {
             let parts = path.components(separatedBy: ".")
-            guard let first = parts.first, let last = parts.last, blocks.contains(first),
-                  dropKey(last, at: Array(parts.dropFirst().dropLast()), under: first, in: &root)
-            else { continue }
+            guard let first = parts.first, let last = parts.last, blocks.contains(first) else {
+                continue
+            }
+            // A one-segment path is a whole top-level block (`columns`), not a key inside itself.
+            let held = parts.count == 1
+                ? root.entries.contains { $0.key == first }
+                : dropKey(last, at: Array(parts.dropFirst().dropLast()), under: first, in: &root)
+            guard held else { continue }
+            if parts.count == 1 { root.entries.removeAll { $0.key == first } }
             removed.append(path)
         }
         if !removed.isEmpty {
@@ -512,7 +454,9 @@ enum ConfigService {
     /// The save that removes a retired key from `block`: "Config save" for the blocks the Config
     /// screen writes, "Customize Apply" for `charts`, nil for a block no app writer rewrites.
     static func retiredKeyRemover(inBlock block: String) -> String? {
-        if managedTopLevelKeys.contains(block) { return "Config save" }
+        if managedTopLevelKeys.contains(block) || retiredTopLevelKeys.contains(block) {
+            return "Config save"
+        }
         switch block {
         case "charts": return "Customize Apply"
         case "security_policy": return "Scoring save"
@@ -527,10 +471,18 @@ enum ConfigService {
         let tempURL = url.deletingLastPathComponent()
             .appendingPathComponent(".config.yaml.\(UUID().uuidString).tmp")
         try encoded.write(to: tempURL, atomically: true, encoding: .utf8)
-        if !manager.fileExists(atPath: url.path) {
-            manager.createFile(atPath: url.path, contents: Data())
+        do {
+            if !manager.fileExists(atPath: url.path) {
+                manager.createFile(atPath: url.path, contents: Data())
+            }
+            _ = try manager.replaceItemAt(url, withItemAt: tempURL)
+        } catch {
+            // The temp file holds the unscrubbed text, webhook URL included.
+            do { try manager.removeItem(at: tempURL) } catch {
+                AppLogger.collect.warning("ConfigService: could not remove a temporary config copy")
+            }
+            throw error
         }
-        _ = try manager.replaceItemAt(url, withItemAt: tempURL)
         var stamp = ConfigFileStamp.of(url)
         stamp.digest = ConfigFileStamp.digest(encoded)
         return stamp
@@ -722,18 +674,6 @@ enum ConfigService {
         }
 
         var state = ConfigState.defaultState
-        if let columns = root.value(for: "columns")?.mapping {
-            for key in ConfigState.columnKeys {
-                state.columns[key] = columns.value(for: key)?.stringValue ?? ""
-            }
-        }
-
-        if let mobile = root.value(for: "mobile_columns")?.mapping {
-            for key in ConfigState.mobileColumnKeys {
-                state.mobileColumns[key] = mobile.value(for: key)?.stringValue ?? ""
-            }
-        }
-
         state.securityAgents = sequenceMappings(root, "security_agents").map {
             ConfigSecurityAgent(
                 name: string($0, "name"),
@@ -815,26 +755,6 @@ enum ConfigService {
     static func apply(state: ConfigState, to document: inout YAMLCodec.YAMLDocument) {
         var root = document.root.mapping ?? .init(entries: [])
 
-        var columns = root.value(for: "columns")?.mapping ?? .init(entries: [])
-        for key in ConfigState.baseColumnKeys {
-            columns.set(key, value: scalar(state.columns[key] ?? ""))
-        }
-        for key in ConfigState.optionalColumnKeys {
-            let value = state.columns[key] ?? ""
-            if value.trimmingCharacters(in: .whitespaces).isEmpty {
-                columns.entries.removeAll { $0.key == key }
-            } else {
-                columns.set(key, value: scalar(value))
-            }
-        }
-        root.set("columns", value: .mapping(columns))
-
-        var mobileColumns = root.value(for: "mobile_columns")?.mapping ?? .init(entries: [])
-        for key in ConfigState.mobileColumnKeys {
-            mobileColumns.set(key, value: scalar(state.mobileColumns[key] ?? ""))
-        }
-        root.set("mobile_columns", value: .mapping(mobileColumns))
-
         root.set("security_agents", value: .sequence(state.securityAgents.map { agent in
             var entry = agent.source.mapping
             entry.set("name", value: scalar(agent.name))
@@ -867,8 +787,9 @@ enum ConfigService {
         root.set("platform", value: .mapping(platform))
 
         var output = root.value(for: "output")?.mapping ?? .init(entries: [])
-        output.set("output_dir", value: scalar(state.outputDir))
-        output.set("archive_dir", value: scalar(state.archiveDir))
+        let defaults = ConfigState.defaultState
+        setFolder("output_dir", state.outputDir, default: defaults.outputDir, in: &output)
+        setFolder("archive_dir", state.archiveDir, default: defaults.archiveDir, in: &output)
         output.set("timestamp_outputs", value: .scalar(.bool(state.timestampOutputs)))
         output.set("archive_enabled", value: .scalar(.bool(state.archiveEnabled)))
         setWholeNumbers(state, in: "output", to: &output)
@@ -886,6 +807,18 @@ enum ConfigService {
         root.set("branding", value: .mapping(branding))
 
         document.root = .mapping(root)
+    }
+
+    /// Writes a pinned folder key only when the file already sets it or the value is not the
+    /// default: a key the file never had would read as a changed folder in `SharedConfigPin`.
+    private static func setFolder(
+        _ key: String, _ value: String, default fallback: String,
+        in output: inout YAMLCodec.YAMLMapping
+    ) {
+        let isDefault = value.trimmingCharacters(in: .whitespaces)
+            == fallback.trimmingCharacters(in: .whitespaces)
+        guard output.value(for: key) != nil || !isDefault else { return }
+        output.set(key, value: scalar(value))
     }
 
     /// What `thresholds.stale_basis` holds: a date, a list of dates, or nothing the app reads.

@@ -8,9 +8,7 @@ extension ConnectionCredentialsModel {
     ) -> Dependencies {
         Dependencies(
             jamfCLI: {
-                guard let binary = ExecutableLocator.locate("jamf-cli") else { return nil }
-                let version = await JamfCLIInstaller.installedVersionOffMain(at: binary)
-                return JamfCLIContext(binary: binary, version: version)
+                ExecutableLocator.locate("jamf-cli").map { JamfCLIContext(binary: $0) }
             },
             register: { context, request in
                 try OnboardingFlow.signatureGate(binary: context.binary)
@@ -18,14 +16,11 @@ extension ConnectionCredentialsModel {
                     binary: context.binary, profile: request.profile,
                     gatewayURL: request.gatewayURL, scope: request.scope,
                     scopeID: request.scopeID, clientID: request.clientID,
-                    clientSecret: request.clientSecret,
-                    noVerify: JamfCLIInstaller.supportsSpecDerivedNames(context.version))
+                    clientSecret: request.clientSecret)
             },
             check: { context, profile in
                 await ConnectionCheck.run(
-                    profile: profile,
-                    specNames: JamfCLIInstaller.supportsSpecDerivedNames(context.version),
-                    runner: ConnectionCheck.runner(binary: context.binary))
+                    profile: profile, runner: ConnectionCheck.runner(binary: context.binary))
             },
             existingProfiles: { profiles().map(\.name) },
             workspaceConflict: { ProfileService.caseVariantWorkspace(of: $0) },

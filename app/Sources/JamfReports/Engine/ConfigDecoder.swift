@@ -8,8 +8,6 @@ import Foundation
 /// by `scaffold` or hand-edited by users. `ReportConfig.merged(with:)` folds in
 /// defaults before any sheet-generation logic runs.
 struct ReportConfig: Decodable, Sendable {
-    var columns: ColumnConfig?
-    var mobileColumns: MobileColumnConfig?
     var securityAgents: [SecurityAgentConfig]?
     var jamfCli: JamfCLIConfig?
     var compliance: ComplianceConfig?
@@ -32,8 +30,6 @@ struct ReportConfig: Decodable, Sendable {
     var securityPolicy: SecurityControlPolicy?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case columns
-        case mobileColumns = "mobile_columns"
         case securityAgents = "security_agents"
         case jamfCli = "jamf_cli"
         case compliance
@@ -60,8 +56,6 @@ struct ReportConfig: Decodable, Sendable {
     /// mirroring the Python script's `DEFAULT_CONFIG` deep-merge.
     func withDefaults() -> ReportConfig {
         var r = self
-        if r.columns == nil { r.columns = ColumnConfig() }
-        if r.mobileColumns == nil { r.mobileColumns = MobileColumnConfig() }
         if r.securityAgents == nil { r.securityAgents = [] }
         if r.jamfCli == nil { r.jamfCli = JamfCLIConfig() }
         if r.compliance == nil { r.compliance = ComplianceConfig() }
@@ -73,205 +67,6 @@ struct ReportConfig: Decodable, Sendable {
         if r.branding == nil { r.branding = BrandingConfig() }
         if r.platform == nil { r.platform = PlatformConfig() }
         return r
-    }
-}
-
-// MARK: - columns
-
-/// Maps logical field names → actual CSV column header strings.
-/// Key names must match `DEFAULT_CONFIG["columns"]` exactly.
-struct ColumnConfig: Decodable, Sendable {
-    var computerName: String?
-    var serialNumber: String?
-    var operatingSystem: String?       // key is `operating_system`, NOT `os_version`
-    var lastCheckin: String?            // key is `last_checkin`, NOT `last_contact`
-    var department: String?
-    var manager: String?
-    var email: String?                  // key is `email`, NOT `assigned_user_email`
-    var filevault: String?
-    var sip: String?
-    var firewall: String?
-    var gatekeeper: String?
-    var secureBoot: String?
-    var bootstrapToken: String?
-    var diskPercentFull: String?
-    var architecture: String?
-    var model: String?
-    /// Hardware model identifier column (`Mac16,6`), as opposed to `model`'s marketing name.
-    /// YAML key: `model_identifier`.
-    var modelIdentifier: String?
-    var lastEnrollment: String?
-    var mdmExpiry: String?
-    var fullName: String?
-    var assetTag: String?
-    var building: String?
-    var position: String?
-    var lastLoggedInUser: String?
-    var recoveryLock: String?
-    var batteryHealth: String?
-    var entraSSOStatus: String?
-    /// Device purchase or acquisition date column. YAML key: `purchase_date`.
-    var purchaseDate: String?
-    /// Last Inventory Update column (Jamf's export header). YAML key: `last_inventory`. Read
-    /// only for `thresholds.stale_basis: [inventory]`; a CSV without it has no inventory date.
-    var lastInventory: String?
-
-    enum CodingKeys: String, CodingKey, CaseIterable {
-        case computerName = "computer_name"
-        case serialNumber = "serial_number"
-        case operatingSystem = "operating_system"
-        case lastCheckin = "last_checkin"
-        case department
-        case manager
-        case email
-        case filevault
-        case sip
-        case firewall
-        case gatekeeper
-        case secureBoot = "secure_boot"
-        case bootstrapToken = "bootstrap_token"
-        case diskPercentFull = "disk_percent_full"
-        case architecture
-        case model
-        case modelIdentifier = "model_identifier"
-        case lastEnrollment = "last_enrollment"
-        case mdmExpiry = "mdm_expiry"
-        case fullName = "full_name"
-        case assetTag = "asset_tag"
-        case building
-        case position
-        case lastLoggedInUser = "last_logged_in_user"
-        case recoveryLock = "recovery_lock"
-        case batteryHealth = "battery_health"
-        case entraSSOStatus = "entra_sso_status"
-        case purchaseDate = "purchase_date"
-        case lastInventory = "last_inventory"
-    }
-
-    /// Return the configured column name for the given logical field, or nil if unset.
-    func columnName(for field: ColumnField) -> String? {
-        let value: String?
-        switch field {
-        case .computerName: value = computerName
-        case .serialNumber: value = serialNumber
-        case .operatingSystem: value = operatingSystem
-        case .lastCheckin: value = lastCheckin
-        case .department: value = department
-        case .manager: value = manager
-        case .email: value = email
-        case .filevault: value = filevault
-        case .sip: value = sip
-        case .firewall: value = firewall
-        case .gatekeeper: value = gatekeeper
-        case .secureBoot: value = secureBoot
-        case .bootstrapToken: value = bootstrapToken
-        case .diskPercentFull: value = diskPercentFull
-        case .architecture: value = architecture
-        case .model: value = model
-        case .modelIdentifier: value = modelIdentifier
-        case .lastEnrollment: value = lastEnrollment
-        case .mdmExpiry: value = mdmExpiry
-        case .fullName: value = fullName
-        case .assetTag: value = assetTag
-        case .building: value = building
-        case .position: value = position
-        case .lastLoggedInUser: value = lastLoggedInUser
-        case .recoveryLock: value = recoveryLock
-        case .batteryHealth: value = batteryHealth
-        case .entraSSOStatus: value = entraSSOStatus
-        case .purchaseDate: value = purchaseDate
-        case .lastInventory: value = lastInventory
-        }
-        let trimmed = value?.trimmingCharacters(in: .whitespaces) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-/// Logical column field identifiers (the `columns` keys in `config.example.yaml`).
-///
-/// This enum is a hub — adding a new case requires edits in five places:
-///
-/// 1. **This enum** — add the new `case`.
-/// 2. **`ColumnConfig.columnName(for:)`** (same file) — add a `case` branch that returns
-///    the corresponding `ColumnConfig` property.
-/// 3. **`ColumnConfig.CodingKeys`** (same file) — add a `CodingKeys` entry if the raw
-///    YAML key name differs from the Swift property name (snake_case vs camelCase).
-/// 4. **`CSVDashboard.mappedExtraInventoryFields()`** — add the field if it should appear
-///    as an optional column in the Device Inventory sheet.
-/// 5. **`CustomizeView.swift`** — add the field if it should appear in the column-picker UI.
-///
-/// Also document it in `config.example.yaml`. See CLAUDE.md "Config-shape change checklist".
-enum ColumnField: String, CaseIterable, Sendable {
-    case computerName, serialNumber, operatingSystem, lastCheckin
-    case department, manager, email
-    case filevault, sip, firewall, gatekeeper, secureBoot, bootstrapToken
-    case diskPercentFull, architecture, model, modelIdentifier, lastEnrollment, mdmExpiry
-    case fullName, assetTag, building, position
-    case lastLoggedInUser, recoveryLock, batteryHealth, entraSSOStatus
-    /// Device purchase or acquisition date. YAML key: `purchase_date`.
-    case purchaseDate
-    /// Last Inventory Update. YAML key: `last_inventory`.
-    case lastInventory
-
-    /// The `columns:` key in config.yaml, taken from the decoder rather than spelled from the
-    /// case name (which would read `entraSSOStatus` as `entra_s_s_o_status`).
-    var configKey: String {
-        let key: ColumnConfig.CodingKeys = switch self {
-        case .computerName: .computerName
-        case .serialNumber: .serialNumber
-        case .operatingSystem: .operatingSystem
-        case .lastCheckin: .lastCheckin
-        case .department: .department
-        case .manager: .manager
-        case .email: .email
-        case .filevault: .filevault
-        case .sip: .sip
-        case .firewall: .firewall
-        case .gatekeeper: .gatekeeper
-        case .secureBoot: .secureBoot
-        case .bootstrapToken: .bootstrapToken
-        case .diskPercentFull: .diskPercentFull
-        case .architecture: .architecture
-        case .model: .model
-        case .modelIdentifier: .modelIdentifier
-        case .lastEnrollment: .lastEnrollment
-        case .mdmExpiry: .mdmExpiry
-        case .fullName: .fullName
-        case .assetTag: .assetTag
-        case .building: .building
-        case .position: .position
-        case .lastLoggedInUser: .lastLoggedInUser
-        case .recoveryLock: .recoveryLock
-        case .batteryHealth: .batteryHealth
-        case .entraSSOStatus: .entraSSOStatus
-        case .purchaseDate: .purchaseDate
-        case .lastInventory: .lastInventory
-        }
-        return key.rawValue
-    }
-}
-
-// MARK: - mobile_columns
-
-struct MobileColumnConfig: Decodable, Sendable {
-    var deviceName: String?
-    var serialNumber: String?
-    var operatingSystem: String?
-    var lastCheckin: String?
-    var email: String?
-    var model: String?
-    var deviceFamily: String?
-    var managed: String?
-    var supervised: String?
-
-    enum CodingKeys: String, CodingKey, CaseIterable {
-        case deviceName = "device_name"
-        case serialNumber = "serial_number"
-        case operatingSystem = "operating_system"
-        case lastCheckin = "last_checkin"
-        case email, model
-        case deviceFamily = "device_family"
-        case managed, supervised
     }
 }
 
@@ -824,7 +619,6 @@ struct ChartsConfig: Decodable, Sendable {
     var savePng: Bool?
     var embedInXlsx: Bool?
     var historicalCsvDir: String?   // key is `historical_csv_dir`
-    var archiveCurrentCsv: Bool?    // key is `archive_current_csv`
     var osAdoption: OSAdoptionConfig?
     var complianceTrend: ComplianceTrendConfig?
     var deviceStateTrend: DeviceStateTrendConfig?
@@ -834,7 +628,6 @@ struct ChartsConfig: Decodable, Sendable {
         case savePng = "save_png"
         case embedInXlsx = "embed_in_xlsx"
         case historicalCsvDir = "historical_csv_dir"
-        case archiveCurrentCsv = "archive_current_csv"
         case osAdoption = "os_adoption"
         case complianceTrend = "compliance_trend"
         case deviceStateTrend = "device_state_trend"
@@ -915,12 +708,33 @@ struct BrandingConfig: Decodable, Sendable {
 struct ProtectConfig: Decodable, Sendable {
     var enabled: Bool?
     var profile: String?
+    /// `backup_on_synced_storage`: back Protect up even when the workspace is on storage other
+    /// Macs reach. Absent or anything but a boolean reads as off; Config Doctor names a value
+    /// that is not one. On a shared workspace `SharedConfigPin` decides what this Mac uses.
+    var backupOnSyncedStorage: Bool?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case enabled, profile
+        case backupOnSyncedStorage = "backup_on_synced_storage"
+    }
+
+    init(enabled: Bool? = nil, profile: String? = nil, backupOnSyncedStorage: Bool? = nil) {
+        self.enabled = enabled
+        self.profile = profile
+        self.backupOnSyncedStorage = backupOnSyncedStorage
+    }
+
+    /// A mistyped `backup_on_synced_storage` reads as off rather than failing the whole decode.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled)
+        profile = try container.decodeIfPresent(String.self, forKey: .profile)
+        backupOnSyncedStorage = try? container.decodeIfPresent(
+            Bool.self, forKey: .backupOnSyncedStorage)
     }
 
     var isEnabled: Bool { enabled ?? false }
+    var backsUpOnSyncedStorage: Bool { backupOnSyncedStorage ?? false }
     var resolvedProfile: String { profile?.trimmingCharacters(in: .whitespaces) ?? "" }
 }
 
@@ -972,12 +786,38 @@ struct NotifyConfig: Decodable, Sendable {
     var provider: String?
     var url: String?
     var detail: String?
+    /// `heartbeat`: the background tick posts one short "still running" card a day. Absent or
+    /// anything but a boolean reads as off; Config Doctor names a value that is not one.
+    var heartbeat: Bool?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case enabled, provider, url, detail
+        case enabled, provider, url, detail, heartbeat
+    }
+
+    init(
+        enabled: Bool? = nil, provider: String? = nil, url: String? = nil, detail: String? = nil,
+        heartbeat: Bool? = nil
+    ) {
+        self.enabled = enabled
+        self.provider = provider
+        self.url = url
+        self.detail = detail
+        self.heartbeat = heartbeat
+    }
+
+    /// A mistyped `heartbeat` reads as off rather than failing the whole config.yaml decode:
+    /// it is a switch, and a scheduled run must not stop over it.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+        heartbeat = try? container.decodeIfPresent(Bool.self, forKey: .heartbeat)
     }
 
     var isEnabled: Bool { enabled ?? false }
+    var sendsHeartbeat: Bool { heartbeat ?? false }
     var resolvedProvider: Provider {
         Provider(rawValue: (provider ?? "teams").lowercased()) ?? .teams
     }
@@ -1280,10 +1120,6 @@ struct ConfigException: Decodable, Sendable, Equatable {
     let signedOffDate: String
     var expiresDate: String?
     var linkedFinding: String?
-    /// Optional NIST/STIG/CIS control identifier (e.g. `"AC-2"`, `"AC-2(1).a"`).
-    /// Validated by `ControlID.parse(_:)` for canonical form when surfaced via
-    /// `ConfigException.typedControlID` (`ConfigSchema+ControlID.swift`).
-    var controlID: String?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case id, description
@@ -1291,7 +1127,6 @@ struct ConfigException: Decodable, Sendable, Equatable {
         case signedOffDate = "signed_off_date"
         case expiresDate = "expires_date"
         case linkedFinding = "linked_finding"
-        case controlID = "control_id"
     }
 
     init(
@@ -1300,8 +1135,7 @@ struct ConfigException: Decodable, Sendable, Equatable {
         signedOffBy: String,
         signedOffDate: String,
         expiresDate: String? = nil,
-        linkedFinding: String? = nil,
-        controlID: String? = nil
+        linkedFinding: String? = nil
     ) {
         self.id = id
         self.description = description
@@ -1309,7 +1143,6 @@ struct ConfigException: Decodable, Sendable, Equatable {
         self.signedOffDate = signedOffDate
         self.expiresDate = expiresDate
         self.linkedFinding = linkedFinding
-        self.controlID = controlID
     }
 }
 

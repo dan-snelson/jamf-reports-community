@@ -116,7 +116,7 @@ final class JamfCLIUpdateGuardTests: XCTestCase {
             }
         }
         try await waitUntil { started.isSet }
-        XCTAssertTrue(CLIBridge.toolUpdateRunning)
+        XCTAssertEqual(CLIBridge.holdPurpose, .toolUpdate)
         XCTAssertEqual(try String(contentsOf: lock.url, encoding: .utf8), String(getpid()))
 
         // Manual: refused before any state changes.

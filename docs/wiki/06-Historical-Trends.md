@@ -30,6 +30,20 @@ end, and the change over a quarter or any other window — generate a
 from the Generated screen instead. It reads the same `summary.json` snapshots described
 below, plus your collected extension attributes.
 
+## Mobile devices
+
+When the workspace has mobile devices, Trends also offers their series: managed, supervised,
+stale (last inventory on Jamf Pro, last check-in on Jamf School) and on the current OS, plus
+passcode compliant, data protection and jailbreaks where Jamf Pro reports them. Macs and mobile
+devices are never added together into one figure. A figure the product does not report is left
+out, not drawn as 0. Each share is counted over the devices that report the field.
+
+The Macs series is **Managed Computers** (it was Managed Devices): its figure and chart count
+Macs only, and mobile devices have their own **Managed mobile devices** series. Device-count
+charts scale to the data, so a small fleet no longer sits flat at the bottom of a 0 to 1,000
+axis. Alert rules can watch the mobile figures too; the metric names are in
+`config.example.yaml` under `alerts`.
+
 ## Compliance band history
 
 When `compliance.baselines` (see [Configuration & Templates](https://github.com/tonyyo11/jamf-reports-community/wiki/04-Configuration-and-Templates))
@@ -66,9 +80,9 @@ weekly trend points; irregular collection produces irregular timelines.
 
 Trend data uses two on-disk stores, kept separate on purpose:
 
-- **CSV snapshot history** (`snapshots/`) — dated Jamf Pro CSV exports. The trend source
-  for export-only data: Extension Attributes, compliance failure lists, department and
-  manager slicing.
+- **CSV snapshot history** (`snapshots/`) — dated Jamf Pro CSV exports you place there.
+  Since 2.11 the app no longer copies a CSV into this folder itself (`archive_current_csv`
+  is retired); the Trends screen is built from the daily summaries.
 - **jamf-cli JSON history** (`jamf-cli-data/`) — cached API responses. The trend source
   for API-native summaries: OS adoption from `inventory-summary`, device-state trend from
   `device-compliance`, security posture from `security`.

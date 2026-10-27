@@ -57,7 +57,7 @@ final class AuditConsistencyTests: XCTestCase {
 
     func testCollectRunsTheSameAuditCommand() throws {
         let row = try XCTUnwrap(
-            ReportEngine.collectCommandMatrix(profile: "p", specNames: true, staleDays: 21)
+            ReportEngine.collectCommandMatrix(profile: "p", staleDays: 21)
                 .first { $0.kind == "audit" })
         XCTAssertEqual(row.args, ReportEngine.auditArguments(profile: "p", staleDays: 21))
     }

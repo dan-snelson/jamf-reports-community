@@ -25,11 +25,9 @@ enum ConnectionCheck {
         case undecided(exitCode: Int32?)
     }
 
-    /// Needs no permission. jamf-cli 1.29 renamed `jamf-pro-versions` to `jamf-pro-version`;
-    /// the old name warns until 2027-03-09 and the new one exits 2 before 1.29.
-    static func versionArguments(profile: String, specNames: Bool) -> [String] {
-        ["-p", profile, "pro", specNames ? "jamf-pro-version" : "jamf-pro-versions", "list",
-         "--output", "json"]
+    /// Needs no permission.
+    static func versionArguments(profile: String) -> [String] {
+        ["-p", profile, "pro", "jamf-pro-version", "list", "--output", "json"]
     }
 
     /// A Platform call that matches nothing and returns one empty page.
@@ -84,8 +82,8 @@ enum ConnectionCheck {
         JamfCLIErrorEnvelope.parse(stdout)?.message?.contains("TENANT_NOT_FOUND") == true
     }
 
-    static func run(profile: String, specNames: Bool, runner: Runner) async -> Verdict {
-        let version = await runner(versionArguments(profile: profile, specNames: specNames))
+    static func run(profile: String, runner: Runner) async -> Verdict {
+        let version = await runner(versionArguments(profile: profile))
         var probe: Attempt?
         if needsProbe(version) {
             probe = await runner(probeArguments(profile: profile))
@@ -125,13 +123,6 @@ enum ConnectionCheck {
 }
 
 extension ConnectionCheck.Verdict {
-    var blocksContinue: Bool {
-        switch self {
-        case .rejectedID, .noJamfPro: true
-        case .accepted, .missingPermission, .undecided: false
-        }
-    }
-
     /// The verdict that points the user at a Jamf School workspace instead.
     var suggestsJamfSchool: Bool {
         if case .noJamfPro = self { return true }
@@ -141,11 +132,11 @@ extension ConnectionCheck.Verdict {
     /// At tenant level (legacy) a tenant that is not Jamf Pro can be Jamf School, Jamf Protect
     /// or Jamf Security Cloud; an environment's MDM is Jamf Pro or Jamf School, so it is School.
     static let notJamfProTenantText = "The gateway recognises this tenant ID, but it is not a "
-        + "Jamf Pro tenant. If it is Jamf School, set it up as a Jamf School workspace (Add Jamf "
-        + "School workspace in the sidebar's workspace menu). If it is Jamf Protect or Jamf "
+        + "Jamf Pro tenant. If it is Jamf School, set it up as a Jamf School workspace (Settings › "
+        + "Add connection, then Jamf School). If it is Jamf Protect or Jamf "
         + "Security Cloud, Jamf Reports cannot report from it on its own: Jamf Protect is added "
-        + "to a Jamf Pro workspace (Data Sources › Add Jamf Protect), and Jamf Security Cloud is "
-        + "not supported yet."
+        + "to a Jamf Pro or Jamf School workspace (Data Sources › Add Jamf Protect), and Jamf "
+        + "Security Cloud is not supported yet."
 
     /// What the verdict says without its advice on continuing, for a list of results.
     static func missingPermissionText(names: [String]) -> String {
@@ -184,8 +175,8 @@ extension ConnectionCheck.Verdict {
         case .noJamfPro:
             return "The gateway recognises this ID, but no Jamf Pro server answers for it. This "
                 + "environment's MDM is probably Jamf School. Jamf Reports reads Jamf School with "
-                + "a School API key, so set it up as a Jamf School workspace (Add Jamf School "
-                + "workspace in the sidebar's workspace menu). If it should be Jamf Pro, check "
+                + "a School API key, so set it up as a Jamf School workspace (Settings › Add "
+                + "connection, then Jamf School). If it should be Jamf Pro, check "
                 + "that the ID is for the environment that holds your Jamf Pro tenant."
         case .missingPermission(let names):
             return Self.missingPermissionText(names: names)

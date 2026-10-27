@@ -84,10 +84,6 @@ final class PolicyHealthServiceTests: XCTestCase {
 
         // Findings verification
         XCTAssertEqual(snapshot.findings.count, 3)
-        let severityGrouping = snapshot.findingsBySeverity
-        XCTAssertEqual(severityGrouping["critical"], 1)
-        XCTAssertEqual(severityGrouping["warning"], 1)
-        XCTAssertEqual(severityGrouping["info"], 1)
 
         // File metadata
         XCTAssertEqual(snapshot.sourceFile, policyURL)
@@ -298,41 +294,6 @@ final class PolicyHealthServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.profileTotalErrors, 0)
         XCTAssertNil(snapshot.profileDevicesAffected,
                      "no summary envelope means devices affected is unknown, not zero")
-    }
-
-    func testSeverityGroupingCaseInsensitive() throws {
-        let policyJSON = """
-        [
-          {
-            "summary": {
-              "total_policies": 5,
-              "enabled": 5,
-              "disabled": 0,
-              "config_findings": 4,
-              "warnings": 2,
-              "info": 2
-            },
-            "config_findings": [
-              {"severity": "Critical", "policy": "P1", "policy_id": "1", "check": "C1", "detail": "D1"},
-              {"severity": "CRITICAL", "policy": "P2", "policy_id": "2", "check": "C2", "detail": "D2"},
-              {"severity": "Warning", "policy": "P3", "policy_id": "3", "check": "C3", "detail": "D3"},
-              {"severity": "warning", "policy": "P4", "policy_id": "4", "check": "C4", "detail": "D4"}
-            ]
-          }
-        ]
-        """
-
-        let tmp = FileManager.default.temporaryDirectory
-        let policyURL = tmp.appendingPathComponent("severity-\(UUID().uuidString).json")
-
-        try Data(policyJSON.utf8).write(to: policyURL)
-        defer { try? FileManager.default.removeItem(at: policyURL) }
-
-        let snapshot = try XCTUnwrap(PolicyHealthService.load(policyURL: policyURL, profileURL: nil))
-
-        let severityGrouping = snapshot.findingsBySeverity
-        XCTAssertEqual(severityGrouping["critical"], 2, "Both 'Critical' and 'CRITICAL' should group together")
-        XCTAssertEqual(severityGrouping["warning"], 2, "Both 'Warning' and 'warning' should group together")
     }
 
     // MARK: - CacheSource derivation

@@ -1,31 +1,34 @@
 # Bringing In Custom Extension Attributes — Worked Examples
 
 > **DRAFT outline — to be fleshed out with screenshots.** This page scaffolds
-> the end-to-end examples of adopting Extension Attribute (EA) columns from a
-> CSV export into `config.yaml`. Replace each _(screenshot: …)_ placeholder with
+> the end-to-end examples of adopting Extension Attributes (EAs) into
+> `config.yaml`. Replace each _(screenshot: …)_ placeholder with
 > a real capture, and expand the prose where noted. Everything here is
 > per-profile — every example operates on the **active profile's** `config.yaml`.
 
 ## Before you start
 
-EA values are **not** in a default Jamf Pro inventory export. When exporting,
-add your EA columns under **Export-only fields** so they appear in the CSV.
-Drop the export into the profile's `csv-inbox/` (or the workspace root).
+Custom EA sheets and the EA Warnings sheet are built from the extension attribute values
+jamf-cli collects (`ea-results`), so run a collect first. No CSV export is needed (the CSV
+workbook tabs were retired in 2.11). An EA's `column:` in `config.yaml` is the EA's name
+as Jamf Pro shows it.
 
-_(screenshot: Jamf Pro export builder with Extension Attribute columns added under Export-only fields)_
+_(screenshot: Extension Attributes screen after a collect, with the Adopt EAs button)_
 
-## Path A — The CSV → EA walkthrough (recommended)
+## Path A — Adopt EAs (recommended)
 
-**Data Sources → "EA tracking guide"** scans the newest inbox CSV, detects
-EA-like columns, and lets you adopt each one. As of v2.3, each candidate has an
+**Extension Attributes → "Adopt EAs…"** (or **Data Sources → "Adopt EAs"**) lists the
+Extension Attributes jamf-cli already collected, with a guessed type for each, and adds the
+ones you select to `config.yaml` when you choose **Add … to config**. Existing settings are
+kept, and an EA already tracked is left out of the list. Each candidate has an
 **"Adopt as"** choice — **Custom EA** or **Security Agent** — so the same flow
 covers both reporting shapes.
 
-_(screenshot: CSV → EA walkthrough with detected candidates and the Adopt-as picker)_
+_(screenshot: Adopt EAs with collected candidates and the Adopt-as picker)_
 
 ### Example 1 — Boolean EA (compliance state)
 
-- Column: `FileVault 2 - Status`, sample value `Encrypted`
+- EA: `FileVault 2 - Status`, sample value `Encrypted`
 - Adopt as: **Custom EA**, type **boolean**, true value `Encrypted`
 - Result in `config.yaml`:
   ```yaml
@@ -40,7 +43,7 @@ _(screenshot: CSV → EA walkthrough with detected candidates and the Adopt-as p
 
 ### Example 2 — Security Agent (agent install/connection state)
 
-- Column: `CrowdStrike Falcon - Status`, sample value `Installed`
+- EA: `CrowdStrike Falcon - Status`, sample value `Installed`
 - Adopt as: **Security Agent**, connected value `Installed`
 - Result in `config.yaml`:
   ```yaml
@@ -54,44 +57,51 @@ _(screenshot: CSV → EA walkthrough with detected candidates and the Adopt-as p
 
 ### Example 3 — Version EA
 
-- Column: `SysTrack Agent Version`, sample value `5.7.6`
+- EA: `SysTrack Agent Version`, sample value `5.7.6`
 - Adopt as: **Custom EA**, type **version**, current versions list (tune later)
 - _(screenshot: version EA row; note where Current versions is edited)_
 
 ### Example 4 — Date EA (certificate / expiry)
 
-- Column: `KerberosSSO - password_expires_date`
+- EA: `KerberosSSO - password_expires_date`
 - Adopt as: **Custom EA**, type **date**, warning days `30`
 - _(screenshot: date EA row with warning-days field)_
 
 ### Example 5 — Percentage EA
 
-- Column: `Disk Usage Percent`
+- EA: `Disk Usage Percent`
 - Adopt as: **Custom EA**, type **percentage**, warning ≥ `80`, critical ≥ `90`
 - Note: leave thresholds set — an empty threshold is omitted from the file (the
   engine uses its default) rather than written as an invalid value.
 - _(screenshot: percentage EA row with thresholds)_
 
-After adopting, hit **Save** in the Config tab and **Run check** to validate the
-mappings against the CSV.
+After adopting, the EAs show in **Config → Custom EAs** and in reports after the next
+generate. Open **Health Audit → Config** (Config Doctor) to check them against the collected
+data.
 
-_(screenshot: Config → Custom EAs after Save, with Run check passing)_
+_(screenshot: Config → Custom EAs after adopting, with Config Doctor passing)_
 
 ## Path B — Hand-editing in Config → Custom EAs
 
-For columns the walkthrough didn't detect, add rows manually with **+ Add EA
+For EAs the list didn't offer, add rows manually with **+ Add EA
 sheet** / **+ Add agent**. Cover the same five types as above.
 
 _(screenshot: Custom EAs tab with the Add buttons)_
 
-## Re-importing as the CSV changes over time
+## Path C — Import a CSV export once
 
-Re-running **Re-scaffold from CSV** (Config → Columns) **merges** into the
-current profile: it fills new/empty column mappings, repairs mappings whose CSV
-column was renamed, and keeps your security agents, custom EAs and thresholds.
-The result toast reports exactly what changed.
+If you have a Jamf Pro CSV export with EA columns (added under **Export-only fields** in
+Jamf Pro's export builder), **Adopt EAs → Import from a CSV export (one time)** reads the
+file you pick once and proposes the columns it does not already know as candidates.
+`jamf-reports scaffold --csv <path> --out <path>` writes a new `config.yaml` from the
+same export on the command line, with only `custom_eas` added to the minimal config. The CSV is not read again: reports use the collected EA values,
+so the EA's name must match one Jamf Pro returns.
 
-_(screenshot: the merge result toast after a re-scaffold)_
+## When an EA has no data
+
+The workbook's **EA Warnings** sheet says whether a tracked EA is missing from Jamf Pro or
+defined there with no values collected, and Config Doctor reports the same. Fix the name in
+Config → Custom EAs, or remove the EA.
 
 ## Custom EA type reference
 

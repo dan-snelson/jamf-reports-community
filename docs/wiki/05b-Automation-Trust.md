@@ -20,9 +20,9 @@ alerts). Both record to Run History under a distinct `cli-collect` / `cli-genera
 so a self-scheduled cron/launchd job that calls the CLI is no longer invisible.
 
 Every scheduled run also records **failing config checks** in its own log. A run collects
-happily against broken column mappings and exits 0, so without this the config rots
-invisibly for weeks. Only genuine failures surface — warnings are for a human reading the
-Config screen, and putting them here would make every run look broken.
+happily against a broken config and exits 0, so without this the config rots
+invisibly for weeks. Only genuine failures surface — warnings are for a human reading
+Config Doctor, and putting them here would make every run look broken.
 
 The **dead-man switch is the exception** — it can only track a *schedule* the app itself
 knows about (managed, hand-built, or imported from a legacy plist). It measures "overdue"
@@ -84,7 +84,17 @@ next collect fetches it.
   schedule that failed or came back incomplete — a source did not land — one hour after it
   started, then two hours after that, then four, and then waits for the schedule's next
   time. A retry only re-collects what is still due, so sources that already landed are not
-  fetched again. Report-from-cache and backup schedules are not retried.
+  fetched again. If today's daily summary is still missing after those three retries, the
+  collect keeps retrying every hour until midnight, so a laptop that was off the VPN until
+  the afternoon still gets its day; it stops sooner when every source failed in a way another
+  try repeats (see the next item). Report-from-cache and backup schedules are not retried.
+- **A Mac that is on only part of the day.** A daily collect runs at its scheduled time or,
+  after the Mac was off or asleep, at its first background check after waking; that run is
+  the day's run, so the scheduled time does not repeat it. **Run now** never moves or
+  cancels the scheduled run.
+- **One failure card a day.** A scheduled run that fails the same way again posts its
+  failure card once a day per schedule and profile, not on every hourly retry. A different
+  failure still posts, and a card that could not be sent is tried again.
 - **Some failures are never retried automatically.** They fail identically every time until
   something outside the app changes:
   - a usage or credentials-gate error (exit 2)
@@ -241,7 +251,7 @@ alerts:
 ### How and when alerts fire
 
 - **Only on runs that collect.** Alerts evaluate after a run that produced a fresh summary
-  — `snapshot-only`, `jamf-cli-full`, or `csv-assisted`. A `jamf-cli-only` run generates
+  — `snapshot-only` or `jamf-cli-full`. A `jamf-cli-only` run generates
   from cache and never evaluates alerts.
 - **A rule whose metric has no data that day never fires.** Missing data is not an alert —
   that gap is the dead-man switch's job, not an alert's.

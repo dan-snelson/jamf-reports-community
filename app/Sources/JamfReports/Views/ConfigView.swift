@@ -31,13 +31,11 @@ func safeElementBinding<T>(
 struct ConfigView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast
-    @State private var cli = CLIBridge()
 
     enum ConfigTab: String, CaseIterable {
-        case columns, agents, eas, thresholds, platform, output, scoring, fromFile
+        case agents, eas, thresholds, platform, output, scoring, fromFile
         var label: String {
             switch self {
-            case .columns:    "Columns"
             case .agents:     "Security Agents"
             case .eas:        "Custom EAs"
             case .thresholds: "Thresholds"
@@ -49,7 +47,6 @@ struct ConfigView: View {
         }
         var icon: String {
             switch self {
-            case .columns:    "internaldrive"
             case .agents:     "shield"
             case .eas:        "sparkles"
             case .thresholds: "bolt"
@@ -70,6 +67,12 @@ struct ConfigView: View {
             default:        label
             }
         }
+
+        /// The tabs a workspace can use. Jamf School has no security agents, Extension
+        /// Attributes, Platform API or score, so it keeps Thresholds, Output and the file view.
+        static func offered(school: Bool) -> [ConfigTab] {
+            school ? [.thresholds, .output, .fromFile] : allCases
+        }
     }
 
     // MARK: Save-status feedback pill
@@ -78,10 +81,9 @@ struct ConfigView: View {
         case idle, saving, saved, error(String)
     }
 
-    @State private var tab: ConfigTab = .columns
+    @State private var tab: ConfigTab = .agents
     @State private var saveStatus: SaveStatus = .idle
     @State private var saveTask: Task<Void, Never>?
-    @State private var triggerColumnsCheck = false
     /// Key-path detail from the report engine's strict parse, when it fails
     /// on a file the lenient GUI editor tolerates (#181 recovery card).
     @State private var engineParseDetail: String?
@@ -148,7 +150,7 @@ struct ConfigView: View {
                     : "This clears \(summary).")
                 + " Your current file is kept beside the new one as "
                 + "config.yaml.broken-<timestamp> — nothing is deleted, so you can copy "
-                + "values back. Rebuild quickly with the CSV → EA guide and Columns scaffold."
+                + "values back. Rebuild quickly with Adopt EAs in Data Sources."
             )
         }
     }
@@ -334,15 +336,6 @@ struct ConfigView: View {
         }
     }
 
-    /// The re-scaffold toast: what it merged, then the notes its save left.
-    static func rescaffoldMessage(
-        profile: String, familyLabel: String, summary: String, notes: [String]
-    ) -> String {
-        (["Merged \(familyLabel) column mappings into \(profile)'s config — \(summary). "
-            + "Security agents, custom EAs and thresholds were kept. Review the Columns tab, "
-            + "then Save."] + notes).joined(separator: " ")
-    }
-
     /// Reads config.yaml again, dropping the edits not yet saved; the notice says so.
     private func reload() {
         Task { @MainActor in
@@ -371,8 +364,8 @@ struct ConfigView: View {
 
     private func segments(_ label: KeyPath<ConfigTab, String>) -> some View {
         SegmentedControl(
-            selection: $tab,
-            options: ConfigTab.allCases.map { ($0, $0[keyPath: label], $0.icon) }
+            selection: Binding(get: { shownTab }, set: { tab = $0 }),
+            options: offeredTabs.map { ($0, $0[keyPath: label], $0.icon) }
         )
     }
 
@@ -394,22 +387,6 @@ struct ConfigView: View {
                     PNPButton(title: "View YAML", icon: "chevron.left.forwardslash.chevron.right", action: viewYAML)
                         .disabled(workspace.demoMode)
                         .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
-                    // Switches to Columns because that is where the results
-                    // render. Worth knowing if this ever reads as a bug again:
-                    // the check used only to validate column mappings, which
-                    // made the jump look arbitrary. It now runs every Config
-                    // Doctor family — mappings, baselines, alert rules, data
-                    // accuracy, workspace and sharing — so the tab switch is
-                    // taking the operator to the report, not away from theirs.
-                    PNPButton(title: "Run check", icon: "flask") {
-                        tab = .columns
-                        triggerColumnsCheck = true
-                    }
-                    .disabled(workspace.demoMode)
-                    .help(workspace.demoMode
-                          ? DemoData.liveOnlyHelp
-                          : "Check this profile's config and data, and show what to fix "
-                              + "(results appear under Columns)")
                     // Demo edits apply on screen but have no file to be saved to.
                     PNPButton(title: "Save", icon: "checkmark", style: .gold, action: save)
                         .disabled(workspace.demoMode)
@@ -468,10 +445,18 @@ struct ConfigView: View {
 
     // MARK: Tab routing
 
+    private var offeredTabs: [ConfigTab] {
+        ConfigTab.offered(school: workspace.isSchoolWorkspace)
+    }
+
+    /// The selected tab, or the first offered one when the workspace does not offer it.
+    private var shownTab: ConfigTab {
+        offeredTabs.contains(tab) ? tab : offeredTabs[0]
+    }
+
     @ViewBuilder
     private var tabContent: some View {
-        switch tab {
-        case .columns:    ColumnsTab(triggerCheck: $triggerColumnsCheck)
+        switch shownTab {
         case .agents:     AgentsTab()
         case .eas:        EasTab()
         case .thresholds: ThresholdsTab()
@@ -514,321 +499,6 @@ struct ConfigView: View {
             withAnimation { saveStatus = .idle }
         }
     }
-}
-
-// MARK: - Columns tab
-
-private struct ColumnsTab: View {
-    /// Which device-family column block the editor is showing.
-    private enum ColumnFamily: Hashable { case mac, mobile }
-
-    @Binding var triggerCheck: Bool
-    @Environment(WorkspaceStore.self) private var workspace
-    @Environment(\.colorSchemeContrast) private var contrast
-    @State private var cli = CLIBridge()
-    @State private var checkOutput: [String] = []
-    @State private var family: ColumnFamily = .mac
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 12) {
-                SegmentedControl(
-                    selection: $family,
-                    options: [
-                        (ColumnFamily.mac, "macOS", "laptopcomputer"),
-                        (ColumnFamily.mobile, "Mobile Devices", "ipad"),
-                    ]
-                )
-                TipView(ConfigTips.columnMapping)
-                    .frame(maxWidth: 480, alignment: .leading)
-                switch family {
-                case .mac:    macColumnsCard
-                case .mobile: mobileColumnsCard
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            VStack(spacing: 12) {
-                validationCard
-                scaffoldTipCard
-            }
-            .frame(width: 240)
-        }
-        .onChange(of: triggerCheck) { _, triggered in
-            guard triggered else { return }
-            triggerCheck = false
-            family = .mac
-            runCheck()
-        }
-    }
-
-    // MARK: macOS column mappings (unchanged idiom)
-
-    private var macColumnsCard: some View {
-        @Bindable var ws = workspace
-        return Card(padding: 18) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    SectionHeader(title: "CSV Column Mappings")
-                    Spacer()
-                    Pill(
-                        text: "\(ws.columnMappings.filter { $0.status == .ok }.count) OK · "
-                            + "\(ws.columnMappings.filter { $0.status == .warn }.count) WARN",
-                        tone: .teal,
-                        icon: "checkmark"
-                    )
-                }
-                .padding(.bottom, 8)
-
-                HStack(spacing: 4) {
-                    Text("Mapping logical fields → column headers in your CSV export")
-                        .font(.caption)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                }
-                .padding(.bottom, 12)
-
-                VStack(spacing: 0) {
-                    ForEach(ws.columnMappings.indices, id: \.self) { i in
-                        ColumnFieldRow(
-                            mapping: ws.columnMappings[i],
-                            value: Binding(
-                                get: { ws.columnMappings[i].value },
-                                set: { ws.columnMappings[i].value = $0 }
-                            )
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: Mobile-device column mappings (opt-in)
-
-    private var mobileColumnsCard: some View {
-        @Bindable var ws = workspace
-        return Card(padding: 18) {
-            VStack(alignment: .leading, spacing: 0) {
-                SectionHeader(title: "Mobile CSV Column Mappings")
-                    .padding(.bottom, 8)
-                Text("Optional — only needed if you report on iOS/iPadOS/tvOS "
-                    + "devices. Leave blank for a Mac-only fleet.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 12)
-
-                VStack(spacing: 0) {
-                    ForEach(ConfigState.mobileColumnKeys, id: \.self) { key in
-                        MobileColumnFieldRow(
-                            key: key,
-                            placeholder: Self.mobilePlaceholders[key] ?? "",
-                            value: Binding(
-                                get: { ws.configState.mobileColumns[key] ?? "" },
-                                set: { ws.configState.mobileColumns[key] = $0 }
-                            )
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    /// Native column-header examples shown as placeholders when a mobile
-    /// mapping is blank. Mirrors the `mobile_columns` block in
-    /// `config.example.yaml`.
-    private static let mobilePlaceholders: [String: String] = [
-        "device_name": "Display Name",
-        "serial_number": "Serial Number",
-        "operating_system": "OS Version",
-        "last_checkin": "Last Inventory Update",
-        "email": "Email Address",
-        "model": "Model",
-        "device_family": "Device Family",
-        "managed": "Managed",
-        "supervised": "Supervised",
-    ]
-
-    private var validationCard: some View {
-        Card(padding: 16) {
-            VStack(alignment: .leading, spacing: 0) {
-                SectionHeader(title: "Validation")
-                    .padding(.bottom, 10)
-                let ok   = workspace.columnMappings.filter { $0.status == .ok }.count
-                let warn = workspace.columnMappings.filter { $0.status == .warn }.count
-                let skip = workspace.columnMappings.filter { $0.status == .skip }.count
-                VStack(alignment: .leading, spacing: 10) {
-                    validationRow(icon: "checkmark.circle.fill", color: Theme.Colors.ok,
-                                  title: ColumnValidationText.mapped(ok),
-                                  detail: "Required fields present")
-                    if warn > 0 {
-                        validationRow(icon: "exclamationmark.triangle.fill", color: Theme.Colors.warn,
-                                      title: ColumnValidationText.warnings(warn),
-                                      detail: ColumnValidationText.warningDetail(
-                                          workspace.columnMappings))
-                    }
-                    if skip > 0 {
-                        validationRow(icon: "minus.circle", color: Theme.Text.tertiary(contrast),
-                                      title: "\(skip) unmapped", detail: "Sheets that use these will be skipped")
-                    }
-                }
-                Divider().background(Theme.Hairline.standard).padding(.vertical, 12)
-                if !checkOutput.isEmpty {
-                    // The check reports the whole Config Doctor now, not a
-                    // single exit line, so its output needs somewhere to go.
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(checkOutput.enumerated()), id: \.offset) { _, line in
-                                Mono(text: line, size: 10.5,
-                                     color: Theme.Text.tertiary(contrast))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 180)
-                    .padding(.bottom, 6)
-                }
-                HStack(spacing: 6) {
-                    PNPButton(title: "Re-check", icon: "arrow.clockwise", size: .sm, action: runCheck)
-                        .disabled(workspace.demoMode)
-                        .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
-                    PNPButton(title: "Open CSV", icon: "arrow.up.right.square", style: .ghost, size: .sm, action: openCSV)
-                        .disabled(workspace.demoMode)
-                        .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
-                }
-            }
-        }
-    }
-
-    private func validationRow(icon: String, color: Color, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(color)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.footnote.weight(.medium)).foregroundStyle(Theme.Text.primary)
-                Text(detail).font(.caption).foregroundStyle(Theme.Text.tertiary(contrast))
-            }
-        }
-    }
-
-    private var scaffoldTipCard: some View {
-        Card(padding: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(title: "Tip")
-                Text(scaffoldTipText)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Text.secondary)
-                PNPButton(title: "Re-scaffold from CSV", icon: "bolt", style: .gold, size: .sm,
-                          action: runScaffold)
-                    .disabled(workspace.demoMode)
-                    .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
-                TipView(ConfigTips.rescaffold)
-            }
-        }
-    }
-
-    /// Runs the report engine's check against the real workspace and its CSV,
-    /// so never in demo mode.
-    private func runCheck() {
-        guard !workspace.demoMode else { return }
-        Task {
-            checkOutput = ["Running check…"]
-            let csvPath = newestCSVPath()
-            let exit: Int32
-            do {
-                exit = try await cli.check(profile: workspace.profile, csvPath: csvPath) { line in
-                    Task { @MainActor in
-                        if checkOutput == ["Running check…"] { checkOutput = [] }
-                        checkOutput.append(line.text)
-                    }
-                }
-            } catch {
-                checkOutput = [
-                    "Check failed: \(error.localizedDescription).",
-                    "Confirm a CSV is in csv-inbox and config.yaml is valid.",
-                ]
-                return
-            }
-            checkOutput.append(
-                exit == 0
-                    ? "— check complete"
-                    : CLIBridge.explainExit(exit, operation: "Config check")
-            )
-        }
-    }
-
-    private func openCSV() {
-        guard !workspace.demoMode else { return }
-        guard let url = newestCSVURL() else {
-            workspace.toast = Toast(
-                message: "No CSV export found in the workspace yet.",
-                style: .danger
-            )
-            return
-        }
-        SystemActions.open(url)
-    }
-
-    private var scaffoldTipText: String {
-        "Run scaffold to detect column mappings from a new CSV export and merge them into "
-            + "profile \(workspace.profile)'s config.yaml. Existing mappings, security agents, "
-            + "custom EAs and thresholds are kept — only empty or stale column mappings are "
-            + "filled. Re-running as the CSV changes over time is safe."
-    }
-
-    private func runScaffold() {
-        guard !workspace.demoMode else { return }
-        guard let csvURL = newestCSVURL() else {
-            workspace.toast = Toast(
-                message: "Drop a CSV export into the workspace before scaffolding.",
-                style: .danger
-            )
-            return
-        }
-        let profile = workspace.profile
-        Task {
-            do {
-                // MERGE into the existing config (per profile) rather than
-                // overwrite: fill empty mappings, repair mappings whose CSV
-                // column is gone, keep everything else (agents, custom EAs,
-                // thresholds) untouched. ConfigService.save preserves unmanaged keys.
-                // File reads + config load/save; keep off the main actor so a
-                // large CSV export never blocks the UI.
-                let outcome = try await Task.detached {
-                    try ScaffoldService.mergeIntoConfig(csvURL: csvURL, profile: profile)
-                }.value
-                let merged = outcome.state
-                await MainActor.run {
-                    workspace.toast = Toast(
-                        message: ConfigView.rescaffoldMessage(
-                            profile: profile, familyLabel: outcome.familyLabel,
-                            summary: outcome.report.summary, notes: outcome.saveReport.notes),
-                        style: .success
-                    )
-                }
-                workspace.reloadFromDisk()
-                // reloadFromDisk() leaves the loaded config alone, so without this the
-                // Columns tab showed the old mappings and Save wrote them back.
-                if workspace.profile == profile {
-                    workspace.adoptScaffoldedColumns(
-                        from: merged, readStamp: outcome.readStamp,
-                        savedDocument: outcome.savedDocument, savedStamp: outcome.savedStamp)
-                }
-            } catch {
-                await MainActor.run {
-                    workspace.toast = Toast(
-                        message: "Re-scaffold failed for \(profile): \(error.localizedDescription)",
-                        style: .danger)
-                }
-            }
-        }
-    }
-
-    private func newestCSVURL() -> URL? { CLIBridge.newestCSV(in: workspace.profile) }
-
-    private func newestCSVPath() -> String? { newestCSVURL()?.path }
 }
 
 // MARK: - Agents tab
@@ -935,10 +605,18 @@ private struct AgentsTab: View {
             // with the header.
             .menuIndicator(.hidden)
             .fixedSize()
+            .accessibilityLabel(
+                "Actions for " + (agent.wrappedValue.name.isEmpty ? "agent" : agent.wrappedValue.name))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
     }
+}
+
+/// Spoken name of an icon-only remove button: what it removes, by name when it has one.
+func removeButtonLabel(noun: String, name: String) -> String {
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
+    return trimmed.isEmpty ? "Remove \(noun)" : "Remove \(noun) \(trimmed)"
 }
 
 // MARK: - Custom EAs tab
@@ -1072,8 +750,30 @@ private struct ThresholdsTab: View {
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
+        if workspace.isSchoolWorkspace { schoolBody } else { proBody }
+    }
+
+    /// Jamf School reports one date per device, its last check-in, so only the stale
+    /// threshold applies.
+    private var schoolBody: some View {
         @Bindable var ws = workspace
-        HStack(alignment: .top, spacing: 14) {
+        return Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionHeader(title: "General Thresholds").padding(.bottom, 14)
+                thresholdField(
+                    label: "Stale device threshold", key: "stale_device_days",
+                    value: $ws.configState.staleDeviceDays, unit: "days",
+                    help: "A device is stale when its last check-in with Jamf School is more "
+                        + "than this many days ago"
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var proBody: some View {
+        @Bindable var ws = workspace
+        return HStack(alignment: .top, spacing: 14) {
             Card(padding: 18) {
                 VStack(alignment: .leading, spacing: 0) {
                     SectionHeader(title: "General Thresholds").padding(.bottom, 14)
@@ -1199,14 +899,19 @@ private struct PlatformTab: View {
                 VStack(alignment: .leading, spacing: 8) {
                     FieldLabel(label: "Compliance benchmarks")
                     ForEach(ws.configState.complianceBenchmarks.indices, id: \.self) { i in
+                        let benchmark = safeElementBinding(
+                            $ws.configState.complianceBenchmarks, i, default: "")
                         HStack(spacing: 8) {
-                            PNPTextField(value: safeElementBinding(
-                                $ws.configState.complianceBenchmarks, i, default: ""))
+                            PNPTextField(value: benchmark)
                             Button(role: .destructive) { ws.removeComplianceBenchmark(at: i) } label: {
                                 Image(systemName: "minus.circle.fill")
                                     .foregroundStyle(Theme.Colors.danger)
+                                    .frame(minWidth: 24, minHeight: 24)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel(
+                                removeButtonLabel(noun: "benchmark", name: benchmark.wrappedValue))
                         }
                     }
                     PNPButton(title: "Add benchmark", icon: "plus", style: .ghost, size: .sm, action: { ws.addComplianceBenchmark() })
@@ -1253,7 +958,7 @@ private struct PlatformTab: View {
                     .font(.caption.weight(.medium))
                     .foregroundStyle(Theme.Text.primary)
                 Text("Create an integration in Jamf Account under Integrations, then add it "
-                     + "with Settings → Add connection and choose Platform Gateway. That routes "
+                     + "with Settings → Add connection and choose Platform API. That routes "
                      + "Jamf Pro API traffic through the gateway and unlocks the Platform "
                      + "commands these sheets use.")
                     .font(.caption)
@@ -1421,94 +1126,6 @@ private struct OutputTab: View {
                 PNPTextField(value: value, mono: true)
             }
         }
-    }
-}
-
-// MARK: - Validation card text
-
-/// The Columns tab's validation summary: counts that agree with their noun, and a warning that
-/// names the mappings it counts instead of sending the reader to a check that may not mention it.
-enum ColumnValidationText {
-    static func mapped(_ count: Int) -> String {
-        "\(count) column\(count == 1 ? "" : "s") mapped"
-    }
-
-    static func warnings(_ count: Int) -> String {
-        "\(count) warning\(count == 1 ? "" : "s")"
-    }
-
-    /// The labels of the mappings flagged `.warn`, with the column each is mapped to.
-    static func warningDetail(_ mappings: [ColumnMapping]) -> String {
-        let flagged = mappings.filter { $0.status == .warn }.map { mapping in
-            mapping.value.isEmpty ? mapping.label : "\(mapping.label) (\(mapping.value))"
-        }
-        guard !flagged.isEmpty else { return "Run check for details" }
-        return "Flagged: " + flagged.joined(separator: ", ")
-    }
-}
-
-// MARK: - ColumnFieldRow
-
-private struct ColumnFieldRow: View {
-    let mapping: ColumnMapping
-    @Binding var value: String
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 4) {
-                Mono(text: mapping.key, size: 11.5, color: Theme.Text.secondary)
-                if mapping.required {
-                    Text("*").font(.caption2).foregroundStyle(Theme.Colors.goldBright)
-                }
-            }
-            .frame(width: 180, alignment: .leading)
-
-            PNPTextField(
-                value: $value,
-                placeholder: mapping.status == .skip ? "(unmapped — feature skipped)" : "",
-                mono: true
-            )
-
-            statusIcon.frame(width: 24)
-        }
-        .padding(.vertical, 6)
-    }
-
-    private var statusIcon: some View {
-        Group {
-            switch mapping.status {
-            case .ok:
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.Colors.ok)
-            case .warn:
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.Colors.warn)
-            case .skip:
-                Image(systemName: "minus.circle").foregroundStyle(Theme.Text.tertiary(contrast))
-            case .fail:
-                Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.Colors.danger)
-            }
-        }
-        .font(.system(size: 12, weight: .semibold))
-    }
-}
-
-// MARK: - MobileColumnFieldRow
-
-/// One row of the Mobile Devices column editor. Same label + TextField idiom
-/// as `ColumnFieldRow`, minus the live validation icon — mobile mappings are
-/// not exercised by the macOS "Run check" flow.
-private struct MobileColumnFieldRow: View {
-    let key: String
-    let placeholder: String
-    @Binding var value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Mono(text: key, size: 11.5, color: Theme.Text.secondary)
-                .frame(width: 180, alignment: .leading)
-            PNPTextField(value: $value, placeholder: placeholder, mono: true)
-        }
-        .padding(.vertical, 6)
     }
 }
 

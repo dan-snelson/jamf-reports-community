@@ -103,6 +103,23 @@ final class OverviewLiveDataTests: XCTestCase {
         XCTAssertEqual(built.reportingMacs, 12, "the Macs the first benchmark evaluated")
     }
 
+    func testBenchmarkRulesShowTheTitleAndTheIDOnlyWithoutOne() {
+        typealias Rule = ComplianceBenchmarksService.Snapshot.Rule
+        let snapshot = ComplianceBenchmarksService.Snapshot(
+            rules: [
+                Rule(rule: "Audit logging", passed: 5, failed: 7, unknown: 0, devices: 12,
+                     passRate: "41%", ruleId: "audit_flags_lo", benchmark: "CIS"),
+                Rule(rule: "", passed: 9, failed: 3, unknown: 0, devices: 12,
+                     passRate: "75%", ruleId: "os_sip_enable", benchmark: "CIS"),
+            ],
+            devices: [], rulesSourceFile: nil, devicesSourceFile: nil, snapshotDate: nil
+        )
+
+        let built = OverviewLiveDataLoader.failingRules(benchmarks: snapshot)
+
+        XCTAssertEqual(built.rules.map(\.ruleID), ["Audit logging", "os_sip_enable"])
+    }
+
     // MARK: - Loading a workspace
 
     /// A workspace under a temporary root holding `config` and one ea-results snapshot.
@@ -231,23 +248,15 @@ final class OverviewLiveDataTests: XCTestCase {
         ])
     }
 
-    func testFailedRulesComeFromTheExtensionAttributeFirst() {
-        var mac = record("mac-1", days: 0, source: "export.csv + computers.json")
-        mac.failedRules = 4
+    func testFailedRulesComeFromTheExtensionAttribute() {
+        let mac = record("mac-1", days: 0)
         let counts = OverviewLiveDataLoader.failureCounts(
             rows: (try? eaRows(#"[{"device": "MAC-1", "ea_name": "Failed Count", "value": 9}]"#))
                 ?? [],
             countColumn: "failed count")
 
-        XCTAssertEqual(OverviewLiveDataLoader.failedRules(
-            for: mac, eaCounts: counts, baselineConfigured: true), 9)
-        XCTAssertEqual(OverviewLiveDataLoader.failedRules(
-            for: mac, eaCounts: [:], baselineConfigured: true), 4, "CSV count as fallback")
-        XCTAssertNil(OverviewLiveDataLoader.failedRules(
-            for: mac, eaCounts: [:], baselineConfigured: false),
-                     "Without a compliance column every CSV row reads 0; that is not a pass")
-        XCTAssertNil(OverviewLiveDataLoader.failedRules(
-            for: record("jamf-only", days: 0), eaCounts: [:], baselineConfigured: true))
+        XCTAssertEqual(OverviewLiveDataLoader.failedRules(for: mac, eaCounts: counts), 9)
+        XCTAssertNil(OverviewLiveDataLoader.failedRules(for: mac, eaCounts: [:]))
     }
 
     func testRecentRowShowsUnknownsAsUnknown() {

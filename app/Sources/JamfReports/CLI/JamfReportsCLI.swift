@@ -61,7 +61,32 @@ enum CLIRun {
     static func printLogLine(_ line: CLIBridge.LogLine) {
         let stream: FileHandle = (line.level == .fail || line.level == .warn)
             ? .standardError : .standardOutput
-        stream.write(Data(renderedLogLine(line).utf8))
+        write(renderedLogLine(line), to: stream)
+    }
+
+    /// Writes `text`, made safe for a terminal when `stream` is one; a pipe or file gets the
+    /// bytes unchanged, so a script reads the value as jamf-cli or the cache holds it.
+    static func write(_ text: String, to stream: FileHandle) {
+        let shown = isatty(stream.fileDescriptor) == 1 ? terminalSafe(text) : text
+        stream.write(Data(shown.utf8))
+    }
+
+    /// `text` with C0 controls other than tab and newline, DEL, C1 controls, the line and
+    /// paragraph separators and the bidi controls written as `\uNNNN`: a device name or server
+    /// error can otherwise clear the screen, retitle the window, set the clipboard or reorder
+    /// what the line shows. JSON stays valid JSON for the same value.
+    static func terminalSafe(_ text: String) -> String {
+        var out = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            let value = scalar.value
+            if (value < 0x20 && value != 0x09 && value != 0x0A) || (0x7F...0x9F).contains(value)
+                || (0x2028...0x202E).contains(value) || (0x2066...0x2069).contains(value) {
+                out.append(contentsOf: String(format: "\\u%04x", value).unicodeScalars)
+            } else {
+                out.append(scalar)
+            }
+        }
+        return String(out)
     }
 
     /// The bytes written for `line`: credentials masked, since jamf-cli echoes its own errors
@@ -88,7 +113,7 @@ enum CLIRun {
 
     /// Print an error to stderr and exit with the given code (jamf-cli convention).
     static func fail(_ message: String, code: Int32 = 1) -> Never {
-        FileHandle.standardError.write(Data(("error: " + message + "\n").utf8))
+        write("error: " + message + "\n", to: .standardError)
         exit(code)
     }
 

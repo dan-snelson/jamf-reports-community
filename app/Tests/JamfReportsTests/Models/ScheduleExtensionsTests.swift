@@ -46,7 +46,7 @@ struct ScheduleExtensionsTests {
             profile: "test",
             schedule: "Mon 07:30",
             cadence: "weekly",
-            mode: .csvAssisted,
+            mode: .jamfCLIFull,
             next: "—",
             last: "—",
             lastStatus: .ok,
@@ -54,7 +54,7 @@ struct ScheduleExtensionsTests {
             enabled: true
         )
 
-        #expect(schedule.plainLanguageSummary == "Weekly at 07:30 — collects snapshots and builds a workbook (CSV required)")
+        #expect(schedule.plainLanguageSummary == "Weekly at 07:30 — collects snapshots and builds a workbook")
     }
 
     @Test("Plain language summary for jamf-cli-only mode")
@@ -151,7 +151,7 @@ struct ScheduleExtensionsTests {
 
     @Test("No migration nudge for other modes")
     func migrationNudgeNotNeededOtherModes() {
-        for mode in [Schedule.RunMode.snapshotOnly, .jamfCLIFull, .csvAssisted] {
+        for mode in [Schedule.RunMode.snapshotOnly, .jamfCLIFull] {
             let schedule = Schedule(
                 name: "Test",
                 profile: "test",

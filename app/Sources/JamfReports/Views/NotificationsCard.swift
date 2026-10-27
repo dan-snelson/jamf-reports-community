@@ -4,7 +4,7 @@ import TipKit
 /// Configures the active profile's `notify:` webhook. Scheduled runs already
 /// read this block at run time, so the panel only WRITES it; each control
 /// persists immediately (write-on-change), matching the Settings AI panel.
-/// The URL TextField is the exception: its binding fires per KEYSTROKE, and each
+/// The URL field is the exception: its binding fires per KEYSTROKE, and each
 /// save is a full config.yaml read/decode/re-encode/atomic-rename — so URL edits
 /// are debounced (600ms) instead of written per character.
 ///
@@ -19,6 +19,7 @@ struct NotificationsCard: View {
     @State private var notifyProvider: NotifyConfig.Provider = .teams
     @State private var notifyURL = ""
     @State private var notifyDetail: NotifyConfig.Detail = .full
+    @State private var notifyHeartbeat = false
     @State private var notifySaveMessage: String?
     /// What a save did not keep (a backup was made), shown while its profile is live.
     @State private var notifySaveNote: ProfileSaveNote?
@@ -56,7 +57,8 @@ struct NotificationsCard: View {
                     .pickerStyle(.menu)
                     .frame(maxWidth: 260, alignment: .leading)
 
-                    TextField("https://...", text: Binding(
+                    // The URL is a bearer secret: anyone holding it can post to the channel.
+                    SecureField("https://...", text: Binding(
                         get: { notifyURL },
                         set: { notifyURL = $0; scheduleDebouncedNotifySave() }))
                         .textFieldStyle(.roundedBorder)
@@ -64,6 +66,11 @@ struct NotificationsCard: View {
                         .frame(maxWidth: 420, alignment: .leading)
                         .onSubmit { flushNotifySave() }
 
+                    if NotifyConfigWriter.showsMissingURLWarning(enabled: notifyEnabled, url: notifyURL) {
+                        Text("Add the webhook URL. Nothing is sent until then, the heartbeat "
+                            + "included.")
+                            .font(.footnote).foregroundStyle(Theme.Colors.warn)
+                    }
                     if NotifyConfigWriter.showsInsecureURLWarning(enabled: notifyEnabled, url: notifyURL) {
                         Text("URL must start with https:// — notifications will not send.")
                             .font(.footnote).foregroundStyle(Theme.Colors.warn)
@@ -79,6 +86,14 @@ struct NotificationsCard: View {
                     .frame(maxWidth: 260, alignment: .leading)
                     Text("Minimal sends event counts only — no metric values, error text, or "
                         + "schedule names.")
+                        .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
+
+                    Toggle("Send a daily heartbeat", isOn: Binding(
+                        get: { notifyHeartbeat },
+                        set: { notifyHeartbeat = $0; saveNotifyConfig() }))
+                        .toggleStyle(.switch)
+                    Text("Posts one short card a day while the background item runs, so you can "
+                        + "alert on a day without one.")
                         .font(.footnote).foregroundStyle(Theme.Colors.fgMuted)
 
                     HStack(spacing: 8) {
@@ -126,7 +141,8 @@ struct NotificationsCard: View {
             enabled: notifyEnabled,
             provider: notifyProvider.rawValue,
             url: notifyURL,
-            detail: notifyDetail.rawValue
+            detail: notifyDetail.rawValue,
+            heartbeat: notifyHeartbeat
         )
     }
 
@@ -136,6 +152,7 @@ struct NotificationsCard: View {
         notifyProvider = config.resolvedProvider
         notifyURL = config.resolvedURL
         notifyDetail = config.resolvedDetail
+        notifyHeartbeat = config.sendsHeartbeat
         notifySaveMessage = nil
         notifySaveNote = nil
         notifyTestResult = nil
@@ -145,7 +162,7 @@ struct NotificationsCard: View {
     private var currentEdit: PendingNotifySave {
         PendingNotifySave(
             profile: profile, enabled: notifyEnabled, provider: notifyProvider.rawValue,
-            url: notifyURL, detail: notifyDetail.rawValue)
+            url: notifyURL, detail: notifyDetail.rawValue, heartbeat: notifyHeartbeat)
     }
 
     private func saveNotifyConfig() {
@@ -159,6 +176,7 @@ struct NotificationsCard: View {
                 provider: edit.provider,
                 url: edit.url,
                 detail: edit.detail,
+                heartbeat: edit.heartbeat,
                 profile: edit.profile
             )
             notifySaveMessage = nil
@@ -202,13 +220,17 @@ struct NotificationsCard: View {
     private func sendTestNotification() async {
         notifyTesting = true
         notifyTestResult = nil
+        let profile = profile
+        let organization = await Task.detached { WebhookNotifier.organization(profile: profile) }
+            .value
         let delivered = await WebhookNotifier.send(
             config: currentNotifyConfig,
-            title: "Test notification — Jamf Reports",
+            title: "Test notification",
             facts: [
                 .init(label: "Profile", value: profile),
                 .init(label: "Status", value: "Test"),
-            ]
+            ],
+            organization: organization
         )
         notifyTesting = false
         notifyTestResult = delivered ? "Delivered" : "Send failed — check the URL"
@@ -222,4 +244,5 @@ private struct PendingNotifySave: Sendable {
     let provider: String
     let url: String
     let detail: String
+    let heartbeat: Bool
 }

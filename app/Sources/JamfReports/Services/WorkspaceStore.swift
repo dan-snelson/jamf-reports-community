@@ -15,7 +15,6 @@ final class WorkspaceStore {
     @ObservationIgnored let connectionStore: ConnectionStore
     var schedules: [Schedule]
     var customEAs: [CustomEA]
-    var columnMappings: [ColumnMapping]
     var demoMode: Bool
 
     /// Shared trend store, owned here so it SURVIVES tab navigation. Overview and
@@ -90,6 +89,9 @@ final class WorkspaceStore {
     /// running collect's, else nil ("Ready").
     var statusLine: String? { globalStatus ?? collectStatus }
     var toast: Toast? = nil
+    /// The setup on screen has registered a jamf-cli profile or created a workspace folder and
+    /// is not finished; `AddSheetPlan.addRefusal` keeps the Add sheet closed meanwhile.
+    var onboardingRunHasWork = false
     /// Last known auth probe result for the active profile. `nil` while not yet
     /// checked (e.g. demo mode, or immediately after a profile switch before the
     /// async probe completes). Refreshed by `refreshAuthStatus()`.
@@ -180,8 +182,12 @@ final class WorkspaceStore {
         }
     }
 
-    /// Every metric a score card or the Trends picker can show for this workspace.
-    var availableMetrics: [TrendSeries.Metric] { TrendSeries.Metric.allCases + agentMetrics }
+    /// Every metric the Trends picker can show for this workspace; a Jamf School workspace has
+    /// only what its summary measures. Trends offers a mobile metric only where a day carries it.
+    var availableMetrics: [TrendSeries.Metric] {
+        isSchoolWorkspace ? TrendSeries.Metric.schoolMetrics
+            : TrendSeries.Metric.allCases + TrendSeries.Metric.mobileMetrics + agentMetrics
+    }
 
     /// Whether the Overview shows `metric` as a score card: an agent metric needs its agent
     /// configured (and not counted as EDR), a control card needs its control counted by the
@@ -205,12 +211,6 @@ final class WorkspaceStore {
         ProfileService.connectionGrouping(profiles: profiles, connections: activeConnections)
     }
 
-    /// Initialized workspaces under their connections, for Fleet Overview.
-    var initializedConnectionGrouping: ConnectionGrouping {
-        ProfileService.connectionGrouping(
-            profiles: initializedProfiles, connections: activeConnections)
-    }
-
     /// True when the active profile has a `config.yaml` on disk under
     /// `~/Jamf-Reports/<profile>/`. Demo profiles always report `true` because
     /// they don't have an on-disk workspace to initialize.
@@ -224,7 +224,7 @@ final class WorkspaceStore {
 
     /// Profiles with a workspace on disk. An `.error` profile is left out even
     /// when a folder answers to it: a case variant finds the owner's folder, and
-    /// Fleet Overview would count that workspace twice.
+    /// the sidebar would count that workspace twice.
     var initializedProfiles: [JamfCLIProfile] {
         if demoMode { return profiles }
         return profiles.filter { profile in
@@ -250,12 +250,15 @@ final class WorkspaceStore {
     /// cards edit them through `saveSecurityLevel` and its siblings.
     var securityPolicy: SecurityControlPolicy = .default
     var securityPolicyIssues: [SecurityPolicyIssue] = []
+    /// The active workspace has Jamf Protect connected; read with the config and when Data
+    /// Sources connects or disconnects it (`refreshProtectConnection`). False in demo mode.
+    var protectConnected = false
 
     // Last parsed document (preserves unknown keys + original text for round-trip).
     private var _loadedDoc: YAMLCodec.YAMLDocument?
     // config.yaml as configState was read from it; a save refuses once the file differs.
     private var _loadedStamp: ConfigFileStamp?
-    // Snapshot of state at last load/save — used by revert().
+    // Snapshot of state at last load/save.
     private var _savedState: ConfigState?
 
     /// True when configState has been edited since the last save or load.
@@ -280,44 +283,6 @@ final class WorkspaceStore {
         return SecurityScoreInputs.edrAgentIndex(among: names, chosen: securityPolicy.edrAgent)
             .map { names[$0] }
     }
-
-    // MARK: Column label / required metadata
-
-    private static let columnLabels: [String: String] = [
-        "computer_name":     "Computer Name",
-        "serial_number":     "Serial Number",
-        "operating_system":  "Operating System",
-        "last_checkin":      "Last Check-in",
-        "department":        "Department",
-        "manager":           "Manager",
-        "email":             "Email",
-        "filevault":         "FileVault Status",
-        "sip":               "SIP Status",
-        "firewall":          "Firewall Enabled",
-        "gatekeeper":        "Gatekeeper",
-        "secure_boot":       "Secure Boot",
-        "bootstrap_token":   "Bootstrap Token",
-        "disk_percent_full": "Disk % Full",
-        "architecture":      "Architecture",
-        "model":             "Model",
-        "model_identifier":  "Model Identifier",
-        "last_enrollment":   "Last Enrollment",
-        "mdm_expiry":        "MDM Profile Expiry",
-        "full_name":           "Full Name",
-        "asset_tag":           "Asset Tag",
-        "building":            "Building",
-        "position":            "Position",
-        "last_logged_in_user": "Last Logged-in User",
-        "recovery_lock":       "Recovery Lock",
-        "battery_health":      "Battery Health",
-        "entra_sso_status":    "Entra SSO Status",
-        "purchase_date":       "Purchase Date",
-        "last_inventory":      "Last Inventory Update",
-    ]
-
-    private static let requiredColumnKeys: Set<String> = [
-        "computer_name", "serial_number", "operating_system", "last_checkin",
-    ]
 
     // MARK: Init
 
@@ -365,7 +330,6 @@ final class WorkspaceStore {
             : Self.loadSchedules(baseProfile: ManagedAutomation.managedBaseProfile(
                 profiles: realProfiles, policy: AutomationPolicy.current()))
         self.customEAs = DemoData.customEAs
-        self.columnMappings = DemoData.columnMappings
         self.selectedScoreCards = Self.loadPersistedScoreCards() ?? Self.defaultScoreCards
         self.overviewLayout = OverviewLayout.parse(
             UserDefaults.standard.string(forKey: Self.overviewLayoutKey))
@@ -375,7 +339,7 @@ final class WorkspaceStore {
         self.jamfCLIInstallSource = jamfCLI?.source.label
         self.jamfCLIVerificationFailed = jamfCLI?.codesignVerified == false
         self.jamfCLISpecProVersion = jamfCLI?.specProVersion
-        if isDemo { applyDemoConfig() }
+        if isDemo { applyDemoConfig() } else { refreshProtectConnection() }
     }
 
     /// Managed schedules come from the policy; hand-built from the store.
@@ -457,6 +421,7 @@ final class WorkspaceStore {
                 profile = next
             }
             org = Self.org(for: real.first(where: { $0.name == profile }))
+            refreshProtectConnection()
             Task { await refreshAuthStatus() }
             if wasDemo { restoreLiveStateAfterDemo() }
         }
@@ -471,7 +436,6 @@ final class WorkspaceStore {
         configState = .defaultState
         _loadedDoc = nil
         _savedState = nil
-        rebuildColumnMappings()
         rebuildCustomEAs()
         Task {
             do { try await loadConfig() } catch {
@@ -497,6 +461,7 @@ final class WorkspaceStore {
             AutomationHealthModel.shared.freshnessIssues = []
             AutomationHealthModel.shared.sharedConfigKeys = []
             AutomationHealthModel.shared.automationFolderRefused = false
+            AutomationHealthModel.shared.attentionItems = []
             // The live config stayed loaded: its agent name and benchmark labelled
             // demo screens, and Config's Save reused the real YAML document.
             applyDemoConfig()
@@ -645,13 +610,10 @@ final class WorkspaceStore {
     }
 
     /// Human-readable summary of the customizations the current config carries,
-    /// e.g. "12 column mappings, 1 security agent, 16 custom EAs". Empty when the
+    /// e.g. "1 security agent, 16 custom EAs". Empty when the
     /// loaded state has nothing customized (so callers can omit the clause).
     func clearedConfigSummary() -> String {
         var parts: [String] = []
-        let columns = configState.columns.values.filter { !$0.isEmpty }.count
-            + configState.mobileColumns.values.filter { !$0.isEmpty }.count
-        if columns > 0 { parts.append("\(columns) column mapping\(columns == 1 ? "" : "s")") }
         let agents = configState.securityAgents.count
         if agents > 0 { parts.append("\(agents) security agent\(agents == 1 ? "" : "s")") }
         let eas = configState.customEAs.count
@@ -775,6 +737,7 @@ final class WorkspaceStore {
     /// file doesn't exist yet (new workspace). Other errors are rethrown.
     func loadConfig() async throws {
         configRepairedKeys = []
+        refreshProtectConnection()
         // A config.yaml under the demo profile's name is not the demo's, and
         // reading it would put real values on demo screens.
         if demoMode {
@@ -801,11 +764,10 @@ final class WorkspaceStore {
             configError = nil
             configRepairedKeys = []
         }
-        rebuildColumnMappings()
         rebuildCustomEAs()
     }
 
-    /// Flush current configState (+ any column mapping edits) to disk atomically. Returns what
+    /// Flush current configState to disk atomically. Returns what
     /// the save left as typed, for the Config screen to say.
     @discardableResult
     func saveConfig() async throws -> ConfigSaveReport {
@@ -813,7 +775,6 @@ final class WorkspaceStore {
         // config.yaml in the real workspaces root, where profile discovery and the
         // background item's all-profiles runs treat it as a real workspace.
         guard !demoMode else { return ConfigSaveReport() }
-        syncColumnMappingsToState()
         let changedFolders = SharedConfigPin.changedFolderKeys(
             before: _savedState.map { ($0.outputDir, $0.archiveDir) },
             after: (configState.outputDir, configState.archiveDir))
@@ -919,48 +880,7 @@ final class WorkspaceStore {
         configRepairedKeys = []
         securityPolicy = .default
         securityPolicyIssues = []
-        rebuildColumnMappings()
         rebuildCustomEAs()
-    }
-
-    /// Discard in-memory edits and restore to the state at the last load/save.
-    func revert() {
-        configState = _savedState ?? .defaultState
-        rebuildColumnMappings()
-        rebuildCustomEAs()
-        configError = nil
-    }
-
-    /// Takes the column mappings a re-scaffold just wrote to config.yaml into the working
-    /// config and its saved baseline, and rebuilds the Columns tab. Other unsaved edits stay.
-    /// Before, the Columns tab kept the old mappings, and the Save the re-scaffold toast asks
-    /// for wrote them back over the merge.
-    ///
-    /// The file's stamp moves with the write only when the merge read the file this screen
-    /// loaded (`readStamp`, from `ScaffoldService.mergeIntoConfig`). If it had changed on disk
-    /// since, the screen's other values are still the old ones, so the stamp stays and the
-    /// next Save refuses (`changedOnDisk`) until the screen reloads. The document and stamp it
-    /// then adopts are the merge's own (`savedDocument`, `savedStamp`), not a fresh read: a file
-    /// edited after the merge's save keeps a stamp that no longer matches, so the next Save
-    /// refuses instead of taking that edit as the screen's own.
-    func adoptScaffoldedColumns(
-        from saved: ConfigState, readStamp: ConfigFileStamp,
-        savedDocument: YAMLCodec.YAMLDocument, savedStamp: ConfigFileStamp
-    ) {
-        guard !demoMode else { return }
-        configState.columns = saved.columns
-        configState.mobileColumns = saved.mobileColumns
-        configState.failuresCountColumn = saved.failuresCountColumn
-        configState.failuresListColumn = saved.failuresListColumn
-        _savedState?.columns = saved.columns
-        _savedState?.mobileColumns = saved.mobileColumns
-        _savedState?.failuresCountColumn = saved.failuresCountColumn
-        _savedState?.failuresListColumn = saved.failuresListColumn
-        if _loadedStamp?.isSameFile(as: readStamp) == true {
-            _loadedDoc = savedDocument
-            _loadedStamp = savedStamp
-        }
-        rebuildColumnMappings()
     }
 
     // MARK: Mutations
@@ -1004,33 +924,6 @@ final class WorkspaceStore {
     }
 
     // MARK: Private helpers
-
-    /// Copy columnMappings.value back into configState.columns before saving.
-    private func syncColumnMappingsToState() {
-        for mapping in columnMappings {
-            configState.columns[mapping.key] = mapping.value
-        }
-    }
-
-    /// Rebuild [ColumnMapping] from configState.columns. A live workspace's status is read
-    /// off its value (empty is unmapped, else mapped): `columnMappings` starts as the demo's
-    /// list, and carrying its badges over put the demo's one warning on every live workspace.
-    /// Demo mode keeps its own badges.
-    private func rebuildColumnMappings() {
-        let statusByKey: [String: ColumnMapping.Status] = demoMode
-            ? Dictionary(columnMappings.map { ($0.key, $0.status) }, uniquingKeysWith: { $1 })
-            : [:]
-        columnMappings = ConfigState.columnKeys.map { key in
-            let value = configState.columns[key] ?? ""
-            return ColumnMapping(
-                key: key,
-                label: Self.columnLabels[key] ?? key,
-                value: value,
-                required: Self.requiredColumnKeys.contains(key),
-                status: statusByKey[key] ?? (value.isEmpty ? .skip : .ok)
-            )
-        }
-    }
 
     /// Rebuild [CustomEA] display models from configState.customEAs.
     private func rebuildCustomEAs() {
@@ -1204,7 +1097,14 @@ final class WorkspaceStore {
     /// The sidebar's visibility for the active workspace: the user's hidden tabs, and the tabs
     /// its product cannot fill.
     func tabVisibility(hiddenRaw: String) -> TabVisibility {
-        TabVisibility.parse(hiddenRaw).limited(toSchool: isSchoolWorkspace)
+        TabVisibility.parse(hiddenRaw)
+            .limited(toSchool: isSchoolWorkspace, protectConnected: protectConnected)
+    }
+
+    /// Re-reads whether the active workspace has Jamf Protect connected (`ConnectedProducts`).
+    func refreshProtectConnection() {
+        protectConnected = !demoMode
+            && ConnectedProducts.read(profile: profile).protectProfile != nil
     }
 
     /// After credentials are saved: a profile's auth method or scope level may have changed, so
@@ -1344,6 +1244,7 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
     case patch, updates, ddmBlueprints
     case policyProfile, extensionAttributes
     case outreach, protectDashboard, mobileFleet, groupInventory
+    case schoolDevices
 
     var id: String { rawValue }
 
@@ -1351,7 +1252,7 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .overview:          "Overview"
         case .fleet:             "Fleet Overview"
-        case .devices:           "Devices"
+        case .devices:           "Computers"
         case .deviceLookup:      "Device Lookup"
         case .trends:            "Trends"
         case .audit:             "Health Audit"
@@ -1374,8 +1275,9 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
         case .extensionAttributes: "Extension Attributes"
         case .outreach:          "Offline Outreach"
         case .protectDashboard:  "Jamf Protect"
-        case .mobileFleet:       "Mobile Fleet"
+        case .mobileFleet:       "Mobile Devices"
         case .groupInventory:    "Groups & Searches"
+        case .schoolDevices:     "Devices"
         }
     }
 
@@ -1408,16 +1310,20 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
         case .protectDashboard:  "shield.lefthalf.filled"
         case .mobileFleet:       "ipad"
         case .groupInventory:    "rectangle.3.group"
+        case .schoolDevices:     "ipad.and.iphone"
         }
     }
 
     var badgeIsGold: Bool { self == .trends }
 
     /// The tabs a Jamf School workspace keeps (2.10): it collects only School data, which no
-    /// Jamf Pro screen reads, so it keeps the screens about the workspace, its reports and its
-    /// automation. Applied by `TabVisibility.limited(toSchool:)`, never stored.
+    /// Jamf Pro screen reads, so it keeps its own Overview and Devices and the screens about the
+    /// workspace, its reports and its automation, and Trends, which charts the School daily
+    /// summary (`ReportEngine.writeSchoolSummary`). Fleet Overview stays out until its tiles
+    /// read that summary. Applied by `TabVisibility.limited(toSchool:)`, never stored.
     static let schoolTabs: Set<Tab> = [
-        .overview, .fleet, .reports, .schedules, .runs, .config, .sources, .settings, .onboarding,
+        .overview, .schoolDevices, .trends, .reports, .schedules, .runs, .config, .sources,
+        .settings, .onboarding,
     ]
 
     /// Tabs the user cannot hide. These are the bones of the app — hiding
@@ -1425,7 +1331,7 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
     /// configuration. Everything else is toggleable via `TabVisibility`.
     var isCoreTab: Bool {
         switch self {
-        case .overview, .devices, .sources, .settings, .onboarding:
+        case .overview, .devices, .schoolDevices, .sources, .settings, .onboarding:
             return true
         case .fleet, .deviceLookup, .trends, .audit, .reports,
              .schedules, .runs, .config, .customize, .backups,
@@ -1449,13 +1355,14 @@ enum Tab: String, CaseIterable, Identifiable, Hashable {
     /// `.onboarding` is intentionally absent: the sidebar never lists it.
     static let navGroups: [NavGroup] = [
         .init(label: "REPORTS",
-              items: [.overview, .fleet, .devices, .deviceLookup, .trends, .audit, .reports]),
+              items: [.overview, .fleet, .trends, .audit, .reports]),
+        .init(label: "FLEET",
+              items: [.devices, .schoolDevices, .mobileFleet, .deviceLookup, .protectDashboard,
+                      .groupInventory]),
         .init(label: "POSTURE",
               items: [.securityPosture, .compliancePosture, .complianceBenchmarks, .outreach]),
         .init(label: "OPERATIONS",
               items: [.patch, .updates, .ddmBlueprints, .policyProfile, .extensionAttributes]),
-        .init(label: "FLEET",
-              items: [.mobileFleet, .protectDashboard, .groupInventory]),
         .init(label: "AUTOMATION",
               items: [.schedules, .runs]),
         .init(label: "CONFIGURATION",
@@ -1490,16 +1397,23 @@ struct TabVisibility: Sendable, Equatable {
         self.hidden = hidden.filter { !$0.isCoreTab }
     }
 
+    /// False for a tab the workspace's product cannot fill, whatever the user chose.
+    func isAvailable(_ tab: Tab) -> Bool { !unavailable.contains(tab) }
+
     /// True when this tab should appear in the sidebar.
     func isVisible(_ tab: Tab) -> Bool {
         !unavailable.contains(tab) && (tab.isCoreTab || !hidden.contains(tab))
     }
 
     /// This visibility for the active workspace: a Jamf School workspace also leaves out every
-    /// tab outside `Tab.schoolTabs`.
-    func limited(toSchool isSchool: Bool) -> TabVisibility {
+    /// tab outside `Tab.schoolTabs`, except Jamf Protect while Protect is connected (2.11), and
+    /// any other workspace leaves out the School Devices tab.
+    func limited(toSchool isSchool: Bool, protectConnected: Bool = false) -> TabVisibility {
         var copy = self
-        copy.unavailable = isSchool ? Set(Tab.allCases).subtracting(Tab.schoolTabs) : []
+        let schoolTabs = protectConnected
+            ? Tab.schoolTabs.union([.protectDashboard]) : Tab.schoolTabs
+        copy.unavailable = isSchool
+            ? Set(Tab.allCases).subtracting(schoolTabs) : [.schoolDevices]
         return copy
     }
 

@@ -8,13 +8,15 @@ import Foundation
 ///
 /// Sheet plan mirrors Python's `SchoolDashboard.sheet_plan()`:
 ///   School Overview, Device Groups, Users, Classes, Apps, Profiles,
-///   Locations, DEP Devices, iBeacons,
-///   Device Inventory, OS Versions, Device Status, Stale Devices.
+///   Locations, DEP Devices, iBeacons, Blueprints,
+///   Device Inventory, OS Versions, Device Status, Stale Devices, Trends, then the Protect tabs.
 struct SchoolDashboard: Sendable {
 
     let config: ReportConfig
     let dataDir: URL
     let workbook: Workbook
+    /// The profile's daily summaries, for the Trends tab.
+    var summaries: [DailySummary] = []
 
     private var staleThreshold: Int { config.thresholds?.resolvedStaleDays ?? 30 }
 
@@ -53,9 +55,18 @@ struct SchoolDashboard: Sendable {
         return (written, failures)
     }
 
-    /// The School tabs in their default order.
+    /// The School tab names in their default order, for screens that list them without a
+    /// workbook (the Generate sheet). `sheetPlan` writes the same names.
+    static let sheetNames = [
+        "School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles", "Locations",
+        "DEP Devices", "iBeacons", "Blueprints", "Device Inventory", "OS Versions",
+        "Device Status", "Stale Devices", "Trends",
+    ] + CoreDashboard.protectSheetNames
+
+    /// The School tabs in their default order, then the Jamf Pro workbook's Protect tabs, which
+    /// are written while `protect.enabled` is on (2.11), under the same gate and names.
     var sheetPlan: [(name: String, write: () throws -> Void)] {
-        [
+        let school: [(name: String, write: () throws -> Void)] = [
             ("School Overview", writeSchoolOverview),
             ("Device Groups", writeSchoolDeviceGroups),
             ("Users", writeSchoolUsers),
@@ -65,11 +76,15 @@ struct SchoolDashboard: Sendable {
             ("Locations", writeSchoolLocations),
             ("DEP Devices", writeSchoolDepDevices),
             ("iBeacons", writeSchoolIBeacons),
+            ("Blueprints", writeSchoolBlueprints),
             ("Device Inventory", writeSchoolDeviceInventory),
             ("OS Versions", writeSchoolOSVersions),
             ("Device Status", writeSchoolDeviceStatus),
             ("Stale Devices", writeSchoolStaleDevices),
+            ("Trends", writeSchoolTrends),
         ]
+        return school
+            + CoreDashboard(config: config, dataDir: dataDir, workbook: workbook).protectSheetPlan
     }
 
     // MARK: - School Overview
@@ -319,6 +334,39 @@ struct SchoolDashboard: Sendable {
         }
     }
 
+    // MARK: - Blueprints (Experimental: Platform API, `school-blueprints`)
+
+    func writeSchoolBlueprints() throws {
+        let raw = try loadSchoolJSON(names: [ReportEngine.schoolBlueprintsKind])
+        let items = flattenSchoolList(raw)
+        let ws = workbook.addSheet("Blueprints")
+        ws.setColumnWidth(0, 0, 36)
+        ws.setColumnWidth(1, 1, 16)
+        ws.setColumnWidth(2, 4, 24)
+        var row = ws.writeSheetHeader(
+            title: "Blueprints",
+            subtitle: "Experimental. Generated: \(ISO8601DateFormatter().string(from: Date()))",
+            ncols: 5
+        )
+        let hdrs = ["Name", "State", "Last deployed", "Created", "Updated"]
+        for (col, h) in hdrs.enumerated() { ws.write(h, row: row, col: col, format: .header) }
+        row += 1
+        for item in items {
+            let deployment = item["deploymentState"] as? [String: Any]
+            let last = deployment?["lastDeployment"] as? [String: Any]
+            let state = (deployment?["state"] as? String ?? "")
+                .replacingOccurrences(of: "_", with: " ")
+            ws.write(stringField(item, ["name"]), row: row, col: 0, format: .cell)
+            ws.write(state.prefix(1).uppercased() + state.dropFirst().lowercased(),
+                     row: row, col: 1, format: .cell)
+            ws.write(last.map { stringField($0, ["started"]) } ?? "",
+                     row: row, col: 2, format: .cell)
+            ws.write(stringField(item, ["created"]), row: row, col: 3, format: .cell)
+            ws.write(stringField(item, ["updated"]), row: row, col: 4, format: .cell)
+            row += 1
+        }
+    }
+
     // MARK: - Device Inventory (from school-devices bridge snapshot)
 
     func writeSchoolDeviceInventory() throws {
@@ -422,10 +470,11 @@ struct SchoolDashboard: Sendable {
     func writeSchoolStaleDevices() throws {
         let raw = try loadSchoolJSON(names: ["school-devices", "school_devices"])
         let items = flattenSchoolList(raw)
-        let stale = items.filter { item -> Bool in
+        // A check-in that does not read is unknown, not stale, so the device is left out.
+        let stale = items.compactMap { item -> (item: [String: Any], days: Int)? in
             let checkin = stringField(item, ["lastCheckin", "last_checkin", "lastContactTime"])
-            let days = daysSince(checkin)
-            return days > staleThreshold
+            guard let days = daysSince(checkin), days > staleThreshold else { return nil }
+            return (item, days)
         }
         let ws = workbook.addSheet("Stale Devices")
         ws.setColumnWidth(0, 0, 28)
@@ -440,14 +489,77 @@ struct SchoolDashboard: Sendable {
         let hdrs = ["Device Name", "Serial", "Last Checkin", "Days Since Checkin"]
         for (col, h) in hdrs.enumerated() { ws.write(h, row: row, col: col, format: .header) }
         row += 1
-        for item in stale {
+        for (item, days) in stale {
             let checkin = stringField(item, ["lastCheckin", "last_checkin", "lastContactTime"])
             ws.write(stringField(item, ["name", "deviceName"]), row: row, col: 0, format: .cell)
             ws.write(stringField(item, ["serialNumber", "serial"]), row: row, col: 1, format: .cell)
             ws.write(checkin, row: row, col: 2, format: .cell)
-            ws.write(daysSince(checkin), row: row, col: 3, format: .red)
+            ws.write(days, row: row, col: 3, format: .red)
             row += 1
         }
+    }
+
+    // MARK: - Trends (from the daily summaries)
+
+    /// One row per daily summary, newest first. Macs and mobile devices are never counted
+    /// together, and a figure the day did not record for that type is a blank cell, never 0.
+    /// Numbers are numbers, so Excel and Power BI chart the columns as they are.
+    func writeSchoolTrends() throws {
+        guard !summaries.isEmpty else {
+            throw SchoolDashboardError.noCachedData(names: ["summaries"])
+        }
+        let ws = workbook.addSheet("Trends")
+        ws.setColumnWidth(0, 0, 14)
+        ws.setColumnWidth(1, 10, 18)
+        var row = ws.writeSheetHeader(
+            title: "Trends",
+            subtitle: "Generated: \(ISO8601DateFormatter().string(from: Date()))",
+            ncols: Self.trendColumns.count)
+        for (col, title) in Self.trendColumns.enumerated() {
+            ws.write(title, row: row, col: col, format: .header)
+        }
+        ws.freezePane(row: row + 1, col: 1)
+        row += 1
+        for summary in summaries.sorted(by: { $0.date > $1.date }) {
+            for (col, value) in Self.trendCells(summary).enumerated() {
+                switch value {
+                case .count(let n): ws.write(n, row: row, col: col, format: .int)
+                case .share(let fraction): ws.write(fraction, row: row, col: col, format: .pct)
+                case .text(let text): ws.write(text, row: row, col: col, format: .cell)
+                case nil: ws.writeBlank(row: row, col: col, format: .cell)
+                }
+            }
+            row += 1
+        }
+    }
+
+    static let trendColumns = [
+        "Date", "Macs", "Stale Macs", "Macs on current macOS %",
+        "Mobile devices", "Managed mobile devices", "Stale mobile devices",
+        "Supervised mobile devices", "Mobile devices reporting supervision",
+        "Supervised mobile devices %", "Mobile devices on current OS %",
+    ]
+
+    enum TrendCell: Equatable { case count(Int), share(Double), text(String) }
+
+    /// A summary's Trends row in `trendColumns` order; nil is a blank cell. A share is a
+    /// fraction (0.75) under the percent format. A day with no Macs leaves the Mac columns blank.
+    static func trendCells(_ s: DailySummary) -> [TrendCell?] {
+        let hasMacs = s.totalDevices > 0
+        let mobile = s.mobile
+        return [
+            .text(s.date),
+            hasMacs ? .count(s.totalDevices) : nil,
+            hasMacs ? s.staleCount.map(TrendCell.count) : nil,
+            hasMacs ? s.osCurrentPct.map { .share($0 / 100) } : nil,
+            s.mobileDeviceCount.map(TrendCell.count),
+            mobile.map { .count($0.managed) },
+            mobile?.stale.map(TrendCell.count),
+            mobile?.supervised.map { .count($0.met) },
+            mobile?.supervised.map { .count($0.of) },
+            mobile?.supervised?.pct.map { .share($0 / 100) },
+            mobile?.osCurrent?.pct.map { .share($0 / 100) },
+        ]
     }
 
     // MARK: - Private helpers
@@ -523,10 +635,8 @@ struct SchoolDashboard: Sendable {
     }
 
     /// jamf-cli's `lastCheckin` is "yyyy-MM-dd HH:mm:ss", which `DateParser` reads.
-    private func daysSince(_ dateString: String) -> Int {
-        guard !dateString.isEmpty else { return 0 }
-        guard let date = DateParser().parse(dateString) else { return 0 }
-        return Int(Date().timeIntervalSince(date) / 86400)
+    private func daysSince(_ dateString: String) -> Int? {
+        DateParser().parse(dateString).map { Int(Date().timeIntervalSince($0) / 86400) }
     }
 
     /// The platform and major version in jamf-cli's `os`, which reads "Prefix Version": "macOS
@@ -538,32 +648,6 @@ struct SchoolDashboard: Sendable {
         guard let major = numeric.split(separator: ".").first else { return "Unknown" }
         let platform = os[..<start].trimmingCharacters(in: .whitespaces)
         return platform.isEmpty ? String(major) : "\(platform) \(major)"
-    }
-}
-
-// MARK: - SchoolCSVDashboard
-
-/// Writes School CSV-derived sheets (Device Inventory from CSV, Stale Devices, etc.).
-/// Currently a stub that writes nothing: the school-devices snapshot already produces the
-/// Device Inventory sheet through `SchoolDashboard`, and no School CSV column mapping exists.
-struct SchoolCSVDashboard: Sendable {
-    let config: ReportConfig
-    let csvData: Data
-    let workbook: Workbook
-
-    init?(config: ReportConfig, csvData: Data, workbook: Workbook) {
-        guard !csvData.isEmpty else { return nil }
-        self.config = config
-        self.csvData = csvData
-        self.workbook = workbook
-    }
-
-    @discardableResult
-    func writeAll() -> [String] {
-        // CSV-driven school sheets use the same CSVParser as the Jamf Pro side.
-        // For now this stub writes nothing additional — the bridge-driven
-        // school-devices snapshot already produces Device Inventory via SchoolDashboard.
-        return []
     }
 }
 

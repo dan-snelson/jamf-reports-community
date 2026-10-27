@@ -32,6 +32,36 @@ import XCTest
 @MainActor
 final class OnboardingFlowRedactionTests: XCTestCase {
 
+    // MARK: - Clearing zeroes the stored bytes
+
+    /// Each secret the flow holds is zeroed in place by `clearAllSecrets`, not only dropped.
+    func test_clearAllSecrets_zeroesEveryStoredSecret() throws {
+        let setters: [(OnboardingFlow, Data) -> Void] = [
+            { $0.setClientSecret($1) }, { $0.setPlatformClientSecret($1) },
+            { $0.setProtectClientSecret($1) }, { $0.setSchoolAPIKey($1) },
+            { $0.setSchoolPlatformClientSecret($1) },
+        ]
+        for (index, set) in setters.enumerated() {
+            let flow = OnboardingFlow()
+            let zeroed = try secretBufferIsZeroed(store: { set(flow, $0) }, clear: {
+                flow.clearAllSecrets()
+            })
+            XCTAssertTrue(zeroed, "secret \(index) was not zeroed")
+            XCTAssertTrue(flow.clientSecret.isEmpty && flow.platformClientSecret.isEmpty
+                && flow.protectClientSecret.isEmpty && flow.schoolAPIKey.isEmpty
+                && flow.schoolPlatformClientSecret.isEmpty)
+        }
+    }
+
+    /// The redaction helper matches the secret's bytes without making it a String.
+    func test_redacting_replacesEveryOccurrenceOfTheSecretBytes() {
+        let text = "bad secret abc123 and again abc123."
+        XCTAssertEqual(
+            OnboardingFlow.redacting(Data("abc123".utf8), in: text),
+            "bad secret [redacted] and again [redacted].")
+        XCTAssertEqual(OnboardingFlow.redacting(Data(), in: text), text)
+    }
+
     // MARK: - Clearing: OAuth2 (Pro) credentials
 
     /// After navigating backwards from the authenticate step, `clientSecret`
@@ -40,7 +70,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.currentStep = .authenticate
         flow.proConnectionType = .oauth2
-        flow.clientSecret = "super-secret-oauth-value"
+        flow.clientSecret = Data("super-secret-oauth-value".utf8)
         flow.secretFieldHasText = true
 
         flow.previousStep()
@@ -61,7 +91,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.currentStep = .authenticate
         flow.proConnectionType = .platformGateway
-        flow.platformClientSecret = "platform-secret-xyz"
+        flow.platformClientSecret = Data("platform-secret-xyz".utf8)
         flow.platformSecretFieldHasText = true
 
         flow.previousStep()
@@ -81,9 +111,9 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     func test_previousStep_fromAuthenticate_clearsBothFlowSecrets() {
         let flow = OnboardingFlow()
         flow.currentStep = .authenticate
-        flow.clientSecret = "oauth-secret"
+        flow.clientSecret = Data("oauth-secret".utf8)
         flow.secretFieldHasText = true
-        flow.platformClientSecret = "platform-secret"
+        flow.platformClientSecret = Data("platform-secret".utf8)
         flow.platformSecretFieldHasText = true
 
         flow.previousStep()
@@ -101,9 +131,9 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     func test_previousStep_fromAddProducts_clearsProductSecrets() {
         let flow = OnboardingFlow()
         flow.currentStep = .addProducts
-        flow.protectClientSecret = "protect-secret-abc"
+        flow.protectClientSecret = Data("protect-secret-abc".utf8)
         flow.protectSecretFieldHasText = true
-        flow.schoolAPIKey = "school-api-key-def"
+        flow.schoolAPIKey = Data("school-api-key-def".utf8)
         flow.schoolAPIKeyFieldHasText = true
 
         flow.previousStep()
@@ -134,7 +164,9 @@ final class OnboardingFlowRedactionTests: XCTestCase {
         let secret = "r0und-tr1p-secret!"
         let data = Data(secret.utf8)
         flow.setClientSecret(data)
-        XCTAssertEqual(flow.clientSecret, secret, "setClientSecret must decode UTF-8 bytes faithfully")
+        XCTAssertEqual(
+            flow.clientSecret, Data(secret.utf8),
+            "setClientSecret must decode UTF-8 bytes faithfully")
     }
 
     /// `setPlatformClientSecret(_:)` converts UTF-8 bytes into `platformClientSecret`.
@@ -142,7 +174,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
         let flow = OnboardingFlow()
         let secret = "platform-r0und-tr1p"
         flow.setPlatformClientSecret(Data(secret.utf8))
-        XCTAssertEqual(flow.platformClientSecret, secret)
+        XCTAssertEqual(flow.platformClientSecret, Data(secret.utf8))
     }
 
     /// `setProtectClientSecret(_:)` converts UTF-8 bytes into `protectClientSecret`.
@@ -150,7 +182,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
         let flow = OnboardingFlow()
         let secret = "protect-s3cr3t"
         flow.setProtectClientSecret(Data(secret.utf8))
-        XCTAssertEqual(flow.protectClientSecret, secret)
+        XCTAssertEqual(flow.protectClientSecret, Data(secret.utf8))
     }
 
     /// `setSchoolAPIKey(_:)` converts UTF-8 bytes into `schoolAPIKey`.
@@ -158,7 +190,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
         let flow = OnboardingFlow()
         let key = "school-4pi-k3y"
         flow.setSchoolAPIKey(Data(key.utf8))
-        XCTAssertEqual(flow.schoolAPIKey, key)
+        XCTAssertEqual(flow.schoolAPIKey, Data(key.utf8))
     }
 
     // MARK: - stdin builders: secret appears in bytes, not in argv
@@ -168,7 +200,8 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     func test_oAuth2_secretInStdin_notInArgv() {
         let secret = "my-oauth2-secret"
         let clientID = "my-client-id"
-        let data = OnboardingFlow.proOAuth2Stdin(clientID: clientID, clientSecret: secret)
+        let data = OnboardingFlow.proOAuth2Stdin(
+            clientID: clientID, clientSecret: Data(secret.utf8))
         let args = OnboardingFlow.proOAuth2Arguments(
             profile: "testprofile", url: "https://jamf.example.com"
         )
@@ -191,7 +224,8 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     func test_platformGateway_secretInStdin_notInArgv() {
         let secret = "platform-secret-value"
         let clientID = "platform-client-id"
-        let data = OnboardingFlow.platformGatewayStdin(clientID: clientID, clientSecret: secret)
+        let data = OnboardingFlow.platformGatewayStdin(
+            clientID: clientID, clientSecret: Data(secret.utf8))
         let args = OnboardingFlow.platformGatewayArguments(
             profile: "testprofile",
             gatewayURL: "https://us.api.jamfcloud.com",
@@ -210,7 +244,8 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     /// The Protect secret appears in stdin bytes and not in argv.
     func test_protect_secretInStdin_notInArgv() {
         let secret = "protect-client-secret"
-        let data = OnboardingFlow.protectStdin(clientID: "protect-id", clientSecret: secret)
+        let data = OnboardingFlow.protectStdin(
+            clientID: "protect-id", clientSecret: Data(secret.utf8))
         let args = OnboardingFlow.protectArguments(
             profile: "protect-profile", url: "https://protect.jamfcloud.com"
         )
@@ -226,7 +261,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     /// The School API key appears in stdin bytes and not in argv.
     func test_school_apiKeyInStdin_notInArgv() {
         let apiKey = "school-api-key-value"
-        let data = OnboardingFlow.schoolStdin(networkID: "net-123", apiKey: apiKey)
+        let data = OnboardingFlow.schoolStdin(networkID: "net-123", apiKey: Data(apiKey.utf8))
         let args = OnboardingFlow.schoolArguments(
             profile: "school-profile", url: "https://school.jamfcloud.com"
         )
@@ -248,7 +283,8 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     /// containing secret must still produce valid UTF-8 stdin bytes.
     func test_oAuth2Stdin_metacharacterSecret_roundTripsClean() {
         let metacharSecret = "s3cr3t.*+?[]{}()|^$\\"
-        let data = OnboardingFlow.proOAuth2Stdin(clientID: "cid", clientSecret: metacharSecret)
+        let data = OnboardingFlow.proOAuth2Stdin(
+            clientID: "cid", clientSecret: Data(metacharSecret.utf8))
         let stdin = String(data: data, encoding: .utf8) ?? ""
         XCTAssertTrue(
             stdin.contains(metacharSecret),
@@ -259,7 +295,8 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     /// A Platform Gateway secret containing regex metacharacters round-trips cleanly.
     func test_platformGatewayStdin_metacharacterSecret_roundTripsClean() {
         let metacharSecret = "pl@t!f0rm.*+?[]"
-        let data = OnboardingFlow.platformGatewayStdin(clientID: "cid", clientSecret: metacharSecret)
+        let data = OnboardingFlow.platformGatewayStdin(
+            clientID: "cid", clientSecret: Data(metacharSecret.utf8))
         let stdin = String(data: data, encoding: .utf8) ?? ""
         XCTAssertTrue(stdin.contains(metacharSecret))
     }
@@ -267,7 +304,8 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     /// A Protect secret containing regex metacharacters round-trips cleanly.
     func test_protectStdin_metacharacterSecret_roundTripsClean() {
         let metacharSecret = "pr0t3ct.[*+?|\\]"
-        let data = OnboardingFlow.protectStdin(clientID: "cid", clientSecret: metacharSecret)
+        let data = OnboardingFlow.protectStdin(
+            clientID: "cid", clientSecret: Data(metacharSecret.utf8))
         let stdin = String(data: data, encoding: .utf8) ?? ""
         XCTAssertTrue(stdin.contains(metacharSecret))
     }
@@ -275,7 +313,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     /// A School API key containing regex metacharacters round-trips cleanly.
     func test_schoolStdin_metacharacterAPIKey_roundTripsClean() {
         let metacharKey = "sch00l-k3y.[*+?|\\]"
-        let data = OnboardingFlow.schoolStdin(networkID: "net", apiKey: metacharKey)
+        let data = OnboardingFlow.schoolStdin(networkID: "net", apiKey: Data(metacharKey.utf8))
         let stdin = String(data: data, encoding: .utf8) ?? ""
         XCTAssertTrue(stdin.contains(metacharKey))
     }
@@ -285,7 +323,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     /// The OAuth2 stdin bytes must be structured as `clientID\nclientSecret\n`
     /// (0x0A delimiters, not CRLF). The term reader in jamf-cli uses LF.
     func test_oAuth2Stdin_structure_lfDelimiters() {
-        let data = OnboardingFlow.proOAuth2Stdin(clientID: "id", clientSecret: "sec")
+        let data = OnboardingFlow.proOAuth2Stdin(clientID: "id", clientSecret: Data("sec".utf8))
         let bytes = Array(data)
         // id\nsec\n = ['i','d',0x0A,'s','e','c',0x0A]
         XCTAssertEqual(bytes.filter { $0 == 0x0A }.count, 2, "Must have exactly two 0x0A bytes")
@@ -294,7 +332,7 @@ final class OnboardingFlowRedactionTests: XCTestCase {
 
     /// The School stdin must end with `n\n` as the defensive Platform API prompt answer.
     func test_schoolStdin_endsWithDefensiveN() {
-        let data = OnboardingFlow.schoolStdin(networkID: "net", apiKey: "key")
+        let data = OnboardingFlow.schoolStdin(networkID: "net", apiKey: Data("key".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertTrue(
             s.hasSuffix("n\n"),
@@ -308,17 +346,15 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     func test_previousStep_fromAuthenticate_doesNotClearProductSecrets() {
         let flow = OnboardingFlow()
         flow.currentStep = .authenticate
-        flow.protectClientSecret = "protect-should-survive"
-        flow.schoolAPIKey = "school-should-survive"
+        flow.protectClientSecret = Data("protect-should-survive".utf8)
+        flow.schoolAPIKey = Data("school-should-survive".utf8)
 
         flow.previousStep()
 
-        XCTAssertEqual(
-            flow.protectClientSecret, "protect-should-survive",
+        XCTAssertEqual(flow.protectClientSecret, Data("protect-should-survive".utf8),
             "previousStep() from .authenticate must not clear protectClientSecret"
         )
-        XCTAssertEqual(
-            flow.schoolAPIKey, "school-should-survive",
+        XCTAssertEqual(flow.schoolAPIKey, Data("school-should-survive".utf8),
             "previousStep() from .authenticate must not clear schoolAPIKey"
         )
     }
@@ -327,17 +363,15 @@ final class OnboardingFlowRedactionTests: XCTestCase {
     func test_previousStep_fromAddProducts_doesNotClearProSecrets() {
         let flow = OnboardingFlow()
         flow.currentStep = .addProducts
-        flow.clientSecret = "oauth2-should-survive"
-        flow.platformClientSecret = "platform-should-survive"
+        flow.clientSecret = Data("oauth2-should-survive".utf8)
+        flow.platformClientSecret = Data("platform-should-survive".utf8)
 
         flow.previousStep()
 
-        XCTAssertEqual(
-            flow.clientSecret, "oauth2-should-survive",
+        XCTAssertEqual(flow.clientSecret, Data("oauth2-should-survive".utf8),
             "previousStep() from .addProducts must not clear clientSecret"
         )
-        XCTAssertEqual(
-            flow.platformClientSecret, "platform-should-survive",
+        XCTAssertEqual(flow.platformClientSecret, Data("platform-should-survive".utf8),
             "previousStep() from .addProducts must not clear platformClientSecret"
         )
     }
@@ -395,4 +429,19 @@ final class OnboardingFlowRedactionTests: XCTestCase {
         flow.schoolURL = "https://org.jamfcloud.com"
         XCTAssertTrue(flow.isSchoolURLValid)
     }
+}
+
+/// Hands `store` a secret over a buffer the test owns, runs `clear`, and reports whether every
+/// byte of that buffer is zero: a clear that only dropped the value would leave it intact.
+/// 64 bytes keeps Data off its inline representation, which would copy the bytes.
+@MainActor
+func secretBufferIsZeroed(store: (Data) -> Void, clear: () -> Void) throws -> Bool {
+    let count = 64
+    let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: count, alignment: 1)
+    defer { buffer.deallocate() }
+    buffer.initializeMemory(as: UInt8.self, repeating: 0x41)
+    let base = try XCTUnwrap(buffer.baseAddress)
+    store(Data(bytesNoCopy: base, count: count, deallocator: .none))
+    clear()
+    return buffer.allSatisfy { $0 == 0 }
 }

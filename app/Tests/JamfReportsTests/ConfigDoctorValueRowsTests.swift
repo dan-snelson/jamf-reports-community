@@ -283,7 +283,7 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         custom_eas:
           - {name: Disk Use, column: Boot Drive, type: percentage}
         sheets:
-          only: ["Patch Compliance", "Patch Complience", "disk use", "Device Inventory"]
+          only: ["Patch Compliance", "Patch Complience", "disk use", "EA Warnings"]
           skip: [cover, Nonsense]
           order: ["Fleet Overview", "Fleet Overveiw"]
         """)
@@ -301,23 +301,19 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
             config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
             workbook: Workbook())
         XCTAssertEqual(Set(core.sheetPlan.map(\.name)), Set(SheetID.allCases.map(\.rawValue)))
-        let computers = "Computer Name,Serial Number,Operating System Version,Last Check-in\n"
-            + "Mac-001,C02,15.0,2026-01-01\n"
-        let mobile = "Display Name,JSS Mobile Device ID,OS Version,Last Inventory Update,"
-            + "Jailbreak Detected,Wi-Fi MAC Address,Battery Level,Lost Mode Enabled,"
-            + "Device Ownership Type,Passcode Status\niPad-001,100,18.0,2026-01-01,false,"
-            + "aa:bb:cc:dd:ee:ff,85%,false,Institutional,Compliant\n"
+        // The one tab EASheets writes besides a tab per custom EA: an EA nothing was collected for.
+        let dataDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-eatabs-\(UUID().uuidString)", isDirectory: true)
+        let defined = dataDir.appendingPathComponent("computer-extension-attributes")
+        try FileManager.default.createDirectory(at: defined, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dataDir) }
+        try JSONSerialization.data(withJSONObject: [["id": "1", "name": "One"]])
+            .write(to: defined.appendingPathComponent("computer-extension-attributes_20261004T100000.json"))
         var config = ReportConfig()
-        config.compliance = ComplianceConfig(enabled: true)
-        config.securityAgents = [
-            SecurityAgentConfig(name: "Agent", column: "Agent Status", connectedValue: "Ok")]
-        for csv in [computers, mobile] {
-            let dashboard = try XCTUnwrap(CSVDashboard(
-                config: config, csvData: Data(csv.utf8), workbook: Workbook()))
-            let planned = Set(dashboard.sheetPlan.map(\.name))
-            let known = Set(ConfigDoctorService.csvSheetNames)
-            XCTAssertTrue(planned.isSubset(of: known), "\(planned.subtracting(known))")
-        }
+        config.customEas = [CustomEAConfig(name: "One", column: "One", type: .text)]
+        let eaSheets = try XCTUnwrap(EASheets.load(
+            config: config, workbook: Workbook(), dataDir: dataDir))
+        XCTAssertEqual(eaSheets.sheetPlan.map(\.name), ConfigDoctorService.eaWarningsSheetNames)
         let school = SchoolDashboard(
             config: ReportConfig(), dataDir: FileManager.default.temporaryDirectory,
             workbook: Workbook())
@@ -331,6 +327,8 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         XCTAssertEqual(detail(found, "sheets.skip"),
                        "\"Fleet Overview\" matches no sheet, so the app ignores it.")
         XCTAssertEqual(try rows(school + "sheets:\n  order: [iBeacons, Stale Devices]\n"), [])
+        XCTAssertEqual(try rows(school + "sheets:\n  skip: [Protect Alerts]\n"), [],
+                       "the School workbook has the Protect tabs (2.11)")
         XCTAssertEqual(try rows("sheets:\n  skip: [Cover, charts]\n"), [], "a Jamf Pro profile")
     }
 
@@ -455,13 +453,11 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
     }
 
     func testEveryFileScaffoldWritesStatesNothing() throws {
-        let result = ScaffoldService.ScaffoldResult(
-            family: .computers, columns: ["computer_name": "Computer Name"],
-            complianceColumns: [:], mobileColumns: [:])
+        let eas = [ProposedEA(name: "Disk", column: "Disk Percent", type: "percentage", sampleValue: "41")]
         try withWorkspacesRoot { root, workspace in
             let url = workspace.appendingPathComponent("config.yaml")
             for write in [
-                { try ScaffoldService.writeConfig(to: url, result: result, profile: "values") },
+                { try ScaffoldService.writeConfig(to: url, eas: eas, profile: "values") },
                 { try ScaffoldService.writeMinimalConfig(to: url, profile: "values") },
             ] {
                 try write()
@@ -473,14 +469,9 @@ final class ConfigDoctorValueRowsTests: XCTestCase {
         }
     }
 
-    func testSchoolAndProtectBothEnabledStateWhichOneTheCollectUses() throws {
-        let found = try rows("school_cli: {enabled: true}\nprotect: {enabled: true}\n")
-        XCTAssertEqual(titles(found), ["school_cli.enabled"])
-        XCTAssertEqual(found.first?.detail,
-                       "school_cli.enabled and protect.enabled are both true. The app collects "
-                       + "Jamf School only and never runs Protect for this profile.")
-        XCTAssertEqual(try rows("school_cli: {enabled: true}\nprotect: {enabled: false}\n"), [])
-        XCTAssertEqual(try rows("protect: {enabled: true}\n"), [])
+    /// Protect follows a Jamf School collect (2.11), so School with Protect is not a warning.
+    func testSchoolAndProtectBothEnabledIsQuiet() throws {
+        XCTAssertEqual(try rows("school_cli: {enabled: true}\nprotect: {enabled: true}\n"), [])
     }
 
     func testSchoolAndProtectRowIsQuietWhenSchoolIsAnotherProfile() throws {

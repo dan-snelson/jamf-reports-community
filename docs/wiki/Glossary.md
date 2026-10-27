@@ -322,8 +322,10 @@ Open source at github.com/Jamf-Concepts/jamf-cli. The native engine that
 JamfReports composes for every API call.
 
 ### jamf-cli profile
-A saved set of tenant credentials (URL, client ID, OAuth2 token) keyed by
-slug. Lives in jamf-cli's own keychain entry. JamfReports' "profile" maps
+A saved set of tenant connection settings (URL, client ID, and a reference to
+the secret) keyed by slug. Lives in jamf-cli's own configuration file; the
+secret itself is in the keychain, an environment variable or a file, as the
+reference says. JamfReports' "profile" maps
 1:1 to a jamf-cli profile. *see also: Profile slug.*
 
 ### Namespaces
@@ -396,7 +398,7 @@ reports. Five EA types: `boolean`, `percentage`, `version`, `text`, `date`.
 A screen in the app sidebar. Screens are grouped into Reports, Posture,
 Operations, Fleet, Automation, Configuration, and System. Each non-core
 screen is toggleable in Settings → Sidebar Visibility; the core screens
-(Overview, Devices, Data Sources, Settings) cannot be hidden.
+(Overview, Computers, Data Sources, Settings) cannot be hidden.
 
 ### Days-to-50 / Days-to-90
 For a patch title, the number of days from its release date to the first day its
@@ -412,7 +414,7 @@ failure is flagged failing. Surfaces on the Overview banner and the Automation s
 Automation Health section.
 
 ### Freshness chip
-A per-kind indicator (Patch Compliance, Security Posture, OS Updates, Devices) showing
+A per-kind indicator (Patch Compliance, Security Posture, OS Updates, Computers) showing
 the age of the newest on-disk snapshot for a raw jamf-cli kind that screen reads. A kind
 the screen expects but has never collected shows a distinct red "never" chip rather than
 silently vanishing.
@@ -626,7 +628,7 @@ short trailing kicker for counts like "50 of 200 shown".
 
 ### Sidebar
 The app's navigation rail. Groups: Reports, Posture, Operations, Fleet,
-Automation, Configuration, System. Core screens (Overview, Devices, Data
+Automation, Configuration, System. Core screens (Overview, Computers, Data
 Sources, Settings) are pinned and cannot be hidden.
 
 ### StatTile

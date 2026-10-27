@@ -110,6 +110,27 @@ final class HtmlReportFollowupsTests: XCTestCase {
             "1 Mac has not checked in for more than 30 days.")
     }
 
+    func testTheDevicesHeadlineUsesTheSameStaleFigureAsTheTileAndTheSentence() throws {
+        let report = try workspace(snapshots: [("computers", depFleet)], staleCount: 3)
+        let inputs = report.loadInputs(for: Set(SectionID.allCases))
+        XCTAssertEqual(
+            report.groupSummary(.devices, shown: [], inputs: inputs),
+            "3 Macs idle over 30 days (includes 2 without the Jamf binary, listed apart)")
+    }
+
+    func testThePatchShareIsComputedFromTheCountsNotTheRoundedText() throws {
+        let report = try workspace()
+        // 99 of 200 is 49.5%; the row's rounded text says 50%.
+        let rounded: [String: Any] = ["on_latest": 99, "total": 200, "compliance_pct": "50%"]
+        XCTAssertEqual(try XCTUnwrap(report.patchTitlePct(rounded)), 49.5, accuracy: 0.001)
+        let strings: [String: Any] = ["on_latest": "249", "total": "500", "compliance_pct": "50%"]
+        XCTAssertLessThan(try XCTUnwrap(report.patchTitlePct(strings)), 50)
+        XCTAssertNil(report.patchTitlePct(["on_latest": 0, "total": 0, "compliance_pct": "0%"]),
+                     "a title with no devices is not a share")
+        XCTAssertEqual(try XCTUnwrap(report.patchTitlePct(["compliance_pct": "83%"])), 83)
+        XCTAssertNil(report.patchTitlePct(["title": "Empty"]))
+    }
+
     // MARK: - #276: the Macs missing each agent
 
     private let agentYAML = """
@@ -262,7 +283,7 @@ final class HtmlReportFollowupsTests: XCTestCase {
         let lock = try XCTUnwrap(card("Activation Lock on"))
         XCTAssertTrue(lock.contains(">Unknown<"), lock)
         XCTAssertFalse(lock.contains(">0<"), lock)
-        // #275: the jailbreak status the Mobile Fleet screen shows is in the report too.
+        // #275: the jailbreak status the Mobile Devices screen shows is in the report too.
         let jailbreak = try XCTUnwrap(card("Jailbreak detected"))
         XCTAssertTrue(jailbreak.contains(">1<"), jailbreak)
         XCTAssertTrue(jailbreak.contains("of 2 reporting"), jailbreak)

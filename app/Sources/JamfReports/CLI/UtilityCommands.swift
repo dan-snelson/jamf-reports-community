@@ -2,11 +2,21 @@ import ArgumentParser
 import Foundation
 
 struct Backup: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Back up Jamf Pro config objects for a profile.")
+    static let configuration = CommandConfiguration(
+        abstract: "Back up a Jamf Pro profile's config objects, and Jamf Protect too when "
+            + "connected. Refuses a Jamf School or other-product profile.")
     @Option(help: "Workspace profile slug.") var profile: String
+
+    static func refusal(profile: String) -> String? {
+        CollectRouter.backupRefusal(
+            profile: profile, config: collectRoutingConfig(profile: profile))
+    }
 
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
+        // Before the tick lock and before anything is written, once: the bridge would print
+        // the same refusal and ArgumentParser would print it again as an error.
+        if let refusal = Self.refusal(profile: profile) { CLIRun.fail(refusal) }
         let code = try await CLIRun.exclusively { () -> Int32 in
             let bridge = await MainActor.run { CLIBridge() }
             // Label like the GUI/scheduled path so a cron'd `backup` participates in
@@ -37,12 +47,12 @@ struct Backup: AsyncParsableCommand {
 
 struct Scaffold: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Scaffold a config.yaml, from a Jamf Pro CSV export or as a minimal "
-            + "jamf-cli-only config.")
+        abstract: "Scaffold a minimal jamf-cli config.yaml, optionally importing Extension "
+            + "Attributes from a Jamf Pro CSV export once.")
     @Option(help: ArgumentHelp(
-        "Path to a Jamf Pro CSV export. Omit to write a minimal jamf-cli-only config "
-            + "(no column mapping) — the same starting point the GUI's \"Skip for now\" "
-            + "onboarding path writes."
+        "Path to a Jamf Pro CSV export. Its non-built-in columns are written as custom_eas "
+            + "once; no column mapping is written or read. Omit to write the minimal config "
+            + "alone, the same starting point the GUI's workspace step writes."
     )) var csv: String?
     @Option(help: "Output config.yaml path.") var out: String
 
@@ -51,23 +61,21 @@ struct Scaffold: AsyncParsableCommand {
         let outURL = URL(fileURLWithPath: out)
         try FileManager.default.createDirectory(
             at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        // Profile-agnostic: empty slug → `jamf_cli.profile: ""` (matches the old
-        // Python `scaffold`; the user sets the profile when they wire it up). Like
-        // Python's `scaffold`, this OVERWRITES `--out` if it exists — it's an
-        // initial-setup command; the GUI re-scaffold does a non-destructive merge.
-        // The file it replaces is copied aside first.
+        // Profile-agnostic: empty slug → `jamf_cli.profile: ""` (the user sets the profile
+        // when they wire it up). Like Python's `scaffold`, this OVERWRITES `--out` if it
+        // exists — it's an initial-setup command. The file it replaces is copied aside first.
         guard let csv else {
-            // Same shape the GUI onboarding "Skip for now" path writes, and the
-            // same unconditional-overwrite semantics as the CSV branch below.
             try keepCopy(of: outURL)
             try ScaffoldService.writeMinimalConfig(to: outURL, profile: "")
             SharedConfigPin.confirmWrittenConfig(at: outURL)
             print(outURL.path)
             return
         }
-        let result = try ScaffoldService.matchColumns(from: URL(fileURLWithPath: csv), profile: "")
+        let sample = try ScaffoldService.readSample(from: URL(fileURLWithPath: csv))
+        let eas = ScaffoldService.proposeEAs(
+            headers: sample.headers, sampleRows: sample.rows, mappedHeaders: [])
         try keepCopy(of: outURL)
-        try ScaffoldService.writeConfig(to: outURL, result: result, profile: "")
+        try ScaffoldService.writeConfig(to: outURL, eas: eas, profile: "")
         SharedConfigPin.confirmWrittenConfig(at: outURL)
         print(outURL.path)
     }
@@ -193,13 +201,20 @@ struct DiagnosticBundleCommand: AsyncParsableCommand {
 }
 
 struct Device: AsyncParsableCommand {
-    static let configuration =
-        CommandConfiguration(abstract: "Look up one device by serial number or id.")
+    static let configuration = CommandConfiguration(
+        abstract: "Look up one device by serial number or id. "
+            + "Refuses a profile of another product.")
     @Option(help: "Workspace profile slug.") var profile: String
     @Option(help: "Device serial number or id.") var id: String
 
+    /// No onLine: `CLIRun.fail` is the one place the text is printed.
+    static func refusal(profile: String) async -> String? {
+        await CLIBridge.refusesProCommand(profile: profile, operation: "Device lookup", onLine: nil)
+    }
+
     func run() async throws {
         guard ProfileService.isValid(profile) else { CLIRun.fail("invalid profile '\(profile)'") }
+        if let refusal = await Self.refusal(profile: profile) { CLIRun.fail(refusal) }
         let bridge = await MainActor.run { CLIBridge() }
         guard let result = await bridge.deviceDetailWithProvenance(
             profile: profile, deviceID: id, onLine: CLIRun.printLogLine) else {
@@ -209,14 +224,14 @@ struct Device: AsyncParsableCommand {
             FileHandle.standardError.write(
                 Data("warning: live lookup failed — returned last-known-good cache\n".utf8))
         }
-        print(String(decoding: result.data, as: UTF8.self))
+        CLIRun.write(String(decoding: result.data, as: UTF8.self) + "\n", to: .standardOutput)
     }
 }
 
 struct SchoolCheck: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "school-check",
-        abstract: "Validate a Jamf School profile (community-feedback-driven; provided as-is)."
+        abstract: "Validate a Jamf School workspace. Refuses a profile that is not one."
     )
     @Option(help: "Workspace profile slug.") var profile: String
 

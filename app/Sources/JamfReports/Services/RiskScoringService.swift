@@ -19,12 +19,13 @@ struct RiskScoringService: Sendable {
         var gatekeeperEnabled: Bool
         var firewallEnabled: Bool
         var secureBootLevel: SecureBootLevel
-        /// 0–100. `nil` = field absent (will not trigger boot-drive factor).
-        var bootDrivePctUsed: Double?
         var mscpHighFailures: Int
         var mscpMediumFailures: Int
         var hasBaseline: Bool
-        var daysSinceCheckIn: Int?
+        /// Stale under the workspace's stale rule (`StaleRule`), not a fixed day count.
+        var isStale: Bool
+        /// Why `isStale` holds, for the factor's detail line; nil when not stale.
+        var staleDetail: String?
         /// Number of active CVE exploits present. `nil` = field absent.
         var activeCVEExploits: Int?
         var bootstrapEscrowed: Bool
@@ -40,11 +41,11 @@ struct RiskScoringService: Sendable {
             gatekeeperEnabled: true,
             firewallEnabled: true,
             secureBootLevel: .full,
-            bootDrivePctUsed: 40,
             mscpHighFailures: 0,
             mscpMediumFailures: 0,
             hasBaseline: true,
-            daysSinceCheckIn: 1,
+            isStale: false,
+            staleDetail: nil,
             activeCVEExploits: 0,
             bootstrapEscrowed: true,
             securityAgentConnected: nil
@@ -112,11 +113,6 @@ struct RiskScoringService: Sendable {
         if !input.firewallEnabled {
             add(.firewallDisabled, points: weights.firewallDisabled)
         }
-        if let used = input.bootDrivePctUsed,
-           used >= Double(weights.bootDriveFullThresholdPct) {
-            add(.bootDriveFull, points: weights.bootDriveFull,
-                detail: "\(Int(used.rounded()))% used")
-        }
         if input.mscpHighFailures > 0 {
             let raw = input.mscpHighFailures * weights.mscpHighPerFailure
             let capped = min(raw, weights.mscpHighCap)
@@ -129,18 +125,16 @@ struct RiskScoringService: Sendable {
             add(.mscpMediumFailures, points: capped,
                 detail: "\(input.mscpMediumFailures) Medium failures")
         }
-        // v3.5 only penalizes "no baseline" for active devices (≤30d check-in).
-        let isActive = (input.daysSinceCheckIn ?? Int.max) <= 30
-        if !input.hasBaseline, isActive {
+        // v3.5 only penalizes "no baseline" for active devices.
+        if !input.hasBaseline, !input.isStale {
             add(.noBaseline, points: weights.noBaseline)
         }
         if let exploits = input.activeCVEExploits, exploits > 0 {
             add(.activeCVE, points: weights.activeCVE,
                 detail: "\(exploits) active exploit(s)")
         }
-        if let days = input.daysSinceCheckIn, days > 30 {
-            add(.staleOffline, points: weights.staleOffline,
-                detail: "\(days) days since check-in")
+        if input.isStale {
+            add(.staleOffline, points: weights.staleOffline, detail: input.staleDetail)
         }
         if input.securityAgentConnected == false {
             add(.securityAgentDisconnected, points: weights.securityAgentDisconnected)
@@ -159,13 +153,16 @@ struct RiskScoringService: Sendable {
 
     /// The one rating of a Mac. The Devices list pill, the detail panel, the Priority filter,
     /// the CSV export and the inventory sort all read this, so no screen rates a Mac by a
-    /// rule of its own. Staleness is one of its factors (`staleOffline`).
+    /// rule of its own. Staleness is one of its factors (`staleOffline`), judged by the
+    /// workspace's `staleRule`.
     static func risk(
         for record: DeviceInventoryRecord,
         agentCheck: SecurityAgentCheck? = nil,
-        policy: SecurityControlPolicy
+        policy: SecurityControlPolicy,
+        staleRule: StaleRule
     ) -> DeviceRisk {
-        score(input: .from(record: record, agentCheck: agentCheck, policy: policy))
+        score(input: .from(
+            record: record, agentCheck: agentCheck, policy: policy, staleRule: staleRule))
     }
 
     // MARK: - Security-agent EA lookup
@@ -228,7 +225,8 @@ extension RiskScoringService.Input {
     static func from(
         record: DeviceInventoryRecord,
         agentCheck: RiskScoringService.SecurityAgentCheck? = nil,
-        policy: SecurityControlPolicy
+        policy: SecurityControlPolicy,
+        staleRule: StaleRule
     ) -> Self {
         func passes(_ control: SecurityControl, _ value: String) -> Bool {
             policy.verdict(for: control, value: value, hardwareEncrypted: record.hardwareEncrypted)
@@ -240,28 +238,23 @@ extension RiskScoringService.Input {
             gatekeeperEnabled: passes(.gatekeeper, record.gatekeeper),
             firewallEnabled: passes(.firewall, record.firewall),
             secureBootLevel: .unknown,
-            bootDrivePctUsed: parseDiskUsagePct(record.diskUsage),
             mscpHighFailures: 0,
-            mscpMediumFailures: record.failedRules,
+            mscpMediumFailures: 0,
             hasBaseline: true,
-            daysSinceCheckIn: record.daysSinceContact,
+            isStale: record.isStale(staleRule),
+            staleDetail: staleDetail(record, staleRule),
             activeCVEExploits: nil,
             bootstrapEscrowed: SecurityControlPolicy.reading(record.bootstrapToken) != false,
             securityAgentConnected: agentCheck?.isConnected
         )
     }
 
-    private static func parseDiskUsagePct(_ raw: String) -> Double? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        // Accept "94%", "94", "94.5%", "0.94", etc. Prefer the leading
-        // numeric token and infer 0–1 vs. 0–100 from magnitude.
-        // S-05: `scanDouble(_:)` is deprecated since macOS 10.15; use
-        // the no-arg variant that returns Double?.
-        let scanner = Scanner(string: trimmed)
-        guard let value = scanner.scanDouble() else { return nil }
-        let pct = value > 0 && value <= 1 ? value * 100 : value   // 0.94 → 94
-        // "1e20", "inf" or "-5" is no disk percentage, and the detail text rounds it to an Int.
-        return (0...100).contains(pct) ? pct : nil
+    private static func staleDetail(_ record: DeviceInventoryRecord, _ rule: StaleRule) -> String? {
+        guard record.isStale(rule) else { return nil }
+        switch record.staleAge(rule) {
+        case .days(let days)?: return "\(days) days since \(rule.basisPhrase)"
+        case .never?: return "No \(rule.basisPhrase) on record"
+        case nil: return nil
+        }
     }
 }

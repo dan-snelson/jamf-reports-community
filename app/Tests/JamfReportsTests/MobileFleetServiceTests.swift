@@ -253,9 +253,34 @@ final class MobileFleetServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.totalDevices, 0)
         XCTAssertEqual(snapshot.iPadCount, 0)
         XCTAssertEqual(snapshot.iPhoneCount, 0)
+        XCTAssertTrue(snapshot.collectedWithNoDevices)
 
         // Clean up
         try? FileManager.default.removeItem(at: tempURL)
+    }
+
+    func testProfilesOnlySnapshotIsNotCollectedWithNoDevices() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("profiles-only-\(UUID().uuidString).json")
+        try "[]".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let snapshot = MobileFleetService.load(listURL: nil, inventoryURL: nil, profilesURL: url)
+
+        XCTAssertTrue(snapshot.isDetected)
+        XCTAssertFalse(snapshot.collectedWithNoDevices)
+        XCTAssertFalse(MobileFleetService.Snapshot.empty.collectedWithNoDevices)
+    }
+
+    func testUnreadableListIsNotCollectedWithNoDevices() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bad-list-\(UUID().uuidString).json")
+        try "not json".write(to: url, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let snapshot = MobileFleetService.load(listURL: url, inventoryURL: nil, profilesURL: nil)
+
+        XCTAssertFalse(snapshot.collectedWithNoDevices)
     }
 
     // MARK: - CacheSource derivation

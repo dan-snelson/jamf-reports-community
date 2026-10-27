@@ -23,8 +23,9 @@ struct StaleBasisControls: View {
             FieldLabel(label: "Contact gap", trailing: "contact_gap_days")
             EditableNumberStepper(
                 value: gapDays, range: ContactGap.dayRange, suffix: "days",
+                label: "Contact gap days",
                 help: "How far a Mac's check-in or inventory may lag its last contact.")
-            FieldHelp(text: "The Health Audit and Devices flag a Mac MDM still reaches when its "
+            FieldHelp(text: "The Health Audit and Computers flag a Mac MDM still reaches when its "
                 + "last check-in, or its last inventory, is more than this many days behind its "
                 + "last contact.")
         }

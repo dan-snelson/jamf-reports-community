@@ -44,6 +44,9 @@ struct AutomationHealthIssue: Identifiable, Sendable, Equatable {
     /// `.overdue` (nothing ran, so there is no code) and for older status
     /// records written without one.
     let lastRunExitCode: Int32?
+    /// Why the schedule can never run (the product guard's refusal), for a `.failing` issue that
+    /// has no run record to explain it.
+    let reason: String?
 
     init(
         label: String,
@@ -53,7 +56,8 @@ struct AutomationHealthIssue: Identifiable, Sendable, Equatable {
         profile: String = "",
         expectedFire: Date?,
         lastRunFinishedAt: Date?,
-        lastRunExitCode: Int32? = nil
+        lastRunExitCode: Int32? = nil,
+        reason: String? = nil
     ) {
         self.label = label
         self.displayName = displayName
@@ -63,6 +67,7 @@ struct AutomationHealthIssue: Identifiable, Sendable, Equatable {
         self.expectedFire = expectedFire
         self.lastRunFinishedAt = lastRunFinishedAt
         self.lastRunExitCode = lastRunExitCode
+        self.reason = reason
     }
 
     /// True when `label` belongs to the reserved managed-automation label set
@@ -104,6 +109,7 @@ enum AutomationHealth {
     ///   fire plus the grace window has elapsed, the fire is not before the
     ///   workspace existed (`activeSince` — it never had a chance to run),
     ///   and there is no run artifact finishing at or after the expected fire.
+    /// - `.failing` with a `reason`: the product guard refuses the schedule's profile.
     /// - `.failing`: a run artifact exists and its success flag is `false`
     ///   (independent of overdue — a run that fired but failed still needs
     ///   attention). A schedule can be both; overdue takes precedence so the
@@ -130,6 +136,14 @@ enum AutomationHealth {
         }
         return inputs.compactMap { input in
             guard input.enabled else { return nil }
+
+            // Nothing will ever run, so the missing status file is not an overdue run.
+            if let refusal = input.refusal {
+                return AutomationHealthIssue(
+                    label: input.label, displayName: input.displayName, kind: .failing,
+                    isMulti: input.isMulti, profile: input.profile,
+                    expectedFire: input.expectedFire, lastRunFinishedAt: nil, reason: refusal)
+            }
 
             if let expected = input.expectedFire,
                now.timeIntervalSince(expected) >= graceSeconds,
@@ -209,6 +223,13 @@ final class AutomationHealthModel {
 
     /// Set by the banner's button; Audit opens its Config Doctor segment and clears it.
     var openConfigDoctorRequested = false
+
+    /// The ACTIVE profile's open attention items (`AttentionLog`), newest first, less those
+    /// dismissed on this Mac.
+    var attentionItems: [AttentionItem] = []
+
+    /// Set by the banner's Open Run History: the log Run History selects, then clears.
+    var openRunLogRequested: String?
 }
 
 // MARK: - Managed automation wiring
@@ -260,6 +281,18 @@ extension WorkspaceStore {
                     + "\(error.localizedDescription)\n",
                 stderr)
         }
+    }
+
+    /// The user just opted into automation — a ticker Login Items won't run must not be silently
+    /// absorbed into "setup complete". Only the two states an operator can act on:
+    /// `.unavailable` is a dev build with no bundled agent, which the Login Items pane can't fix.
+    func warnIfTickerNeedsApproval() {
+        guard tickerStatus == .requiresApproval || tickerStatus == .notRegistered else { return }
+        toast = Toast(
+            message: "Setup finished — allow JamfReports under Login Items › "
+                + "Allow in the Background to start automation",
+            style: .warning
+        )
     }
 
     /// The policy changed, or the app launched: make Login Items agree with
@@ -384,6 +417,7 @@ extension WorkspaceStore {
             AutomationHealthModel.shared.freshnessIssues = []
             AutomationHealthModel.shared.sharedConfigKeys = []
             AutomationHealthModel.shared.automationFolderRefused = false
+            AutomationHealthModel.shared.attentionItems = []
             return
         }
         let profile = self.profile
@@ -392,6 +426,20 @@ extension WorkspaceStore {
         }.value
         let folderRefused = await Task.detached(priority: .utility) {
             ProfileService.workspaceURL(for: profile).map(AutomationStateFile.isRefused) ?? false
+        }.value
+        // A workspace with no jamf-cli profile is skipped by every scheduled run, so its item is
+        // shown whichever workspace is open, named, since nothing else would point at it.
+        let others = profiles.map(\.name).filter { $0 != profile }
+        let attention = await Task.detached(priority: .utility) {
+            AttentionLog.openItems(profile: profile) + others.flatMap { other in
+                AttentionLog.openItems(profile: other)
+                    .filter { $0.code == .jamfCLIProfileMissing }
+                    .map { item in
+                        var named = item
+                        named.message = "\(other): \(item.message)"
+                        return named
+                    }
+            }
         }.value
         let jamfCLIVersion = self.jamfCLIVersion
         let resolveAuth = resolveAuthMethod
@@ -405,6 +453,14 @@ extension WorkspaceStore {
         AutomationHealthModel.shared.freshnessIssues = issues
         AutomationHealthModel.shared.sharedConfigKeys = sharedConfig
         AutomationHealthModel.shared.automationFolderRefused = folderRefused
+        AutomationHealthModel.shared.attentionItems = AttentionItem.ordered(
+            attention.filter { !AttentionDismissals.isDismissed($0) })
+    }
+
+    /// The banner's Dismiss: hides the open items on this Mac until each is seen again.
+    func dismissAttention() {
+        AttentionDismissals.dismiss(AutomationHealthModel.shared.attentionItems)
+        AutomationHealthModel.shared.attentionItems = []
     }
 
     /// Pure-ish freshness read: state dir → states → issues. `nonisolated` so
@@ -444,6 +500,7 @@ extension WorkspaceStore {
     /// (`collectSkip` takes `ReportEngine.collectSkipKinds`' normalized set),
     /// and it skips the dashboard on a jamf-cli before 1.31.0
     /// (`dashboardSupported`, false for an unknown version, as `collect` reads it).
+    /// A workspace with Protect connected (`ConnectedProducts`) also expects the `protect-*` kinds.
     /// The Platform, tenant and skip-list rules apply regardless of the `.fail`
     /// counters on disk: a workspace that ran for months before the collect-side
     /// skip has a standing pile of them, and reading those back is exactly what
@@ -453,9 +510,11 @@ extension WorkspaceStore {
         authMethod: String?,
         tenantLevel: Bool = false,
         collectSkip: Set<String> = [],
-        dashboardSupported: Bool = false
+        dashboardSupported: Bool = false,
+        protectConnected: Bool = false
     ) -> [String] {
         let skipsPlatform = ReportEngine.nonPlatformAuthMethod(authMethod) != nil
+        let protect = protectConnected ? DataFreshnessHealth.protectKinds : []
         return ReportEngine.knownCollectKinds.filter { kind in
             if skipExpensive, ReportEngine.expensivePerDeviceKinds.contains(kind) {
                 return false
@@ -466,7 +525,7 @@ extension WorkspaceStore {
             }
             if collectSkip.contains(kind) { return false }
             return !(skipsPlatform && ReportEngine.platformOnlyKinds.contains(kind))
-        }
+        } + protect
     }
 
     // MARK: - Manual collect
@@ -780,12 +839,21 @@ extension WorkspaceStore {
                 + (overdue.count == 1 ? "" : "s")
         // The claim keeps a tick that wakes mid-send from posting the same card; the day is
         // stamped only after a confirmed send, so a failed post retries on the next pass.
-        let outcome = await marker.sendOnce(day: today, in: [workspace]) {
-            await WebhookNotifier.sendFailed(config: notify, title: title, facts: facts)
+        let failure = WebhookNotifier.DeliveryFailure()
+        let outcome = await AttentionLog.recording(profile: profile) {
+            let outcome = await marker.sendOnce(day: today, in: [workspace]) {
+                await WebhookNotifier.sendFailed(
+                    config: notify, title: title, facts: facts,
+                    organization: WebhookNotifier.organization(profile: profile),
+                    failure: failure)
+            }
+            ScheduledRunSignals.noteWebhook(outcome, failure: failure)
+            return outcome
         }
         if outcome == .failed {
+            let reason = failure.reason ?? "unknown"
             AppLogger.webhook.warning(
-                "Overdue dead-man digest failed to send for \(profile, privacy: .public) — day not claimed, will retry (distinct from a routine run digest failure)"
+                "Overdue dead-man digest failed to send for \(profile, privacy: .public): \(reason, privacy: .public) — day not claimed, will retry (distinct from a routine run digest failure)"
             )
         }
     }

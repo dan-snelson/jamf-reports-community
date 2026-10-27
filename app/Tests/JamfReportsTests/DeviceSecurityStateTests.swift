@@ -2,6 +2,14 @@ import Foundation
 import XCTest
 @testable import JamfReports
 
+/// These records carry no check-in date, which the stale rule counts as never checked in; the
+/// tests here are about the security controls, so each is scored as having checked in today.
+private func scored(_ record: DeviceInventoryRecord, _ policy: SecurityControlPolicy) -> DeviceRisk {
+    var current = record
+    current.daysSinceContact = current.daysSinceContact ?? 0
+    return RiskScoringService.risk(for: current, policy: policy, staleRule: StaleRule(days: 30))
+}
+
 /// Verifies the per-device security state surfacing added in v2.1.0 PR 2.
 ///
 /// The Excel sheet, the DevicesView per-control glyph row, and the detail-panel
@@ -110,8 +118,7 @@ final class DeviceSecurityStateTests: XCTestCase {
         let records = try fixtureComputers()
         XCTAssertEqual(records.map(\.name), ["Lab-Mac-01", "Lab-Mac-02", "Lab-Mac-03"])
         XCTAssertEqual(records.map { $0.securityGapCount(policy: .default) }, [0, 5, 0])
-        XCTAssertEqual(records.map { RiskScoringService.risk(for: $0, policy: .default).level },
-                       [.clean, .critical, .clean])
+        XCTAssertEqual(records.map { scored($0, .default).level }, [.clean, .critical, .clean])
     }
 
     /// Rows 1, 3 and 4; row 2 and the FileVault share change on purpose (below).
@@ -137,15 +144,14 @@ final class DeviceSecurityStateTests: XCTestCase {
     private func scoredLevel(
         _ policy: SecurityControlPolicy
     ) -> (DeviceInventoryRecord) -> DeviceRisk.Level {
-        { RiskScoringService.risk(for: $0, policy: policy).level }
+        { scored($0, policy).level }
     }
 
     /// The records here carry no disk, check-in or rule facts, so every factor is a security one.
     private func riskFactors(
         _ record: DeviceInventoryRecord, _ policy: SecurityControlPolicy = .default
     ) -> Set<DeviceRisk.Factor> {
-        Set(RiskScoringService.score(input: .from(record: record, policy: policy))
-            .triggered.map(\.factor))
+        Set(scored(record, policy).triggered.map(\.factor))
     }
 
     private let everySecurityFactor: Set<DeviceRisk.Factor> = [
@@ -376,13 +382,13 @@ final class DeviceSecurityStateTests: XCTestCase {
         XCTAssertEqual(mac.hardwareEncrypted, true)
 
         XCTAssertEqual(mac.securityGapCount(policy: .default), 1)
-        XCTAssertEqual(RiskScoringService.risk(for: mac, policy: .default).level, .high)
+        XCTAssertEqual(scored(mac, .default).level, .high)
         XCTAssertEqual(riskFactors(mac, .default), [.noFileVault])
         XCTAssertEqual(SecurityControlPolicy.default.fileVaultLabel(
             mac.fileVault, hardwareEncrypted: mac.hardwareEncrypted), "UNENCRYPTED")
 
         XCTAssertEqual(mac.securityGapCount(policy: hardwareWarning), 0)
-        XCTAssertEqual(RiskScoringService.risk(for: mac, policy: hardwareWarning).level, .clean)
+        XCTAssertEqual(scored(mac, hardwareWarning).level, .clean)
         XCTAssertEqual(riskFactors(mac, hardwareWarning), [])
         XCTAssertEqual(hardwareWarning.fileVaultLabel(
             mac.fileVault, hardwareEncrypted: mac.hardwareEncrypted),

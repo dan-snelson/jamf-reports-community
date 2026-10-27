@@ -39,8 +39,11 @@ final class SharedConfigPinTests: XCTestCase {
         shared: Bool = true, outputDir: String = "", allowAbsolute: Bool = false,
         retentionMode: String = "archive", retentionArchiveDir: String = "",
         webhook: String = "https://hooks.example.com/a", detail: String = "full",
-        historicalDir: String = "snapshots", protectProfile: String = "protect-a"
+        historicalDir: String = "snapshots", protectProfile: String = "protect-a",
+        heartbeat: Bool? = nil, protectBackup: String? = nil
     ) throws {
+        let beat = heartbeat.map { "\n  heartbeat: \($0)" } ?? ""
+        let backup = protectBackup.map { "\n  backup_on_synced_storage: \($0)" } ?? ""
         let body = """
         shared_workspace:
           enabled: \(shared)
@@ -55,12 +58,12 @@ final class SharedConfigPinTests: XCTestCase {
         notify:
           enabled: true
           url: "\(webhook)"
-          detail: \(detail)
+          detail: \(detail)\(beat)
         charts:
           historical_csv_dir: "\(historicalDir)"
         protect:
           enabled: true
-          profile: "\(protectProfile)"
+          profile: "\(protectProfile)"\(backup)
         """
         try body.write(to: workspace.appendingPathComponent("config.yaml"),
                        atomically: true, encoding: .utf8)
@@ -546,6 +549,22 @@ final class SharedConfigPinTests: XCTestCase {
             workspace: workspace, config: nil, volumeIsLocal: { _ in false }))
     }
 
+    func testAnICloudDesktopAndDocumentsWorkspaceIsPinnedAndCoordinated() throws {
+        try writeConfig(shared: false, outputDir: outside, allowAbsolute: true)
+        let local = CloudStorage.SyncProbe(
+            fileProviderDomain: { _ in nil }, isUbiquitous: { _ in false })
+        XCTAssertNil(SharedConfigPin.check(
+            profile: profile, appSupport: appSupport, syncProbe: local).pinned)
+        // First sight on synced storage: the absolute output folder waits for a Confirm.
+        let synced = SharedConfigPin.check(
+            profile: profile, appSupport: appSupport, syncProbe: .iCloudEverywhere)
+        XCTAssertEqual(synced.drifts.map(\.key), [.outputDir])
+
+        XCTAssertTrue(SharedWorkspace.isEffectivelyShared(
+            workspace: workspace, config: nil, volumeIsLocal: { _ in true },
+            syncProbe: .iCloudEverywhere))
+    }
+
     // MARK: - Headless folders
 
     func testChangedOutputDirFallsBackToTheWorkspaceWithOneWarn() async throws {
@@ -787,7 +806,7 @@ final class SharedConfigPinTests: XCTestCase {
             try await CollectRouter.run(
                 profile: profile, config: config,
                 proCollect: { _, _, _, _, _, _ in .collected },
-                schoolCollect: { _, _, _ in },
+                schoolCollect: { _, _, _, _, _ in },
                 onLine: { lines.add($0.text) })
             XCTAssertEqual(
                 lines.all.first,
@@ -947,6 +966,42 @@ final class SharedConfigPinTests: XCTestCase {
         XCTAssertEqual(check().drifts.map(\.key), [.notifyURL])
     }
 
+    func testAPeerSwitchingTheHeartbeatDoesNotChangeWhatThisMacSends() throws {
+        try writeConfig()
+        _ = check()
+        try writeConfig(heartbeat: true)
+        XCTAssertEqual(check().drifts.map(\.key), [.notifyHeartbeat])
+        XCTAssertFalse(try XCTUnwrap(sendable()).sendsHeartbeat)
+        try confirmAll()
+        XCTAssertTrue(check().drifts.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(sendable()).sendsHeartbeat)
+        try writeConfig(heartbeat: false)
+        XCTAssertTrue(try XCTUnwrap(sendable()).sendsHeartbeat, "the pinned setting stands")
+    }
+
+    func testAPinWrittenBeforeTheHeartbeatKeyPinsItAtFirstSight() throws {
+        try writeConfig(heartbeat: true)
+        _ = check()
+        let url = SharedConfigPin.storeURL(profile: profile, appSupport: appSupport)
+        var pin = try XCTUnwrap(SharedConfigPin.load(profile: profile, appSupport: appSupport))
+        pin.notifyHeartbeat = false
+        pin.pinnedKeys.removeAll { $0 == SharedConfigPin.Key.notifyHeartbeat.rawValue }
+        try JSONEncoder().encode(pin).write(to: url)
+        XCTAssertTrue(check().drifts.isEmpty)
+        XCTAssertTrue(try XCTUnwrap(sendable()).sendsHeartbeat)
+    }
+
+    func testASaveConfirmsTheHeartbeatOnlyWhenItChangedIt() {
+        XCTAssertEqual(SharedConfigPin.changedNotifyKeys(
+            previousURL: "", newURL: "", previousDetail: nil, newDetail: "full",
+            previousHeartbeat: false, newHeartbeat: true), [.notifyHeartbeat])
+        XCTAssertEqual(SharedConfigPin.changedNotifyKeys(
+            previousURL: "", newURL: "", previousDetail: nil, newDetail: "full",
+            previousHeartbeat: true, newHeartbeat: true), [])
+        XCTAssertEqual(SharedConfigPin.changedNotifyKeys(
+            previousURL: "", newURL: "", previousDetail: nil, newDetail: "full"), [])
+    }
+
     func testASaveConfirmsAFolderOnlyWhenItChangedIt() {
         let loaded = (outputDir: "/Volumes/a", archiveDir: "")
         XCTAssertEqual(SharedConfigPin.changedFolderKeys(
@@ -958,5 +1013,138 @@ final class SharedConfigPinTests: XCTestCase {
             [.outputDir, .archiveDir])
         XCTAssertEqual(SharedConfigPin.changedFolderKeys(
             before: nil, after: (outputDir: "/Volumes/b", archiveDir: "")), [])
+    }
+
+    // MARK: - protect.backup_on_synced_storage
+
+    /// What a backup on this workspace may do with Protect, as the backup path asks it.
+    private func protectOnSynced() throws -> Bool {
+        let config = try ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        return SharedConfigPin.protectBackupOnSyncedStorage(
+            config.protect?.backsUpOnSyncedStorage ?? false,
+            profile: profile, appSupport: appSupport)
+    }
+
+    func testProtectBackupsOnSyncedStorageTurnedOnAtFirstSightWaitForAConfirm() throws {
+        try writeConfig(protectBackup: "true")
+        XCTAssertEqual(check().drifts.map(\.key), [.protectBackupOnSyncedStorage])
+        XCTAssertTrue(check().drifts[0].pinnedIsNote)
+        XCTAssertFalse(try protectOnSynced(), "a value a peer may have written stays off")
+        try confirmAll()
+        XCTAssertTrue(check().drifts.isEmpty)
+        XCTAssertTrue(try protectOnSynced())
+    }
+
+    func testAPeerTurningProtectBackupsOnIsDriftAndStaysOff() throws {
+        try writeConfig()
+        _ = check()
+        XCTAssertFalse(try protectOnSynced())
+        try writeConfig(protectBackup: "true")
+        XCTAssertEqual(check().drifts.map(\.key), [.protectBackupOnSyncedStorage])
+        XCTAssertFalse(try protectOnSynced())
+        let config = try ConfigLoader.load(from: workspace.appendingPathComponent("config.yaml"))
+        guard case .skip = ProtectBackup.plan(
+            config: config, workspaceProfile: profile, pinAllows: { true },
+            sharedStorage: { "in a shared workspace" },
+            syncedStorageAllowed: { (try? self.protectOnSynced()) ?? true })
+        else { return XCTFail("a drifted opt-in must not run the Protect backup") }
+    }
+
+    func testTurningAConfirmedOptInOffAppliesAtOnceAndBackOnNeedsAConfirm() throws {
+        try writeConfig(protectBackup: "true")
+        try confirmAll()
+        XCTAssertTrue(try protectOnSynced())
+        try writeConfig(protectBackup: "false")
+        XCTAssertFalse(try protectOnSynced(), "a change to false is honoured without a confirm")
+        XCTAssertTrue(check().drifts.isEmpty, "the safe value is pinned, not shown as drift")
+        XCTAssertEqual(
+            SharedConfigPin.load(profile: profile, appSupport: appSupport)?
+                .protectBackupOnSyncedStorage, false)
+        try writeConfig(protectBackup: "true")
+        XCTAssertFalse(try protectOnSynced(), "a peer's later true waits for a confirm")
+        XCTAssertEqual(check().drifts.map(\.key), [.protectBackupOnSyncedStorage])
+        try confirmAll()
+        XCTAssertTrue(try protectOnSynced())
+        try writeConfig(protectBackup: "\"maybe\"")
+        XCTAssertFalse(try protectOnSynced(), "a non-boolean reads as false")
+        XCTAssertTrue(check().drifts.isEmpty)
+        try writeConfig(protectBackup: "true")
+        XCTAssertFalse(try protectOnSynced(), "true after a non-boolean waits for a confirm")
+    }
+
+    func testAnUnconfirmedOptInTurnedOffIsNoLongerWaiting() throws {
+        try writeConfig(protectBackup: "true")
+        XCTAssertEqual(check().drifts.map(\.key), [.protectBackupOnSyncedStorage])
+        try writeConfig(protectBackup: "false")
+        XCTAssertTrue(check().drifts.isEmpty)
+        try writeConfig(protectBackup: "true")
+        XCTAssertEqual(check().drifts.map(\.key), [.protectBackupOnSyncedStorage])
+        XCTAssertFalse(try protectOnSynced())
+    }
+
+    func testTurningTheSwitchOnOverAnUnconfirmedTrueConfirmsIt() throws {
+        try writeConfig(protectBackup: "true")
+        _ = check()
+        XCTAssertFalse(try protectOnSynced())
+        try ProtectBackupConfigWriter.save(
+            onSyncedStorage: true, profile: profile, appSupport: appSupport)
+        XCTAssertTrue(try protectOnSynced())
+    }
+
+    func testTheBackupsSwitchWritesTheKeyCopiesTheFileAndConfirmsOnThisMac() throws {
+        try writeConfig()
+        let url = workspace.appendingPathComponent("config.yaml")
+        try String(contentsOf: url, encoding: .utf8)
+            .replacingOccurrences(
+                of: "protect:\n", with: "protect:\n  # set by the security team\n")
+            .write(to: url, atomically: true, encoding: .utf8)
+        _ = check()
+        XCTAssertFalse(try protectOnSynced())
+
+        let report = try ProtectBackupConfigWriter.save(
+            onSyncedStorage: true, profile: profile, appSupport: appSupport)
+        XCTAssertTrue(try protectOnSynced(), "the switch confirms the value it wrote")
+        XCTAssertTrue(check().drifts.isEmpty)
+        let backup = try XCTUnwrap(report.backupName)
+        XCTAssertTrue(backup.hasPrefix("config.yaml.bak-"), backup)
+        XCTAssertTrue(fileManager.fileExists(
+            atPath: workspace.appendingPathComponent(backup).path))
+        let saved = try ConfigLoader.load(from: url)
+        XCTAssertEqual(saved.protect?.resolvedProfile, "protect-a", "other protect keys stay")
+        XCTAssertTrue(saved.protect?.isEnabled ?? false)
+
+        try ProtectBackupConfigWriter.save(
+            onSyncedStorage: false, profile: profile, appSupport: appSupport)
+        XCTAssertEqual(try ConfigLoader.load(from: url).protect?.backupOnSyncedStorage, false)
+        XCTAssertFalse(try protectOnSynced())
+        XCTAssertTrue(check().drifts.isEmpty)
+    }
+
+    func testTheSyncedStorageChoiceAndItsDoctorRowFollowThePin() throws {
+        try writeConfig()
+        let url = workspace.appendingPathComponent("config.yaml")
+        let load = { try ConfigLoader.load(from: url) }
+        let choice = try XCTUnwrap(ProtectBackup.syncedStorageChoice(
+            profile: profile, config: try load(), appSupport: appSupport))
+        XCTAssertEqual(choice, .init(place: "in a shared workspace", allowed: false))
+        let rows = ConfigDoctorService.protectSyncedBackupRows(choice)
+        XCTAssertEqual(rows.map(\.id), ["protect.backup_synced_storage"])
+        XCTAssertEqual(rows.first?.severity, .suggest)
+        XCTAssertTrue(rows.first?.hint?.contains("protect.backup_on_synced_storage") ?? false)
+
+        try ProtectBackupConfigWriter.save(
+            onSyncedStorage: true, profile: profile, appSupport: appSupport)
+        let allowed = try XCTUnwrap(ProtectBackup.syncedStorageChoice(
+            profile: profile, config: try load(), appSupport: appSupport))
+        XCTAssertTrue(allowed.allowed)
+        XCTAssertEqual(ConfigDoctorService.protectSyncedBackupRows(allowed), [])
+        XCTAssertEqual(ConfigDoctorService.protectSyncedBackupRows(nil), [])
+    }
+
+    func testALocalWorkspaceHasNoSyncedStorageChoice() throws {
+        try writeConfig(shared: false, protectBackup: "true")
+        XCTAssertNil(ProtectBackup.syncedStorageChoice(
+            profile: profile, config: try ConfigLoader.load(
+                from: workspace.appendingPathComponent("config.yaml")), appSupport: appSupport))
     }
 }

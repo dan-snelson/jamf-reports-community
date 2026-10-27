@@ -93,6 +93,17 @@ final class StateFileBoundedReadTests: XCTestCase {
         XCTAssertNil(store.lastRun(report: "policies"), "past the cap nothing is read")
     }
 
+    /// A `state` folder swapped for a link to a folder holding a planted record is not read.
+    func testStateFileStoreDoesNotReadThroughALinkedStateFolder() throws {
+        let elsewhere = root.appendingPathComponent("elsewhere", isDirectory: true)
+        try StateFileStore(directory: elsewhere).recordRun(report: "computers", at: Date())
+        let state = root.appendingPathComponent("data/state", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: state.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: state, withDestinationURL: elsewhere)
+        XCTAssertNil(StateFileStore(directory: state).lastRun(report: "computers"))
+    }
+
     func testStateFileStoreStillReadsItsOwnFiles() throws {
         let store = StateFileStore(directory: root)
         try store.recordRun(report: "computers", at: Date())

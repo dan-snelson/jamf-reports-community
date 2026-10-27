@@ -5,14 +5,7 @@ import TipKit
 struct SourcesView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast
-    @State private var csvFiles: [InboxFile] = []
     @State private var families: [SnapshotFamily] = []
-    @State private var inboxWatcher = CSVInboxService.DirectoryWatcher()
-    @State private var pendingClearFile: InboxFile?
-    @State private var pendingClearProfile: String?
-    @State private var showClearConfirm = false
-    @State private var clearError: String?
-    @State private var showClearError = false
     @State private var resolutionError: String?
     @State private var showElevateScopeConfirm = false
     @State private var pendingScopeProfile: String?
@@ -31,6 +24,10 @@ struct SourcesView: View {
     /// Newest snapshot per kind, read off the main actor when the plan is built.
     @State private var cachedAt: [String: Date] = [:]
     @State private var expandedProducts: Set<CollectSourcesPlan.Product> = []
+    /// A School workspace's own profile from `config list`, for the Platform API row.
+    @State private var schoolResolved: ProfileAuthMethod.Resolved?
+    @State private var schoolPlatformCheck: SchoolPlatformCheck.Verdict?
+    @State private var reauthOpensPlatform = false
 
     private var isSchoolWorkspace: Bool {
         sourcesPlan?.sources.first?.product == .school
@@ -65,15 +62,16 @@ struct SourcesView: View {
 
             HStack(alignment: .top, spacing: 14) {
                 cliCard
-                csvCard
+                // Jamf School has no Extension Attributes to adopt.
+                if !isSchoolWorkspace { eaCard }
             }
             doctorCard
+            if isSchoolWorkspace { schoolPlatformCard }
             ConnectionCard()
-            // Both are Jamf Pro: the matrix lists `pro` commands, and a School workspace never
-            // collects Protect (`ProfileProductType.detect`).
+            // The matrix lists `pro` commands, which a School workspace never runs.
             if !isSchoolWorkspace { capabilityCard }
             familiesCard
-            if !isSchoolWorkspace { additionalProductsCard }
+            additionalProductsCard
         }
         .sheet(isPresented: $showingProtectConnect, onDismiss: reloadConnectedProducts) {
             ProductConnectSheetView(profileSlug: workspace.profile)
@@ -87,46 +85,27 @@ struct SourcesView: View {
                 prefillURL: activeProfileServerURL,
                 prefillAuthMethod: activeProfileAuthMethod,
                 isSchool: isSchoolWorkspace,
+                schoolPlatform: isSchoolWorkspace ? schoolPlatformRow : nil,
+                opensSchoolPlatform: reauthOpensPlatform,
+                onSchoolPlatformCheck: { schoolPlatformCheck = $0 },
                 onSaved: {
                     workspace.credentialsChanged()
                     runDoctor()
+                    reloadSourcesPlan()
                 }
             )
         }
         .onAppear {
             reload()
-            startInboxWatcher()
             reloadCapabilities()
         }
         .onChange(of: workspace.profile) { _, _ in
-            pendingClearFile = nil
-            pendingClearProfile = nil
-            showClearConfirm = false
+            schoolResolved = nil
+            schoolPlatformCheck = nil
             doctorOutcome = nil
             doctorRunning = false
             reload()
-            startInboxWatcher()
             reloadCapabilities()
-        }
-        .onDisappear {
-            inboxWatcher.stop()
-        }
-        .confirmationDialog(
-            "Clear \"\(pendingClearFile?.name ?? "")\"?",
-            isPresented: $showClearConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Clear inbox file", role: .destructive) {
-                clearPendingFile()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes the CSV file from disk.")
-        }
-        .alert("CSV Inbox Error", isPresented: $showClearError) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(clearError ?? "Unknown error")
         }
         .confirmationDialog(
             "Elevate \"\(pendingScopeProfile ?? "")\" to Full Admin?",
@@ -154,7 +133,7 @@ struct SourcesView: View {
             Text("Data Sources")
                 .font(Theme.Fonts.serif(26, weight: .bold))
                 .foregroundStyle(Theme.Text.primary)
-            Text("Live API · cached snapshots · CSV inboxes · historical archives")
+            Text("Live API · cached snapshots · historical archives")
                 .font(.footnote)
                 .foregroundStyle(Theme.Text.tertiary(contrast))
         }
@@ -234,6 +213,13 @@ struct SourcesView: View {
             }
         )) {
             VStack(spacing: 0) {
+                if product == .platformAPI, isSchoolWorkspace {
+                    Text("Experimental: Jamf School blueprints through the Platform API")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
                 ForEach(sources) { source in
                     sourceRow(source)
                     if source.id != sources.last?.id {
@@ -336,119 +322,29 @@ struct SourcesView: View {
         }
     }
 
-    private var csvCard: some View {
+    private var eaCard: some View {
         Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    Image(systemName: "folder.fill").foregroundStyle(Theme.Colors.tealBright)
+                    Image(systemName: "tablecells.badge.ellipsis")
+                        .foregroundStyle(Theme.Colors.tealBright)
                         .font(.system(size: 16))
-                    SectionHeader(title: "CSV Inbox")
-                    Spacer()
-                    Pill(text: "\(csvFiles.count) FILES", tone: .muted)
+                    SectionHeader(title: "Extension Attributes")
                 }
-                // One line, shortened in the middle: a path has no spaces to wrap at, so it
-                // broke wherever the card ran out of width.
-                Mono(text: workspaceDisplayPath(subpath: "csv-inbox") + "/")
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(workspaceDisplayPath(subpath: "csv-inbox") + "/")
-
-                if csvFiles.isEmpty {
-                    emptyCSVState
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(csvFiles.enumerated()), id: \.element.id) { idx, f in
-                            HStack(spacing: 10) {
-                                Image(systemName: "doc.text")
-                                    .foregroundStyle(
-                                        f.status == .pending
-                                            ? Theme.Colors.gold
-                                            : Theme.Text.tertiary(contrast)
-                                    )
-                                    .font(.system(size: 12))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Mono(text: f.name, color: Theme.Text.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .help(f.name)
-                                    Mono(
-                                        text: "\(FileDisplay.date(f.mtime)) · \(f.size)",
-                                        size: 10.5
-                                    )
-                                    .lineLimit(1)
-                                }
-                                Spacer(minLength: 8)
-                                Pill(text: f.status.rawValue, tone: tone(for: f.status))
-                                Menu {
-                                    if f.status != .archived {
-                                        Button {
-                                            archiveInboxFile(f)
-                                        } label: {
-                                            Label("Archive", systemImage: "archivebox")
-                                        }
-                                    }
-                                    Button(role: .destructive) {
-                                        pendingClearFile = f
-                                        pendingClearProfile = workspace.profile
-                                        showClearConfirm = true
-                                    } label: {
-                                        Label("Clear inbox file", systemImage: "trash")
-                                    }
-                                } label: {
-                                    Image(systemName: "ellipsis.circle")
-                                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                                        .font(.system(size: 14))
-                                }
-                                .menuStyle(.button)
-                                .buttonStyle(.plain)
-                                .disabled(workspace.demoMode)
-                                .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
-                                .accessibilityLabel("Actions for \(f.name)")
-                            }
-                            .padding(.vertical, 8)
-                            if idx < csvFiles.count - 1 {
-                                Divider().background(Theme.Hairline.standard)
-                            }
-                        }
-                    }
+                Text("Pick the Extension Attributes and security agents collected from Jamf "
+                    + "Pro to track in config.yaml. A CSV export can be imported once instead.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
+                PNPButton(title: "Adopt EAs", icon: "tablecells.badge.ellipsis", size: .sm) {
+                    guard !workspace.demoMode else { return }
+                    showingEAWalkthrough = true
                 }
-
-                if !csvFiles.isEmpty {
-                    Text(CSVInboxService.statusCaption)
-                        .font(.caption)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(spacing: 8) {
-                    PNPButton(title: "Open in Finder", icon: "folder", size: .sm) {
-                        guard !workspace.demoMode else { return }
-                        let url = (ProfileService.workspaceURL(for: workspace.profile)
-                                    ?? WorkspaceRootStore.defaultRoot)
-                            .appendingPathComponent("csv-inbox", isDirectory: true)
-                        SystemActions.openFolder(url)
-                    }
-                    .disabled(workspace.demoMode)
-                    .help(workspace.demoMode
-                          ? DemoData.liveOnlyHelp
-                          : "Open the csv-inbox folder where you drop fresh CSV exports.")
-                    // Reads the real inbox's newest CSV and writes config.yaml.
-                    PNPButton(
-                        title: "EA tracking guide",
-                        icon: "tablecells.badge.ellipsis",
-                        style: .ghost,
-                        size: .sm
-                    ) {
-                        guard !workspace.demoMode else { return }
-                        showingEAWalkthrough = true
-                    }
-                    .disabled(workspace.demoMode)
-                    .help(workspace.demoMode
-                          ? DemoData.liveOnlyHelp
-                          : "Detect Extension Attribute columns in your newest CSV and adopt "
-                              + "them into config.yaml.")
-                }
-                .padding(.top, 4)
+                .disabled(workspace.demoMode)
+                .help(workspace.demoMode
+                      ? DemoData.liveOnlyHelp
+                      : "Pick collected Extension Attributes (or import a CSV once) to "
+                          + "track in config.yaml.")
                 TipView(SourcesTips.eaTracking)
                     .frame(maxWidth: 460, alignment: .leading)
             }
@@ -481,6 +377,7 @@ struct SourcesView: View {
                     // under the demo's name, and the check runs `jamf-cli doctor`.
                     Button("Update credentials\u{2026}") {
                         guard !workspace.demoMode else { return }
+                        reauthOpensPlatform = false
                         showingReauth = true
                     }
                     .disabled(workspace.demoMode)
@@ -554,6 +451,7 @@ struct SourcesView: View {
                         .foregroundStyle(Theme.Text.secondary)
                     Spacer()
                     PNPButton(title: "Update credentials\u{2026}", icon: "key.horizontal", size: .sm) {
+                        reauthOpensPlatform = false
                         showingReauth = true
                     }
                 }
@@ -711,7 +609,7 @@ struct SourcesView: View {
                     .disabled(workspace.demoMode)
                     .help(workspace.demoMode
                           ? DemoData.liveOnlyHelp
-                          : "Open the snapshots directory where dated CSV/JSON archives live.")
+                          : "Open the snapshots directory where dated archives live.")
                 }
                 if families.isEmpty {
                     emptyFamiliesState
@@ -751,12 +649,16 @@ struct SourcesView: View {
                     // empty filler rows that read as missing data.
                     .frame(height: min(CGFloat(families.count) * 28 + 34, 200))
                     .scrollContentBackground(.hidden)
-                    Text("Families appear as snapshot types are archived: summaries "
+                    Text(isSchoolWorkspace
+                        ? "Families appear as snapshot types are archived: summaries "
+                        + "(daily trend data: a day's first collect writes it, and each later "
+                        + "collect that fetches new data rebuilds it) plus dated Jamf School "
+                        + "device, group, and user archives."
+                        : "Families appear as snapshot types are archived: summaries "
                         + "(daily trend data: a day's first collect writes it, and each later "
                         + "collect that fetches new data rebuilds it) plus dated computers, "
-                        + "mobile, compliance, and patching archives created when CSV exports "
-                        + "are snapshotted. A jamf-cli-only workspace typically shows only "
-                        + "summaries.")
+                        + "mobile, compliance, and patching archives. A jamf-cli-only workspace "
+                        + "typically shows only summaries.")
                         .font(.caption)
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                         .fixedSize(horizontal: false, vertical: true)
@@ -765,27 +667,11 @@ struct SourcesView: View {
         }
     }
 
-    private var emptyCSVState: some View {
-        EmptyStateView(
-            systemImage: "tablecells.badge.ellipsis",
-            title: "No CSV files in the inbox.",
-            message: "Drop Jamf Pro exports here before running a CSV-assisted report. "
-                + "Add your Extension Attribute columns to the export to track them.",
-            // The walkthrough reads the real inbox and writes config.yaml.
-            primaryAction: workspace.demoMode ? nil : EmptyStateAction(
-                label: "Set up EA tracking",
-                icon: "tablecells.badge.ellipsis",
-                action: { showingEAWalkthrough = true }
-            )
-        )
-        .padding(.vertical, 10)
-    }
-
     private var emptyFamiliesState: some View {
         EmptyStateView(
             systemImage: "archivebox",
             title: "No snapshot families yet",
-            message: "Families appear after collection or CSV archival runs: "
+            message: "Families appear after collection runs: "
                 + "summaries (written by a collect that fetches data), plus dated computers, "
                 + "mobile, compliance, and patching archives."
         )
@@ -796,7 +682,6 @@ struct SourcesView: View {
     private func reload() {
         guard !workspace.demoMode else {
             // The demo workspace, never this Mac's: no folder is read.
-            csvFiles = DemoData.inboxFiles(for: workspace.profile)
             families = DemoData.snapshotFamilies(for: workspace.profile)
             connectedProducts = .none
             sourcesPlan = CollectSourcesPlan.build(.init(
@@ -811,7 +696,6 @@ struct SourcesView: View {
         }
         reloadConnectedProducts()
         reloadSourcesPlan()
-        csvFiles = CSVInboxService().list(profile: workspace.profile)
         families = SnapshotArchiveService().families(profile: workspace.profile)
 
         do {
@@ -830,6 +714,7 @@ struct SourcesView: View {
     private func reloadConnectedProducts() {
         connectedProducts = workspace.demoMode
             ? .none : ConnectedProducts.read(profile: workspace.profile)
+        workspace.refreshProtectConnection()
         guard let named = connectedProducts.protectProfile else {
             cliProfileNames = nil
             return
@@ -855,71 +740,33 @@ struct SourcesView: View {
         let version = workspace.jamfCLIVersion
         let skipExpensive = UserDefaults.standard.bool(forKey: "skipExpensiveCollections")
         Task {
-            let (plan, dates) = await Task.detached(priority: .userInitiated) {
+            let (plan, dates, school) = await Task.detached(priority: .userInitiated) {
                 let config = ProfileService.workspaceURL(for: profile).flatMap {
                     try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
                 }
                 let detected = ProfileProductType.detect(from: config, profile: profile)
-                let auth = detected.type == .jamfPro
-                    ? ProfileAuthMethod.resolve(profile: profile) : nil
+                let auth = ProfileAuthMethod.resolve(profile: profile)
+                let protectProfile = ConnectedProducts.read(profile: profile).protectProfile
                 let plan = CollectSourcesPlan.build(.init(
                     product: detected.type, profile: profile,
-                    protectProfile: ConnectedProducts.read(profile: profile).protectProfile,
+                    protectProfile: protectProfile,
+                    protectRefusal: protectProfile.flatMap { name in
+                        ProfileAuthMethod.resolve(profile: name)?.protectRefusal(profile: name)
+                    },
                     staleDays: config?.thresholds?.resolvedStaleDays ?? 30,
                     installedVersion: version, skipExpensive: skipExpensive,
                     authMethod: auth?.authMethod, tenantLevel: auth?.isTenantLevel == true,
+                    hasTenantID: auth?.hasTenantID == true,
                     collectSkip: ReportEngine.collectSkipKinds(config?.jamfCli?.collectSkip)))
+                let school = detected.type == .jamfSchool
+                    ? ProfileAuthMethod.resolve(profile: profile) : nil
                 return (plan, Self.newestSnapshots(
-                    kinds: plan.sources.map(\.kind), profile: profile))
+                    kinds: plan.sources.map(\.kind), profile: profile), school)
             }.value
             guard profile == workspace.profile, !workspace.demoMode else { return }
             sourcesPlan = plan
             cachedAt = dates
-        }
-    }
-
-    private func clearPendingFile() {
-        guard !workspace.demoMode else { return }
-        guard let file = pendingClearFile,
-              let profile = pendingClearProfile else {
-            return
-        }
-
-        do {
-            try CSVInboxService().clear(file, profile: profile)
-            pendingClearFile = nil
-            pendingClearProfile = nil
-            if profile == workspace.profile {
-                reload()
-            }
-        } catch {
-            clearError = "Couldn't remove the inbox file: \(error.localizedDescription). "
-                + "It may be open in another app or read-only."
-            showClearError = true
-        }
-    }
-
-    private func archiveInboxFile(_ file: InboxFile) {
-        guard !workspace.demoMode else { return }
-        let profile = workspace.profile
-        do {
-            try CSVInboxService().archive(file, profile: profile)
-            reload()
-        } catch {
-            clearError = "Couldn't archive the inbox file: \(error.localizedDescription)"
-            showClearError = true
-        }
-    }
-
-    /// Watch the profile's csv-inbox for dropped exports. Demo mode watches
-    /// nothing: its inbox is fixed.
-    private func startInboxWatcher() {
-        guard !workspace.demoMode else {
-            inboxWatcher.stop()
-            return
-        }
-        inboxWatcher.start(profile: workspace.profile) {
-            reload()
+            schoolResolved = school
         }
     }
 
@@ -989,14 +836,6 @@ struct SourcesView: View {
         return Self.scopeExplanation(scope) + " Click to change."
     }
 
-    private func tone(for status: InboxFileStatus) -> Pill.Tone {
-        switch status {
-        case .pending: .gold
-        case .consumed: .teal
-        case .archived: .muted
-        }
-    }
-
     /// Older builds wrote these kinds under other folder names; their snapshots still count.
     private nonisolated static let legacyCacheNames: [String: [String]] = [
         "computers": ["computers-list", "computers_list"],
@@ -1048,6 +887,41 @@ struct SourcesView: View {
         return dataPath + "/"
     }
 
+    // MARK: - Jamf School Platform API
+
+    private var schoolPlatformRow: SchoolPlatformRow {
+        .state(resolved: schoolResolved, lastCheck: schoolPlatformCheck)
+    }
+
+    /// Opens Update credentials on the School form: `school setup` rebuilds the whole profile,
+    /// so the Platform API fields are added there with the Network ID and API key.
+    private var schoolPlatformCard: some View {
+        Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Text(schoolPlatformRow.label)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(schoolPlatformRow == .rejected
+                                         ? Theme.Colors.warn : Theme.Colors.fg)
+                    Spacer()
+                    PNPButton(title: schoolPlatformRow.actionTitle, icon: "key.horizontal",
+                              size: .sm) {
+                        guard !workspace.demoMode else { return }
+                        reauthOpensPlatform = true
+                        showingReauth = true
+                    }
+                    .disabled(workspace.demoMode)
+                    .help(workspace.demoMode ? DemoData.liveOnlyHelp : "")
+                }
+                Text(SchoolPlatformCheck.experimentalNote)
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let check = schoolPlatformCheck { SchoolPlatformFields.banner(check) }
+            }
+        }
+    }
+
     // MARK: - Additional products card
 
     private var additionalProductsCard: some View {
@@ -1062,6 +936,12 @@ struct SourcesView: View {
                     .font(.caption)
                     .foregroundStyle(Theme.Text.tertiary(contrast))
                     .fixedSize(horizontal: false, vertical: true)
+                if isSchoolWorkspace {
+                    Text(Self.schoolProtectNote)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 // Sets up a real jamf-cli connection and writes config.yaml.
                 ProtectProductControl(
@@ -1073,15 +953,23 @@ struct SourcesView: View {
                     onConnect: { showingProtectConnect = true },
                     onDisconnected: reloadConnectedProducts)
 
-                Text("Jamf School uses its own workspace: choose Add Jamf School workspace in "
-                    + "the sidebar's workspace menu.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .fixedSize(horizontal: false, vertical: true)
+                if !isSchoolWorkspace {
+                    Text("Jamf School uses its own workspace: add one with Settings › Add "
+                        + "connection.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .frame(maxWidth: .infinity)
     }
+
+    /// Jamf Protect on a Jamf School workspace (2.11): collected and reported as on Jamf Pro,
+    /// but not backed up, since a School workspace has no backups.
+    nonisolated static let schoolProtectNote =
+        "Experimental: Jamf Protect with Jamf School. Protect is collected and reported; "
+            + "it is not backed up, as a Jamf School workspace has no backups."
 
     /// JSON snapshots, and the jamf-cli dashboard's page, the one kind saved as HTML.
     private nonisolated static func cacheDates(

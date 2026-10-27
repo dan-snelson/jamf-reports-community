@@ -5,7 +5,7 @@ import XCTest
 // MARK: - GroupD: first-time-admin review fixes
 //
 // D1 — onboarding's first report collects before it generates (Jamf Pro path).
-// D5 — the optional "Map your columns" checklist row doesn't block completion.
+// D5 — the optional "Track your Extension Attributes" checklist row doesn't block completion.
 // D10 — the "Automation is off" banner only fires when something wants the ticker.
 
 @MainActor
@@ -87,20 +87,57 @@ final class GroupDOnboardingAutomationTests: XCTestCase {
         }
     }
 
-    // The Jamf School path is deliberately left unchanged (per D1) and so is
-    // not given an injectable seam here — it calls the real, un-mocked
-    // `CLIBridge().schoolGenerate`, which would spawn a real jamf-cli
-    // process. It is exercised by the existing School-path onboarding tests,
-    // not this group.
+    /// `schoolGenerate` only reads snapshots: a first School report with no collect
+    /// before it was a workbook with no sheets.
+    func test_runFirstReport_schoolPath_collectsBeforeSchoolGenerate() async throws {
+        await withIsolatedWorkspacesRoot {
+            let flow = OnboardingFlow()
+            flow.productPath = .school
+            flow.profileName = "grpd\(Int.random(in: 1000...9999))"
+            let workspace = WorkspaceStore(demoMode: true)
+            let recorder = CallRecorder()
 
-    // MARK: - D5: the optional "Map your columns" row doesn't block completion
+            await flow.runFirstReport(
+                workspaceStore: workspace,
+                collect: { _, _ in recorder.calls.append("collect"); return 0 },
+                generate: { _, _ in recorder.calls.append("generate"); return 0 },
+                schoolGenerate: { _, _ in recorder.calls.append("schoolGenerate"); return 0 }
+            )
+
+            XCTAssertEqual(recorder.calls, ["collect", "schoolGenerate"])
+            XCTAssertEqual(flow.firstReportExitCode, 0)
+        }
+    }
+
+    func test_runFirstReport_schoolPath_stopsBeforeGenerateOnCollectFailure() async throws {
+        await withIsolatedWorkspacesRoot {
+            let flow = OnboardingFlow()
+            flow.productPath = .school
+            flow.profileName = "grpd\(Int.random(in: 1000...9999))"
+            let workspace = WorkspaceStore(demoMode: true)
+            let recorder = CallRecorder()
+
+            await flow.runFirstReport(
+                workspaceStore: workspace,
+                collect: { _, _ in recorder.calls.append("collect"); return 1 },
+                generate: { _, _ in recorder.calls.append("generate"); return 0 },
+                schoolGenerate: { _, _ in recorder.calls.append("schoolGenerate"); return 0 }
+            )
+
+            XCTAssertEqual(recorder.calls, ["collect"])
+            XCTAssertEqual(flow.firstReportExitCode, 1)
+            XCTAssertNotNil(flow.lastError)
+        }
+    }
+
+    // MARK: - D5: the optional "Track your Extension Attributes" row doesn't block completion
 
     func test_checklist_customizeStep_isMarkedOptional() {
         let checklist = GettingStartedChecklist.build(
             connected: false, collected: false, customized: false, scheduled: false, reported: false
         )
         let customize = checklist.steps.first { $0.kind == .customize }
-        XCTAssertEqual(customize?.isOptional, true, "'Map your columns' must be optional")
+        XCTAssertEqual(customize?.isOptional, true, "'Track your Extension Attributes' must be optional")
         for step in checklist.steps where step.kind != .customize {
             XCTAssertFalse(step.isOptional, "\(step.kind) must remain a required step")
         }

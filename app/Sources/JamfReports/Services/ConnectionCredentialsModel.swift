@@ -11,7 +11,6 @@ import Observation
 final class ConnectionCredentialsModel {
     struct JamfCLIContext: Sendable {
         let binary: URL
-        let version: String?
     }
 
     struct Registration: Sendable {
@@ -20,7 +19,7 @@ final class ConnectionCredentialsModel {
         let scope: OnboardingFlow.PlatformScope
         let scopeID: String
         let clientID: String
-        let clientSecret: String
+        let clientSecret: Data
     }
 
     /// Everything outside the model: jamf-cli, the file system and the store. Tests inject all
@@ -95,7 +94,8 @@ final class ConnectionCredentialsModel {
     var clientID = ""
     var idsText = ""
     var secretFieldHasText = false
-    private(set) var clientSecret = ""
+    // Not observed, so a clear zeroes the stored bytes in place; the has-text Bool drives Run.
+    @ObservationIgnored private(set) var clientSecret = Data()
     private(set) var rows: [Row] = []
     private(set) var isRunning = false
     private(set) var hasRun = false
@@ -125,15 +125,13 @@ final class ConnectionCredentialsModel {
     // MARK: - Secret
 
     func setSecret(_ data: Data) {
-        clientSecret = String(data: data, encoding: .utf8) ?? ""
+        clientSecret.wipe()
+        clientSecret = data
     }
 
     /// Overwrites the secret before dropping it; the field's own copy is cleared by the sheet.
     func clearSecret() {
-        let count = clientSecret.count
-        if count > 0 { clientSecret = String(repeating: "\0", count: count) }
-        clientSecret.removeAll(keepingCapacity: false)
-        clientSecret = ""
+        clientSecret.wipe()
         secretFieldHasText = false
     }
 
@@ -180,7 +178,10 @@ final class ConnectionCredentialsModel {
             runError = "Could not find jamf-cli. Install it from the sidebar's setup step."
             return
         }
-        let secret = clientSecret
+        // Moved, not copied: the stored value is empty from here and the local copy is wiped.
+        var secret = clientSecret
+        clientSecret = Data()
+        defer { secret.wipe() }
         let id = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         switch mode {
         case .addEnvironments:
@@ -192,7 +193,7 @@ final class ConnectionCredentialsModel {
     }
 
     private func addEnvironments(
-        _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: String
+        _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: Data
     ) async {
         for planned in plan {
             let label = planned.entry.label
@@ -216,14 +217,17 @@ final class ConnectionCredentialsModel {
     }
 
     private func updateAll(
-        _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: String
+        _ context: JamfCLIContext, gatewayURL: String, clientID: String, secret: Data
     ) async {
         for member in connection.members {
-            guard !member.scopeID.isEmpty else {
+            // connections.json is a plain file; its ID goes to jamf-cli as a flag value.
+            guard ConnectionEnvironments.isUsableID(member.scopeID) else {
+                let reason = member.scopeID.isEmpty
+                    ? "No ID is recorded for this profile."
+                    : "The ID recorded for this profile cannot be used."
                 rows.append(Row(
                     label: member.label, profile: member.profile,
-                    outcome: .skipped("No ID is recorded for this profile. Use Update credentials "
-                        + "on its own workspace."),
+                    outcome: .skipped(reason + " Use Update credentials on its own workspace."),
                     isNew: false))
                 continue
             }

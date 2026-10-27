@@ -516,7 +516,6 @@ struct SchedulesView: View {
             .snapshotOnly: ("icloud.and.arrow.up", Theme.Colors.info),
             .jamfCLIOnly: ("bolt.fill", Theme.Colors.gold),
             .jamfCLIFull: ("shield.lefthalf.filled", Theme.Colors.ok),
-            .csvAssisted: ("folder.fill", Theme.Colors.purple),
         ]
         return VStack(alignment: .leading, spacing: 14) {
             HStack {

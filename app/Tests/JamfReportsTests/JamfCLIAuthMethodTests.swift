@@ -38,7 +38,7 @@ final class JamfCLIAuthMethodTests: XCTestCase {
     func testTheReadersThatTookStringsAgree() {
         XCTAssertTrue(ReauthenticateSheet.prefersPlatformGateway(authMethod: " platform "))
         XCTAssertFalse(ReauthenticateSheet.prefersPlatformGateway(authMethod: "oauth2"))
-        XCTAssertTrue(CLIBridge.shouldSkipAuthProbe(for: "apikey "))
+        XCTAssertEqual(JamfCLIAuthMethod(raw: "apikey "), .apiKey)
         XCTAssertEqual(ReportEngine.nonPlatformAuthMethod(" oauth2 "), "oauth2")
         XCTAssertNil(ReportEngine.nonPlatformAuthMethod("platform"))
         XCTAssertNil(ReportEngine.nonPlatformAuthMethod(nil), "unknown skips nothing")

@@ -151,6 +151,36 @@ final class DataFreshnessHealthTests: XCTestCase {
         XCTAssertEqual(DataFreshnessHealth.tiersToRemediate(issues), [.refresh, .inventory])
     }
 
+    // MARK: - Protect kinds
+
+    func testProtectKindsAreJudgedOnTheRefreshCadence() {
+        XCTAssertEqual(DataFreshnessHealth.protectKinds.count, 5)
+        XCTAssertNil(CollectionTier.tier(forReport: "protect-alerts"),
+                     "the tier map stays Pro-only; freshness maps Protect itself")
+        XCTAssertTrue(DataFreshnessHealth.evaluate(
+            states: [state("protect-alerts", successAgo: 13 * 3600)],
+            hasCollectedBefore: true, now: now).isEmpty)
+
+        let stale = DataFreshnessHealth.evaluate(
+            states: [state("protect-alerts", successAgo: 37 * 3600)],
+            hasCollectedBefore: true, now: now)
+        XCTAssertEqual(stale.map(\.snapshotKind), ["protect-alerts"])
+        XCTAssertEqual(stale.first?.kind, .stale)
+        XCTAssertEqual(stale.first?.tier, .refresh)
+        XCTAssertEqual(DataFreshnessHealth.tiersToRemediate(stale), [.refresh])
+    }
+
+    func testProtectKindsFailAfterTwoFailures() {
+        XCTAssertTrue(DataFreshnessHealth.evaluate(
+            states: [state("protect-plans", successAgo: 600, failures: 1)],
+            hasCollectedBefore: true, now: now).isEmpty)
+        let issues = DataFreshnessHealth.evaluate(
+            states: [state("protect-plans", successAgo: 600, failures: 2)],
+            hasCollectedBefore: true, now: now)
+        XCTAssertEqual(issues.first?.kind, .failing)
+        XCTAssertEqual(issues.first?.snapshotKind, "protect-plans")
+    }
+
     func testRemediationOfHealthyFleetIsEmpty() {
         XCTAssertTrue(DataFreshnessHealth.tiersToRemediate([]).isEmpty)
     }

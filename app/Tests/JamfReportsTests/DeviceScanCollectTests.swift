@@ -52,6 +52,7 @@ final class DeviceScanCollectTests: XCTestCase {
         let url = binDir.appendingPathComponent("stub-cli")
         let script = """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         A="\(answers.path)"
         printf '%s\\n' "$*" >> "$A/calls.log"
         emit() { f="$A/$1"; [ -f "$f.sleep" ] && exec sleep 30; if [ -f "$f.exit" ]; then code=$(cat "$f.exit"); else code=0; fi; \\

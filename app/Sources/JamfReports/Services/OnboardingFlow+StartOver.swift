@@ -4,9 +4,8 @@ import Foundation
 extension OnboardingFlow {
     /// A jamf-cli command or a file write is running; navigation waits for it.
     var isBusy: Bool {
-        isRegisteringProfile || isValidatingConnection || isScaffoldingCSV
-            || isSkippingCSVMapping || isRunningFirstReport || isConnectingProtect
-            || isConnectingSchool
+        isRegisteringProfile || isValidatingConnection || isRunningFirstReport
+            || isConnectingProtect || isConnectingSchool
     }
 
     /// True when Start over has something to remove, so it asks first.

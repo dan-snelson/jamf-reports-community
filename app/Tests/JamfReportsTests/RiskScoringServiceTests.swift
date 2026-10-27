@@ -4,6 +4,8 @@ import XCTest
 
 final class RiskScoringServiceTests: XCTestCase {
 
+    private static let rule = StaleRule(days: 30)
+
     func testSafeInputScoresClean() {
         let risk = RiskScoringService.score(input: .safe)
         XCTAssertEqual(risk.score, 0)
@@ -51,7 +53,7 @@ final class RiskScoringServiceTests: XCTestCase {
     func testNoBaselineOnlyPenalizesActiveDevices() {
         var inactive = RiskScoringService.Input.safe
         inactive.hasBaseline = false
-        inactive.daysSinceCheckIn = 60  // > 30 → stale, not active
+        inactive.isStale = true
 
         let inactiveRisk = RiskScoringService.score(input: inactive)
         XCTAssertFalse(inactiveRisk.triggered.contains { $0.factor == .noBaseline },
@@ -165,17 +167,19 @@ final class RiskScoringServiceTests: XCTestCase {
             lastInventory: "2026-05-10T12:00:00Z", daysSinceContact: 2,
             stale: false, fileVault: "Encrypted", sip: "Enabled",
             firewall: "Enabled", gatekeeper: "Enabled",
-            bootstrapToken: "Escrowed", diskUsage: "62%", failedRules: 0,
+            bootstrapToken: "Escrowed",
             patchFailures: [], source: "jamf-cli"
         )
         let disconnectedInput = RiskScoringService.Input.from(
             record: record,
             agentCheck: .init(value: "Service not running", connectedValue: "Connected"),
-            policy: .default
+            policy: .default,
+            staleRule: Self.rule
         )
         XCTAssertEqual(disconnectedInput.securityAgentConnected, false)
 
-        let noCheckInput = RiskScoringService.Input.from(record: record, policy: .default)
+        let noCheckInput = RiskScoringService.Input.from(
+            record: record, policy: .default, staleRule: Self.rule)
         XCTAssertNil(noCheckInput.securityAgentConnected)
     }
 
@@ -208,53 +212,6 @@ final class RiskScoringServiceTests: XCTestCase {
         XCTAssertEqual(RiskScoringService.score(input: none).score, 12)
     }
 
-    func testBootDriveThresholdRespectsConfigurableCutoff() {
-        var input = RiskScoringService.Input.safe
-        input.bootDrivePctUsed = 94
-        XCTAssertEqual(RiskScoringService.score(input: input).score, 0,
-                       "94% should be below default 95% threshold")
-
-        input.bootDrivePctUsed = 96
-        let risk = RiskScoringService.score(input: input)
-        XCTAssertEqual(risk.score, 8)
-        XCTAssertEqual(risk.triggered.first?.detail, "96% used")
-    }
-
-    /// `Int(1e20.rounded())` in the detail text traps, and the Overview scores every Mac on
-    /// open, so a bad cell must read as no value.
-    func testDiskUsageCellOutsideAPercentageIsNotRead() {
-        func used(_ cell: String) -> Double? {
-            var record = DeviceInventoryRecord.empty(id: "d", source: "csv")
-            record.diskUsage = cell
-            return RiskScoringService.Input.from(record: record, policy: .default).bootDrivePctUsed
-        }
-        for cell in ["1e20", "-5", "250", "inf", "nan", "100.5", ""] {
-            XCTAssertNil(used(cell), "\(cell) is no disk percentage")
-        }
-        XCTAssertEqual(used("94%"), 94)
-        XCTAssertEqual(try XCTUnwrap(used("0.94")), 94, accuracy: 0.0001)
-        XCTAssertEqual(used("100"), 100)
-        XCTAssertEqual(used("0%"), 0)
-    }
-
-    /// `Int.max`-sized `Failed Rules` cell times the per-failure weight overflows and traps.
-    func testCSVFailedRulesBeyondAnyRealCountIsClamped() {
-        func failedRules(_ cell: String) -> Int {
-            DeviceInventoryService.recordFromCSV(
-                ["Computer Name": "Mac-1", "Failed Rules": cell], source: "inventory.csv"
-            ).failedRules
-        }
-        XCTAssertEqual(failedRules("4611686018427387904"), 1_000_000)
-        XCTAssertEqual(failedRules("-4"), 0)
-        XCTAssertEqual(failedRules("37"), 37)
-        let record = DeviceInventoryService.recordFromCSV(
-            ["Computer Name": "Mac-1", "Failed Rules": "4611686018427387904"],
-            source: "inventory.csv")
-        let input = RiskScoringService.Input.from(record: record, policy: .default)
-        XCTAssertGreaterThan(RiskScoringService.score(input: input).score, 0,
-                             "scoring a clamped count neither traps nor wraps")
-    }
-
     func testInputFromInventoryRecordInterpretsStringStatuses() {
         let record = DeviceInventoryRecord(
             id: "JSS-100",
@@ -280,20 +237,18 @@ final class RiskScoringServiceTests: XCTestCase {
             firewall: "Disabled",   // <- only failing one
             gatekeeper: "Enabled",
             bootstrapToken: "Escrowed",
-            diskUsage: "62%",
-            failedRules: 0,
             patchFailures: [],
             source: "jamf-cli"
         )
 
-        let input = RiskScoringService.Input.from(record: record, policy: .default)
+        let input = RiskScoringService.Input.from(
+            record: record, policy: .default, staleRule: Self.rule)
 
         XCTAssertTrue(input.fileVaultEncrypted)
         XCTAssertTrue(input.sipEnabled)
         XCTAssertFalse(input.firewallEnabled)
         XCTAssertTrue(input.gatekeeperEnabled)
         XCTAssertTrue(input.bootstrapEscrowed)
-        XCTAssertEqual(input.bootDrivePctUsed ?? -1, 62, accuracy: 0.01)
         XCTAssertEqual(RiskScoringService.score(input: input).score, 6)
     }
 
@@ -307,6 +262,39 @@ final class RiskScoringServiceTests: XCTestCase {
         XCTAssertEqual(DeviceRisk.Level.from(score: 19), .high)
         XCTAssertEqual(DeviceRisk.Level.from(score: 20), .critical)
         XCTAssertEqual(DeviceRisk.Level.from(score: 100), .critical)
+    }
+
+    // MARK: - Staleness follows the workspace's stale rule
+
+    private func staleTriggered(
+        _ record: DeviceInventoryRecord, _ rule: StaleRule
+    ) -> DeviceRisk.TriggeredFactor? {
+        RiskScoringService.risk(for: record, policy: .default, staleRule: rule)
+            .triggered.first { $0.factor == .staleOffline }
+    }
+
+    func testStaleFactorUsesTheConfiguredDayCount() {
+        var record = statusRecord(fileVault: "Encrypted", sip: "Enabled",
+                                  firewall: "Enabled", gatekeeper: "Enabled")
+        record.daysSinceContact = 45
+        XCTAssertEqual(staleTriggered(record, StaleRule(days: 30))?.detail,
+                       "45 days since check-in")
+        XCTAssertNil(staleTriggered(record, StaleRule(days: 60)),
+                     "45 days is within a 60-day setting")
+        XCTAssertNil(staleTriggered(record, StaleRule(days: 45)),
+                     "exactly at the threshold is not stale")
+    }
+
+    func testStaleFactorUsesTheConfiguredBasis() {
+        var record = statusRecord(fileVault: "Encrypted", sip: "Enabled",
+                                  firewall: "Enabled", gatekeeper: "Enabled")
+        record.daysSinceContact = 1
+        record.checkInDate = Date().addingTimeInterval(-86_400)
+        record.inventoryDate = Date().addingTimeInterval(-50 * 86_400)
+        XCTAssertNil(staleTriggered(record, StaleRule(days: 30)))
+        let both = StaleRule(days: 30, basis: [.checkIn, .inventory])
+        XCTAssertEqual(staleTriggered(record, both)?.detail,
+                       "50 days since check-in or inventory update")
     }
 
     // MARK: - Status-string polarity
@@ -323,7 +311,7 @@ final class RiskScoringServiceTests: XCTestCase {
             lastInventory: "2026-05-10T12:00:00Z", daysSinceContact: 1,
             stale: false, fileVault: fileVault, sip: sip,
             firewall: firewall, gatekeeper: gatekeeper,
-            bootstrapToken: "Escrowed", diskUsage: "10%", failedRules: 0,
+            bootstrapToken: "Escrowed",
             patchFailures: [], source: "jamf-cli"
         )
     }
@@ -337,7 +325,7 @@ final class RiskScoringServiceTests: XCTestCase {
         let input = RiskScoringService.Input.from(record: statusRecord(
             fileVault: "Not Encrypted", sip: "Not Enabled",
             firewall: "Not Enabled", gatekeeper: "Off"
-        ), policy: .default)
+        ), policy: .default, staleRule: Self.rule)
         XCTAssertFalse(input.fileVaultEncrypted, "\"Not Encrypted\" is not encrypted")
         XCTAssertFalse(input.sipEnabled, "\"Not Enabled\" is not enabled")
         XCTAssertFalse(input.firewallEnabled, "\"Not Enabled\" is not enabled")
@@ -354,7 +342,7 @@ final class RiskScoringServiceTests: XCTestCase {
         let input = RiskScoringService.Input.from(record: statusRecord(
             fileVault: "NOT_ENCRYPTED", sip: "NOT_ENABLED",
             firewall: "DISABLED", gatekeeper: "NOT_ENABLED"
-        ), policy: .default)
+        ), policy: .default, staleRule: Self.rule)
         XCTAssertFalse(input.fileVaultEncrypted)
         XCTAssertFalse(input.sipEnabled)
         XCTAssertFalse(input.firewallEnabled)
@@ -365,7 +353,7 @@ final class RiskScoringServiceTests: XCTestCase {
         let input = RiskScoringService.Input.from(record: statusRecord(
             fileVault: "Encrypted", sip: "Enabled",
             firewall: "Enabled", gatekeeper: "Yes"
-        ), policy: .default)
+        ), policy: .default, staleRule: Self.rule)
         XCTAssertTrue(input.fileVaultEncrypted)
         XCTAssertTrue(input.sipEnabled)
         XCTAssertTrue(input.firewallEnabled)
@@ -377,7 +365,7 @@ final class RiskScoringServiceTests: XCTestCase {
     func testEmptyStatusIsNotScoredAsFailing() {
         let input = RiskScoringService.Input.from(record: statusRecord(
             fileVault: "", sip: "", firewall: "", gatekeeper: ""
-        ), policy: .default)
+        ), policy: .default, staleRule: Self.rule)
         XCTAssertTrue(input.fileVaultEncrypted)
         XCTAssertTrue(input.sipEnabled)
     }
@@ -390,14 +378,16 @@ final class RiskScoringServiceTests: XCTestCase {
         record.bootstrapToken = "NOT_ESCROWED"
         let policy = SecurityControlPolicy(
             fileVault: .fail, sip: .warning, firewall: .ignore, gatekeeper: .fail)
-        let input = RiskScoringService.Input.from(record: record, policy: policy)
+        let input = RiskScoringService.Input.from(
+            record: record, policy: policy, staleRule: Self.rule)
         XCTAssertFalse(input.fileVaultEncrypted)
         XCTAssertTrue(input.sipEnabled, "a warning is not a risk point")
         XCTAssertTrue(input.firewallEnabled, "an ignored control is not a risk point")
         XCTAssertFalse(input.gatekeeperEnabled)
         XCTAssertFalse(input.bootstrapEscrowed)
 
-        let atDefault = RiskScoringService.Input.from(record: record, policy: .default)
+        let atDefault = RiskScoringService.Input.from(
+            record: record, policy: .default, staleRule: Self.rule)
         XCTAssertFalse(atDefault.sipEnabled)
         XCTAssertFalse(atDefault.firewallEnabled)
     }

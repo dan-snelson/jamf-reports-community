@@ -29,9 +29,6 @@ final class JamfCLIInstallerTests: XCTestCase {
     }
 
     func test_featureGates_treatAPreReleaseOfTheFloorAsBelowIt() {
-        XCTAssertTrue(JamfCLIInstaller.supportsSpecDerivedNames("1.29.0"))
-        XCTAssertFalse(JamfCLIInstaller.supportsSpecDerivedNames("1.29.0-rc1"))
-        XCTAssertTrue(JamfCLIInstaller.supportsSpecDerivedNames("1.30.0-rc1"))
         XCTAssertTrue(JamfCLIInstaller.supportsDashboard("1.31.0"))
         XCTAssertFalse(JamfCLIInstaller.supportsDashboard("1.31.0-rc1"))
     }
@@ -133,26 +130,10 @@ final class JamfCLIInstallerTests: XCTestCase {
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.16.1"))
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.18.0"))
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.28.9"),
-                      "1.28.9 is below the 2.10 floor 1.29.0")
+                      "1.28.9 is below the floor 1.29.0")
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("1.29.0-rc1"),
                       "a pre-release of the floor counts as below it")
         XCTAssertTrue(JamfCLIInstaller.isBelowMinimumSupported("v1.14.0"))
-    }
-
-    /// jamf-cli 1.29.0 renamed `pro` resources and made `config add-profile` verify
-    /// by default. The new names and `--no-verify` exit 2 on older binaries, so the
-    /// gate is true only for a version confirmed at or above 1.29.0.
-    func test_supportsSpecDerivedNames_onlyFromOneTwentyNine() {
-        XCTAssertTrue(JamfCLIInstaller.supportsSpecDerivedNames("1.29.0"))
-        XCTAssertTrue(JamfCLIInstaller.supportsSpecDerivedNames("v1.29.0"))
-        XCTAssertTrue(JamfCLIInstaller.supportsSpecDerivedNames("1.30.2"))
-        XCTAssertTrue(JamfCLIInstaller.supportsSpecDerivedNames("2.0.0"))
-        XCTAssertFalse(JamfCLIInstaller.supportsSpecDerivedNames("1.28.0"))
-        XCTAssertFalse(JamfCLIInstaller.supportsSpecDerivedNames("1.28.9"))
-        XCTAssertFalse(JamfCLIInstaller.supportsSpecDerivedNames("1.18.0"))
-        XCTAssertFalse(JamfCLIInstaller.supportsSpecDerivedNames(nil),
-                       "unknown version must fail toward the spelling every binary accepts")
-        XCTAssertFalse(JamfCLIInstaller.supportsSpecDerivedNames("garbage"))
     }
 
     func test_isBelowMinimumSupported_acceptsCurrentAndNewer() {
@@ -164,29 +145,22 @@ final class JamfCLIInstallerTests: XCTestCase {
         XCTAssertFalse(JamfCLIInstaller.isBelowMinimumSupported("v1.29.0"))
     }
 
-    /// A scheduled run stops only below the runnable floor (1.18.0, the first with the
-    /// flags collect passes); between it and the supported floor it warns and carries on.
-    func test_isBelowMinimumRunnable_staysAtOneEighteen() {
-        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumRunnable("1.17.9"))
-        XCTAssertTrue(JamfCLIInstaller.isBelowMinimumRunnable("1.18.0-rc1"))
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumRunnable("1.18.0"))
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumRunnable("1.28.9"))
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumRunnable(nil))
-        XCTAssertFalse(JamfCLIInstaller.isBelowMinimumRunnable("garbage"))
+    func test_floorLine_stopsTheRun() {
+        let stop = JamfCLIInstaller.floorLine(installed: "1.28.0", profile: "prod")
+        XCTAssertTrue(stop.hasPrefix("[error] "), stop)
+        XCTAssertTrue(stop.contains("below 1.29.0"), stop)
+        XCTAssertTrue(stop.contains("aborting 'prod'"), stop)
     }
 
-    func test_floorLine_warnsBetweenTheFloorsAndStopsBelowTheRunnableOne() {
-        let warn = JamfCLIInstaller.floorLine(installed: "1.24.0", profile: "prod")
-        XCTAssertFalse(warn.stops, "1.18–1.28 must keep scheduled runs going")
-        XCTAssertTrue(warn.text.hasPrefix("[warn] "), warn.text)
-        XCTAssertTrue(warn.text.contains("1.29.0"), warn.text)
-        XCTAssertFalse(warn.text.contains("[partial]"),
-                       "a warning must not read as a partial run")
-
-        let stop = JamfCLIInstaller.floorLine(installed: "1.17.0", profile: "prod")
-        XCTAssertTrue(stop.stops)
-        XCTAssertTrue(stop.text.hasPrefix("[error] "), stop.text)
-        XCTAssertTrue(stop.text.contains("aborting 'prod'"), stop.text)
+    func test_installedVersionBelowFloor_refusesOnlyAKnownVersionBelowOneTwentyNine() {
+        let saved = JamfCLIInstaller.installedVersionProbe
+        defer { JamfCLIInstaller.installedVersionProbe = saved }
+        JamfCLIInstaller.installedVersionProbe = { "1.28.9" }
+        XCTAssertEqual(JamfCLIInstaller.installedVersionBelowFloor(), "1.28.9")
+        JamfCLIInstaller.installedVersionProbe = { "1.29.0" }
+        XCTAssertNil(JamfCLIInstaller.installedVersionBelowFloor())
+        JamfCLIInstaller.installedVersionProbe = { nil }
+        XCTAssertNil(JamfCLIInstaller.installedVersionBelowFloor(), "unknown never refuses")
     }
 
     func test_isBelowMinimumSupported_returnsFalseOnUnknownInput() {

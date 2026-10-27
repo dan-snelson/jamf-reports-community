@@ -86,23 +86,12 @@ enum RunHistoryService {
     static func loadLog(_ url: URL) -> [CLIBridge.LogLine] {
         guard isInsideLogsDir(url) else { return [] }
 
-        guard let fh = FileHandle(forReadingAtPath: url.resolvingSymlinksInPath().path) else {
+        // A link or FIFO planted at the log's name is refused; `isInsideLogsDir` has already
+        // judged where the name leads.
+        let maxBytes = 5 * 1024 * 1024
+        guard let (data, truncated) = try? BoundedFile.readTail(url, limit: maxBytes) else {
             return []
         }
-        defer { fh.closeFile() }
-
-        let maxBytes: UInt64 = 5 * 1024 * 1024
-        let fileSize = fh.seekToEndOfFile()
-        var truncated = false
-
-        if fileSize > maxBytes {
-            truncated = true
-            fh.seek(toFileOffset: fileSize - maxBytes)
-        } else {
-            fh.seek(toFileOffset: 0)
-        }
-
-        let data = fh.readDataToEndOfFile()
         guard let text = String(data: data, encoding: .utf8) ??
                          String(data: data, encoding: .isoLatin1) else { return [] }
 
@@ -183,13 +172,9 @@ enum RunHistoryService {
     /// when no `exit N` footer or failure marker was found — a crashed run
     /// must never be fabricated as `0`/success.
     static func parseLogTail(from url: URL) -> (Int32?, String?, String) {
-        guard let fh = FileHandle(forReadingAtPath: url.path) else { return (nil, nil, "") }
-        defer { fh.closeFile() }
-
-        let fileSize = fh.seekToEndOfFile()
-        let readSize = min(fileSize, 1024)
-        fh.seek(toFileOffset: fileSize - readSize)
-        let data = fh.readDataToEndOfFile()
+        guard let (data, _) = try? BoundedFile.readTail(url, limit: 1024) else {
+            return (nil, nil, "")
+        }
         guard let text = String(data: data, encoding: .utf8) else { return (nil, nil, "") }
 
         var hasFatal = false
@@ -249,7 +234,8 @@ enum RunHistoryService {
             .appendingPathComponent("summary_\(logFilename).json")
 
         if FileManager.default.fileExists(atPath: summaryURL.path),
-           let data = try? Data(contentsOf: summaryURL) {
+           let data = try? BoundedFile.read(
+               summaryURL, limit: BoundedFile.documentLimit, followSymlinks: false) {
             let verification = SnapshotManifest.verify(snapshot: summaryURL, data: data)
             // Trust only `.verified` (manifest hash matches) or `.absent`
             // (legacy pre-PR-11 — no manifest discipline to enforce). On

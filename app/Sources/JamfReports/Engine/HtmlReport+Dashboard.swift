@@ -89,22 +89,31 @@ extension HtmlReport {
         + "if(e.source!==parent||!e.data){return;}var t=e.data.jrcTheme;"
         + "if(t===\"light\"||t===\"dark\"){d.setAttribute(\"data-theme\",t);}});})();"
 
+    private static let dashboardNotCollected = "not collected yet; with jamf-cli 1.31.0 or "
+        + "later, collect saves jamf-cli's dashboard every two days"
+
     /// The newest dashboard snapshot, as the report can use it.
     func dashboardState() -> DashboardState {
         let dir = dataDir.appendingPathComponent(ReportEngine.dashboardKind, isDirectory: true)
-        guard let url = FileManager.newestHTMLSnapshot(in: dir),
-              let data = try? Data(contentsOf: url) else {
-            return .absent("not collected yet; with jamf-cli 1.31.0 or later, collect saves "
-                + "jamf-cli's dashboard every two days")
+        guard let url = FileManager.newestHTMLSnapshot(in: dir) else {
+            return .absent(Self.dashboardNotCollected)
         }
         let collected = FileManager.snapshotDate(of: url).map(Self.dashboardDateText)
             ?? "on an unknown date"
-        guard data.count <= Self.maxEmbeddedDashboardBytes else {
-            let size = ByteCountFormatter.string(
-                fromByteCount: Int64(data.count), countStyle: .file)
+        // Bounded read: a planted or runaway page must not be read whole before the size check.
+        let data: Data
+        do {
+            data = try BoundedFile.read(
+                url, limit: Self.maxEmbeddedDashboardBytes, followSymlinks: false)
+        } catch BoundedFile.Failure.tooLarge {
+            let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]
+                as? Int64) ?? Int64(Self.maxEmbeddedDashboardBytes)
+            let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
             return .notEmbedded(Self.dashboardNoteSection(
                 "The dashboard collected \(collected) is \(size), too large to embed. Open "
                     + "\(url.lastPathComponent) from the jamf-cli-data/dashboard folder."))
+        } catch {
+            return .absent(Self.dashboardNotCollected)
         }
         let page = Self.dashboardPageForEmbedding(String(decoding: data, as: UTF8.self))
         let srcdoc = HtmlSectionFormatters.escapeHTML(page)

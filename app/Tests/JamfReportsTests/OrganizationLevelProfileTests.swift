@@ -111,26 +111,38 @@ final class OrganizationLevelProfileTests: XCTestCase {
             to: folder.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
     }
 
+    private func route(_ bin: URL, sink: Sink, calls: Counter) async throws {
+        try await CollectRouter.run(
+            profile: profile, tiers: [.scan], force: true, config: nil,
+            proCollect: { _, _, _, _, _, _ in calls.bump(); return .collected },
+            resolved: { ProfileAuthMethod.resolve(profile: $0, binary: bin, configFile: nil) },
+            onLine: sink.append)
+    }
+
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func bump() { lock.withLock { count += 1 } }
+        var value: Int { lock.withLock { count } }
+    }
+
     func testCollectStopsWithOneErrorLineAndRunsNoCommand() async throws {
         try prepareWorkspace()
-        let calls = root.appendingPathComponent("calls.log")
-        let bin = try stub(#"{"name":"orgprofile","auth-method":"platform"}"#, log: calls)
+        let bin = try stub(#"{"name":"orgprofile","auth-method":"platform"}"#)
         let sink = Sink()
+        let calls = Counter()
         do {
-            try await ReportEngine.collect(
-                profile: profile, workspacePaths: WorkspacePaths.self, tiers: [.scan], force: true,
-                authConfirmationProbe: { _, _ in false }, locateJamfCLI: { bin },
-                onLine: sink.append)
+            try await route(bin, sink: sink, calls: calls)
             XCTFail("an organization-level profile must not collect")
-        } catch ReportEngineError.organizationLevelProfile(let name) {
-            XCTAssertEqual(name, profile)
+        } catch CLIBridgeError.wrongProduct {
+            // expected
         }
         let errors = sink.texts.filter { $0.hasPrefix("[error]") }
         XCTAssertEqual(errors.count, 1, "\(sink.texts)")
         XCTAssertTrue(errors[0].contains("organization-level"))
+        XCTAssertTrue(errors[0].contains(PlatformScopeLevel.organizationLevelReason))
         XCTAssertFalse(errors[0].lowercased().contains("correct"), "no ID to correct")
-        let commands = (try? String(contentsOf: calls, encoding: .utf8)) ?? ""
-        XCTAssertFalse(commands.contains("pro "), "no Jamf Pro command was sent: \(commands)")
+        XCTAssertEqual(calls.value, 0, "no Jamf Pro command was sent")
     }
 
     func testCollectOnAnEnvironmentProfileIsNotRefused() async throws {
@@ -138,17 +150,9 @@ final class OrganizationLevelProfileTests: XCTestCase {
         let bin = try stub("""
         {"name":"orgprofile","auth-method":"platform","environment-id":"e1"}
         """)
-        let sink = Sink()
-        do {
-            try await ReportEngine.collect(
-                profile: profile, workspacePaths: WorkspacePaths.self, tiers: [.scan], force: true,
-                authConfirmationProbe: { _, _ in false }, locateJamfCLI: { bin },
-                onLine: sink.append)
-        } catch ReportEngineError.organizationLevelProfile {
-            XCTFail("an environment-level profile was refused")
-        } catch {
-            // Any other outcome of the stubbed run is not this test's concern.
-        }
+        let calls = Counter()
+        try await route(bin, sink: Sink(), calls: calls)
+        XCTAssertEqual(calls.value, 1)
     }
 
     // MARK: - Adoption and Doctor

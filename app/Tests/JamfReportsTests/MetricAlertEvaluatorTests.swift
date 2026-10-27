@@ -515,8 +515,8 @@ final class MetricAlertEvaluatorTests: XCTestCase {
         XCTAssertEqual(alerts.rules?.first?.threshold, 1e19)
         XCTAssertTrue(alerts.resolvedRules.isEmpty)
         let rows = ConfigDoctorService.evaluate(
-            config: try ConfigLoader.loadFromString(yaml), parseError: nil, csvHeaders: nil,
-            csvFamily: nil, eaCoverageNames: []
+            config: try ConfigLoader.loadFromString(yaml), parseError: nil,
+            eaCoverageNames: []
         )
         let row = try XCTUnwrap(rows.first { $0.id == "alerts.rule.0" })
         XCTAssertEqual(row.severity, .fail)

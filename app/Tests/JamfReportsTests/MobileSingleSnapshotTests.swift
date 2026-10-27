@@ -1,8 +1,8 @@
 import XCTest
 @testable import JamfReports
 
-/// The Mobile Fleet screen reads one snapshot, `mobile-devices-list`, which collect fills with the
-/// GENERAL, HARDWARE, SECURITY and USER_AND_LOCATION sections (#226 1). A
+/// The Mobile Devices screen reads one snapshot, `mobile-devices-list`, which collect fills with
+/// the GENERAL, HARDWARE, SECURITY and USER_AND_LOCATION sections (#226 1). A
 /// `mobile-device-inventory-details` snapshot left by an older collect is still read when it is
 /// the newer of the two.
 ///

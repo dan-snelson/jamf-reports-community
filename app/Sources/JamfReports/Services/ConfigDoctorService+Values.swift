@@ -36,20 +36,12 @@ extension ConfigDoctorService {
         return rows
     }
 
-    /// The tabs `CSVDashboard.sheetPlan` can write besides one per custom EA; the Jamf-cli tabs
-    /// are `SheetID`.
-    static let csvSheetNames = [
-        "Device Inventory", "Stale Devices", "Security Controls", "Security Agents",
-        "Compliance", "Mobile Device Inventory", "Mobile Stale Devices", "Fleet Drift",
-        "EA Warnings",
-    ]
+    /// The tab `EASheets` can write besides one per custom EA; the Jamf-cli tabs are `SheetID`.
+    static let eaWarningsSheetNames = ["EA Warnings"]
 
-    /// The tabs `SchoolDashboard.sheetPlan` can write, the only tabs of a Jamf School workbook.
-    static let schoolSheetNames = [
-        "School Overview", "Device Groups", "Users", "Classes", "Apps", "Profiles", "Locations",
-        "DEP Devices", "iBeacons", "Device Inventory", "OS Versions", "Device Status",
-        "Stale Devices",
-    ]
+    /// The tabs `SchoolDashboard.sheetPlan` can write, the only tabs of a Jamf School workbook
+    /// (with the Protect tabs from 2.11).
+    static let schoolSheetNames = SchoolDashboard.sheetNames
 
     // MARK: - Settings the app replaced or clamped
 
@@ -182,7 +174,7 @@ extension ConfigDoctorService {
         let lists = [("only", sheets.only), ("skip", sheets.skip), ("order", sheets.order)]
         let tabs = ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool
             ? schoolSheetNames
-            : SheetID.allCases.map(\.rawValue) + csvSheetNames + [ReportEngine.chartsSheetName]
+            : SheetID.allCases.map(\.rawValue) + eaWarningsSheetNames + [ReportEngine.chartsSheetName]
                 + (config.customEas ?? []).map(\.name)
         let known = Set(tabs.map { $0.lowercased() })
         return lists.compactMap { key, names in
@@ -374,22 +366,15 @@ extension ConfigDoctorService {
     }
 
     private static func productValueRows(_ config: ReportConfig, profile: String) -> [DoctorRow] {
-        guard let school = config.schoolCli, school.isEnabled else { return [] }
-        if school.isForeign(toWorkspace: profile) {
-            return [valueRow(
-                "school_cli.profile",
-                "school_cli.profile names \(shown(school.resolvedProfile)), not this workspace's "
-                    + "profile. The app collects Jamf Pro for this workspace and does not use that "
-                    + "Jamf School profile here. Jamf School needs its own workspace.",
-                "Set school_cli.enabled to false here, and add Jamf School as a separate "
-                    + "workspace.")]
-        }
-        guard config.protect?.isEnabled == true else { return [] }
+        guard let school = config.schoolCli, school.isEnabled,
+              school.isForeign(toWorkspace: profile) else { return [] }
         return [valueRow(
-            "school_cli.enabled",
-            "school_cli.enabled and protect.enabled are both true. The app collects Jamf School "
-                + "only and never runs Protect for this profile.",
-            "Set school_cli.enabled to false to collect Jamf Pro and Protect instead.")]
+            "school_cli.profile",
+            "school_cli.profile names \(shown(school.resolvedProfile)), not this workspace's "
+                + "profile. The app collects Jamf Pro for this workspace and does not use that "
+                + "Jamf School profile here. Jamf School needs its own workspace.",
+            "Set school_cli.enabled to false here, and add Jamf School as a separate "
+                + "workspace.")]
     }
 
     // MARK: - Row builders

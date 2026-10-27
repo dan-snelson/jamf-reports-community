@@ -51,7 +51,7 @@ struct StateFileStore: Sendable {
     /// never fetched" and the cadence resolver does the right thing.
     func lastRun(report: String) -> Date? {
         let url = fileURL(for: report)
-        guard let raw = BoundedFile.stateText(url) else { return nil }
+        guard let raw = BoundedFile.stateText(url, inside: trustedRoot) else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return Self.formatter.date(from: trimmed)
@@ -125,7 +125,7 @@ struct StateFileStore: Sendable {
     /// record at all.
     func consecutiveTimeouts(for report: String) -> Int {
         guard lastFailureExitCode(for: report) == CLIBridge.exitCodeTimedOut,
-              let text = BoundedFile.stateText(timeoutsURL(for: report)),
+              let text = BoundedFile.stateText(timeoutsURL(for: report), inside: trustedRoot),
               let count = Int(text.trimmingCharacters(in: .whitespacesAndNewlines))
         else { return 0 }
         return max(count, 0)
@@ -137,7 +137,8 @@ struct StateFileStore: Sendable {
     /// Anything else reads as no record at all — a corrupt counter must not be
     /// able to silence the alarm it exists to raise.
     private func validFailureFields(report: String) -> [Substring]? {
-        guard let raw = BoundedFile.stateText(failureURL(for: report)) else { return nil }
+        guard let raw = BoundedFile.stateText(failureURL(for: report), inside: trustedRoot)
+        else { return nil }
         let parts = raw.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
         guard parts.count == 2 || parts.count == 3,
               let count = Int(parts[0]), count > 0,
@@ -164,7 +165,8 @@ struct StateFileStore: Sendable {
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true
         )
-        let next = (failures(report: report)?.count ?? 0) + 1
+        // Saturates: a count read back from a damaged file can be Int.max.
+        let next = min(failures(report: report)?.count ?? 0, Int.max - 1) + 1
         let truncated = Date(timeIntervalSince1970: floor(date.timeIntervalSince1970))
         var body = "\(next) \(Self.formatter.string(from: truncated))"
         if let exitCode { body += " \(exitCode)" }
@@ -181,13 +183,14 @@ struct StateFileStore: Sendable {
             try? FileManager.default.removeItem(at: timeoutsURL(for: report))
             return
         }
-        let next = readTimeoutStreak(report: report) + 1
+        let next = min(readTimeoutStreak(report: report), Int.max - 1) + 1
         try atomicWrite(data: Data(String(next).utf8), to: timeoutsURL(for: report))
     }
 
     /// The stored streak regardless of the `.fail` file, which this write has just replaced.
     private func readTimeoutStreak(report: String) -> Int {
-        guard let text = BoundedFile.stateText(timeoutsURL(for: report)) else { return 0 }
+        guard let text = BoundedFile.stateText(timeoutsURL(for: report), inside: trustedRoot)
+        else { return 0 }
         return max(Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0, 0)
     }
 
@@ -250,7 +253,8 @@ struct StateFileStore: Sendable {
     /// The classified cause of `report`'s newest failure (spec §9.3), or nil when none is
     /// recorded. Reads never throw, like `failures(report:)`.
     func cause(for report: String) -> FailureCause? {
-        guard let data = BoundedFile.stateData(causeURL(for: report)) else { return nil }
+        guard let data = BoundedFile.stateData(causeURL(for: report), inside: trustedRoot)
+        else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(FailureCause.self, from: data)
@@ -314,7 +318,7 @@ struct StateFileStore: Sendable {
 
         var files: [String: String] = [:]
         for url in lastFiles {
-            guard let data = BoundedFile.stateData(url) else { continue }
+            guard let data = BoundedFile.stateData(url, inside: trustedRoot) else { continue }
             files[url.lastPathComponent] = Self.sha256Hex(data)
         }
 
@@ -371,6 +375,10 @@ struct StateFileStore: Sendable {
         f.timeZone = TimeZone(secondsFromGMT: 0)
         return f
     }()
+
+    /// The folder above `directory`: reads open below it, so a `state` folder swapped for a link
+    /// is refused rather than followed.
+    private var trustedRoot: URL { directory.deletingLastPathComponent() }
 
     private func fileURL(for report: String) -> URL {
         directory.appendingPathComponent("\(report).last", isDirectory: false)

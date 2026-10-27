@@ -123,6 +123,36 @@ final class EngineCorrectnessTests: XCTestCase {
             "EMU height should be \(expectedCY); drawing XML: \(xml.prefix(500))")
     }
 
+    // MARK: - Logo anchor
+
+    func testLogoSitsRightOfTheTitleAtItsOwnAspect() throws {
+        let wb = Workbook()
+        let ws = wb.addSheet("Executive Summary")
+        _ = ws.writeSheetHeader(title: "Executive Summary", subtitle: "Fleet KPIs", ncols: 3)
+        ws.insertLogo(data: makePNG(width: 400, height: 100), filename: "logo.png")
+
+        // The title is merged over columns 0-2, so the logo starts at column 4, row 0.
+        let embed = try XCTUnwrap(ws.imageEmbeds.first)
+        XCTAssertEqual(embed.row, 0)
+        XCTAssertEqual(embed.col, 4)
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".xlsx")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try wb.write(to: url)
+        let archive = try Archive(url: url, accessMode: .read)
+        let entry = try XCTUnwrap(archive["xl/drawings/drawing1.xml"])
+        var xmlData = Data()
+        _ = try archive.extract(entry) { xmlData.append($0) }
+        let xml = String(data: xmlData, encoding: .utf8) ?? ""
+
+        XCTAssertTrue(xml.contains("<xdr:oneCellAnchor>"), xml)
+        XCTAssertFalse(xml.contains("twoCellAnchor"), "a logo must not stretch over cells")
+        XCTAssertTrue(xml.contains("<xdr:from><xdr:col>4</xdr:col>"), xml)
+        // Half an inch tall; a 4:1 image is two inches wide.
+        XCTAssertTrue(xml.contains("<xdr:ext cx=\"1828800\" cy=\"457200\"/>"), xml)
+    }
+
     // MARK: - P10-B-42: XLSXValidator empty sheetData detection
 
     func testXLSXValidatorDetectsEmptySheetData() throws {
@@ -170,26 +200,6 @@ final class EngineCorrectnessTests: XCTestCase {
         let config = try ConfigDecoder.loadFromString(yaml)
         XCTAssertEqual(config.jamfCli?.useCachedData, false,
             "Bare 'false' must decode as boolean false")
-    }
-
-    // MARK: - P10-B-06: CSV archival only after successful workbook write
-
-    func testCSVNotArchivedWhenWorkbookWriteFails() throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-        let csvURL = tempDir.appendingPathComponent("test.csv")
-        let historicalDir = tempDir.appendingPathComponent("snapshots")
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        try "device_name,serial\nMac1,ABC123".write(to: csvURL, atomically: true, encoding: .utf8)
-
-        // Simulate: call archiveCurrentCSV only after a successful write.
-        // Here we verify that if we skip the archive call (as the fixed code does when write
-        // throws), the snapshot directory remains empty.
-        let snapshotsBefore = (try? FileManager.default.contentsOfDirectory(atPath: historicalDir.path)) ?? []
-        XCTAssertTrue(snapshotsBefore.isEmpty,
-            "No snapshots should exist before a successful write")
     }
 
     // MARK: - Sanitized accent color helpers

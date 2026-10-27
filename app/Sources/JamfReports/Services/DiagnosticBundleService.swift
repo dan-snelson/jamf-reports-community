@@ -50,6 +50,8 @@ final class DiagnosticRedactor {
     private var cache: [String: String] = [:]
     private var seededRegexes: [String: [NSRegularExpression]] = [:]
     private var scopeIDRegex: NSRegularExpression?
+    private var serverHostRegex: NSRegularExpression?
+    private var workspaceNameRegex: NSRegularExpression?
 
     private let secretPatterns: [(NSRegularExpression, String)]
     private let hostnameURLRE: NSRegularExpression
@@ -58,13 +60,15 @@ final class DiagnosticRedactor {
     private let serialRE: NSRegularExpression
     private let homePathRE: NSRegularExpression
     private let ipv4RE: NSRegularExpression
+    private let phoneE164RE: NSRegularExpression
+    private let phoneNANPRE: NSRegularExpression
 
     /// Literals per compiled alternation. Not a cap: a category with more is split across
     /// several regexes, since a cap dropped the shortest literals from redaction.
     private static let seedChunkSize = 5000
     private static let minSeedLen = 4
     private static let seededCategories =
-        ["serial", "device", "udid", "host", "ip", "user", "email", "org"]
+        ["serial", "device", "udid", "host", "ip", "phone", "user", "email", "org"]
 
     /// Exact key match (lowercased) → value replaced with `REDACTED_<UPPER>`.
     static let sensitiveJSONKeys: Set<String> = [
@@ -93,7 +97,9 @@ final class DiagnosticRedactor {
         // Redact the full value under the "user" category.
         "operatoruserhost": "user",
         "email": "email", "emailaddress": "email", "email_address": "email",
-        "phone": "user", "phonenumber": "user", "phone_number": "user",
+        "phone": "phone", "phonenumber": "phone", "phone_number": "phone",
+        "mobilephone": "phone", "mobile_phone": "phone",
+        "telephone": "phone", "telephonenumber": "phone",
         "filevault2enabledusernames": "user",
         "building": "org", "department": "org", "room": "org", "position": "org",
     ]
@@ -115,7 +121,7 @@ final class DiagnosticRedactor {
         self.hostnameURLRE = Self.mustCompile(
             #"(https?://)([a-z0-9][a-z0-9\-\.]{1,253}\.[a-z]{2,63})\b"#, [.caseInsensitive])
         self.hostnameBareRE = Self.mustCompile(
-            #"\b([a-z0-9][a-z0-9\-]{0,62}\.(?:jamfcloud\.com|jamfcloud\.io))\b"#,
+            #"\b((?:[a-z0-9][a-z0-9\-]{0,62}\.)+jamfcloud\.(?:com|io))\b"#,
             [.caseInsensitive])
         self.emailRE = Self.mustCompile(
             #"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"#)
@@ -125,6 +131,11 @@ final class DiagnosticRedactor {
         self.ipv4RE = Self.mustCompile(
             #"(?<![\w.\-])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"#
             + #"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![\w\-]|\.\d)"#)
+        // A phone number needs a leading `+` (E.164) or separators (NANP), so a bare 10-digit
+        // Jamf ID, a date or a timestamp is not one.
+        self.phoneE164RE = Self.mustCompile(#"(?<![\w+])\+[1-9]\d{7,14}\b"#)
+        self.phoneNANPRE = Self.mustCompile(
+            #"(?<![\w.\-])\(?\d{3}\)?[ .\-]\d{3}[ .\-]\d{4}(?![\w\-]|\.\d)"#)
     }
 
     // MARK: - Public API
@@ -138,6 +149,7 @@ final class DiagnosticRedactor {
             "emails": redactEmails,
             "device_names_in_json": redactDeviceNames,
             "usernames": redactUsernames,
+            "phones": true,
         ]
     }
 
@@ -153,6 +165,14 @@ final class DiagnosticRedactor {
         // Before the serial pattern, which would otherwise cut a UUID's last segment out of it.
         out = redactScopeIDs(in: out)
         if redactHostnames {
+            // The profile's own server, which the patterns below miss when it is on-prem and
+            // written without a scheme (`jss.example.org:8443`). First, so a seeded literal
+            // wins over the generic host patterns.
+            if let serverHostRegex {
+                out = replaceMatches(serverHostRegex, in: out) { g in
+                    self.placeholder("host", (g[0] ?? "").lowercased())
+                }
+            }
             out = replaceMatches(hostnameURLRE, in: out) { g in
                 (g[1] ?? "") + self.placeholder("host", g[2] ?? "")
             }
@@ -160,8 +180,14 @@ final class DiagnosticRedactor {
                 self.placeholder("host", g[0] ?? "")
             }
         }
+        // After the hosts: a profile named after a label of its server (`jamf`, for
+        // `jamf.agency.gov`) would otherwise break the host match and leave the domain.
+        out = redactWorkspaceNames(in: out)
         // `ip` has no keep-flag, like the key-based rule and the seeded literals.
         out = replaceMatches(ipv4RE, in: out) { g in self.placeholder("ip", g[0] ?? "") }
+        for re in [phoneE164RE, phoneNANPRE] {
+            out = replaceMatches(re, in: out) { g in self.placeholder("phone", g[0] ?? "") }
+        }
         if redactEmails {
             out = replaceMatches(emailRE, in: out) { g in self.placeholder("email", g[0] ?? "") }
         }
@@ -227,6 +253,41 @@ final class DiagnosticRedactor {
             .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 }
         scopeIDRegex = literals.isEmpty ? nil : Self.mustCompile(
             literals.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|"),
+            [.caseInsensitive])
+    }
+
+    /// Registers the profile's configured Jamf server (`host:port` and `host`) to remove
+    /// wherever it appears, with or without a scheme. Applied only while hostname redaction is on.
+    func seedServerHosts(_ hosts: [String]) {
+        serverHostRegex = Self.boundedLiteralRegex(hosts)
+    }
+
+    /// Registers the workspace's profile name, as typed and as the app writes it in folder,
+    /// label and file names. It is often the organisation's name, so it is removed wherever it
+    /// appears, file names included.
+    func seedWorkspaceNames(_ names: [String]) {
+        // A workspace name is often the organisation's, and short ones ("CBP") are common.
+        workspaceNameRegex = Self.boundedLiteralRegex(names, minLength: 2)
+    }
+
+    func redactWorkspaceNames(in text: String) -> String {
+        guard let workspaceNameRegex else { return text }
+        return replaceMatches(workspaceNameRegex, in: text) { g in
+            self.placeholder("workspace", (g[0] ?? "").lowercased())
+        }
+    }
+
+    /// Any of `literals` (`minLength` characters or more), in any case, not inside a longer name.
+    private static func boundedLiteralRegex(
+        _ literals: [String], minLength: Int = minSeedLen
+    ) -> NSRegularExpression? {
+        let kept = Set(literals.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .filter { $0.count >= minLength }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 }
+        return kept.isEmpty ? nil : mustCompile(
+            "(?<![A-Za-z0-9-])(?:"
+                + kept.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
+                + ")(?![A-Za-z0-9-])",
             [.caseInsensitive])
     }
 
@@ -317,7 +378,7 @@ final class DiagnosticRedactor {
         return result
     }
 
-    /// `udid`, `ip`, and `org` have no keep-flag and are always redacted when
+    /// `udid`, `ip`, `phone` and `org` have no keep-flag and are always redacted when
     /// redaction is enabled — matching Python `_pii_enabled`.
     private func piiEnabled(_ category: String) -> Bool {
         switch category {
@@ -449,6 +510,8 @@ enum DiagnosticBundleService {
         var cliProfile: String = ""
         /// The profile's tenant and environment IDs, redacted wherever they appear.
         var scopeIDs: [String] = []
+        /// The profile's configured Jamf server, as `host:port` and `host`.
+        var serverHosts: [String] = []
         /// Folders `makeSources` did not collect because they are symlinks, as skipped entries.
         /// `stageFiles` reads neither `logsDir` nor `summariesDir` when its entry is here.
         var refused: [ManifestEntry] = []
@@ -523,6 +586,7 @@ enum DiagnosticBundleService {
             dataDir: try WorkspacePaths.dataDir(for: profile),
             cliProfile: profile,
             scopeIDs: options.redact ? scopeIDs(profile: profile) : [],
+            serverHosts: options.redact ? serverHosts(profile: profile) : [],
             refused: refused
         )
     }
@@ -556,6 +620,36 @@ enum DiagnosticBundleService {
             return siblings
         }
         return scopeIDs(profile: profile, inConfig: text) + siblings
+    }
+
+    /// Every server in the user's own jamf-cli config file, as `host:port` and `host` (just
+    /// `host` when no port is set): the workspace's config.yaml is peer-writable on a shared
+    /// folder, so it never decides which hosts are redacted, and over-redacting another
+    /// profile's host costs nothing. `profile` is kept for callers. No file or no `url` gives
+    /// none.
+    static func serverHosts(
+        profile: String,
+        configURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/jamf-cli/config.yaml")
+    ) -> [String] {
+        (ProfileService.readConfigFile(at: configURL) ?? []).flatMap { entry in
+            entry.url.map(hostForms(ofURL:)) ?? []
+        }
+    }
+
+    /// Pure: `host:port` and `host` of a configured server URL, scheme, credentials and path
+    /// removed.
+    static func hostForms(ofURL url: String) -> [String] {
+        var rest = Substring(url.trimmingCharacters(in: .whitespacesAndNewlines))
+        if let scheme = rest.range(of: "://") { rest = rest[scheme.upperBound...] }
+        rest = rest.prefix { !"/?#".contains($0) }
+        if let at = rest.lastIndex(of: "@") { rest = rest[rest.index(after: at)...] }
+        let hostPort = String(rest)
+        if hostPort.isEmpty { return [] }
+        // A bracketed IPv6 literal is kept whole; the IPv4 and hostname rules do not cover it.
+        guard !hostPort.hasPrefix("["), let colon = hostPort.lastIndex(of: ":")
+        else { return [hostPort] }
+        return [hostPort, String(hostPort[..<colon])]
     }
 
     /// Pure: the `tenant-id` and `environment-id` values under `profile` in config text.
@@ -647,6 +741,13 @@ enum DiagnosticBundleService {
         let redactor: DiagnosticRedactor? = options.redact ? makeRedactor(options) : nil
         redactor?.seedFromWorkspace(sources.dataDir)
         redactor?.seedScopeIDs(sources.scopeIDs)
+        redactor?.seedServerHosts(sources.serverHosts)
+        if !sources.cliProfile.isEmpty {
+            redactor?.seedWorkspaceNames(
+                [sources.cliProfile, sources.workspaceName, profileSlug]
+                    + [ProfileName.pathComponent, ProfileName.labelComponent]
+                        .map { $0(sources.cliProfile) })
+        }
 
         let entries = try stageFiles(
             sources: sources, into: staging, redactor: redactor, options: options, now: now)
@@ -656,8 +757,9 @@ enum DiagnosticBundleService {
             withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         try manifestData.write(to: staging.appendingPathComponent("manifest.json"))
 
+        let zipSlug = redactor?.redactWorkspaceNames(in: profileSlug) ?? profileSlug
         let zipURL = outputDir.appendingPathComponent(
-            "jamf-reports-diagnostic-\(profileSlug)-\(stamp).zip")
+            "jamf-reports-diagnostic-\(zipSlug)-\(stamp).zip")
         try? fm.removeItem(at: zipURL)
         try archive(staging: staging, to: zipURL)
         // 0o600: zip holds potentially sensitive diagnostic content; restrict to
@@ -728,7 +830,8 @@ enum DiagnosticBundleService {
             if values?.isSymbolicLink == true { continue }
             guard values?.isRegularFile == true else { continue }
             if let mtime = values?.contentModificationDate, mtime < cutoff { continue }
-            let arcname = "logs/\(relativePath(of: url, under: logsDir))"
+            let relative = relativePath(of: url, under: logsDir)
+            let arcname = "logs/\(redactor?.redactWorkspaceNames(in: relative) ?? relative)"
             guard let data = try? Data(contentsOf: url) else {
                 entries.append(.skipped(path: arcname, reason: "could not read log"))
                 continue
@@ -959,7 +1062,8 @@ enum DiagnosticBundleService {
         return [
             "schema_version": schemaVersion,
             "generated_at": iso8601(now),
-            "workspace": sources.workspaceName,
+            "workspace": redactor?.redactWorkspaceNames(in: sources.workspaceName)
+                ?? sources.workspaceName,
             "log_lookback_days": options.logLookbackDays,
             "summary_limit": options.summaryLimit,
             "redaction_policy": policy,
@@ -971,12 +1075,18 @@ enum DiagnosticBundleService {
         // `ditto -c -k` makes a PKZip; without `--keepParent` the staging dir's
         // *contents* land at the archive root (logs/, summaries/, …). --norsrc
         // /--noextattr suppress AppleDouble (`._*`) and `__MACOSX` entries.
-        let result = runProcess(
-            "/usr/bin/ditto",
-            ["-c", "-k", "--norsrc", "--noextattr", staging.path, zipURL.path])
-        guard result.code == 0 else {
+        let result = JamfCLIInstaller.runProcessSync(
+            executable: URL(fileURLWithPath: "/usr/bin/ditto"),
+            arguments: ["-c", "-k", "--norsrc", "--noextattr", staging.path, zipURL.path],
+            // Scrubbed like every other spawn: no DYLD_INSERT_LIBRARIES et al. inherited.
+            environment: CLIBridge.environmentForJamfCLI(),
+            timeout: 30)
+        if result.timedOut {
+            throw DiagnosticBundleError.archiveFailed("ditto did not finish within 30 s")
+        }
+        guard result.exitCode == 0 else {
             throw DiagnosticBundleError.archiveFailed(
-                result.stderr.isEmpty ? "ditto exit \(result.code)" : result.stderr)
+                result.stderr.isEmpty ? "ditto exit \(result.exitCode)" : result.stderr)
         }
     }
 
@@ -1124,45 +1234,4 @@ enum DiagnosticBundleService {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.string(from: date)
     }
-
-    private static func runProcess(
-        _ executable: String, _ arguments: [String], timeout: TimeInterval = 30
-    ) -> (code: Int32, stdout: String, stderr: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        // Scrub the environment like every other jamf-cli spawn — don't inherit
-        // DYLD_INSERT_LIBRARIES / SSL_CERT_FILE et al. into the doctor/version probes.
-        process.environment = CLIBridge.environmentForJamfCLI()
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-        do {
-            try process.run()
-        } catch {
-            return (-1, "", error.localizedDescription)
-        }
-        // Watchdog: terminate a wedged child so the bundle can't hang the UI
-        // indefinitely (the pipe read below blocks until the process exits).
-        let box = ProcessBox(process)
-        let watchdog = DispatchWorkItem { if box.process.isRunning { box.process.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        watchdog.cancel()
-        return (
-            process.terminationStatus,
-            String(decoding: outData, as: UTF8.self),
-            String(decoding: errData, as: UTF8.self))
-    }
-}
-
-/// Carries a `Process` into the timeout watchdog closure. `Process.terminate()`
-/// and `isRunning` are documented thread-safe, so unchecked-Sendable is sound —
-/// mirrors the `TextLineBuffer` pattern used elsewhere in the app.
-private final class ProcessBox: @unchecked Sendable {
-    let process: Process
-    init(_ process: Process) { self.process = process }
 }

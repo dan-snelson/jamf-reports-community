@@ -33,6 +33,7 @@ enum SheetID: String, Sendable, CaseIterable {
     // Device health
     case checkinHealth       = "Check-in Health"
     case activeDevices       = "Active Devices"
+    case fleetDrift          = "Fleet Drift"
     case groupHygiene        = "Group Hygiene"
     // Update & patch details
     case patchFailures       = "Patch Failures"

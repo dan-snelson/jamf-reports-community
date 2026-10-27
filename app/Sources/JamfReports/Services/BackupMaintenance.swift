@@ -44,15 +44,15 @@ enum BackupMaintenance {
     /// daemon's marker) and `shared_workspace.enabled: true` each suffice: pruning wrongly
     /// scoped to this Mac only keeps backups, while pruning wrongly unscoped deletes another
     /// Mac's.
-    private static func sharedStorageDescription(
+    static func sharedStorageDescription(
         _ backupsRoot: URL, profile: String,
-        volumeIsLocal: @Sendable (URL) -> Bool?
+        volumeIsLocal: @Sendable (URL) -> Bool?,
+        syncProbe: CloudStorage.SyncProbe = .live
     ) -> String? {
-        switch CloudStorage.sharedStorage(for: backupsRoot, volumeIsLocal: volumeIsLocal) {
-        case .provider(let provider): return "on \(provider.displayName)"
-        case .networkVolume: return "on a network volume"
-        case .syncMarker: return "in a folder a sync tool manages"
-        case nil: break
+        if let storage = CloudStorage.sharedStorage(
+            for: backupsRoot, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe) {
+            if case .syncMarker = storage { return "in \(storage.displayName)" }
+            return "on \(storage.displayName)"
         }
         return sharedWorkspaceEnabled(profile: profile) ? "in a shared workspace" : nil
     }
@@ -85,22 +85,32 @@ enum BackupMaintenance {
     /// 3. **On shared storage, only this machine's own backups are pruned.**
     ///    A shared folder holds every Mac's backups, so an unscoped prune would
     ///    spend this machine's `keep` budget on other people's work and cut
-    ///    everyone's retention. Shared means a sync-provider path, a non-local volume or
-    ///    `shared_workspace.enabled: true` . Ownership comes from the
+    ///    everyone's retention. Shared means `CloudStorage.sharedStorage` or
+    ///    `shared_workspace.enabled: true`. Ownership comes from the
     ///    `.jrc-host` stamp written beside each backup; anything without one — a pre-2.7.0
     ///    backup, or another Mac's — is left alone, because we only delete what
     ///    we can prove is ours. Local storage keeps the original unscoped
     ///    behaviour: there is one writer by definition, and scoping it would
     ///    silently stop pruning every existing single-Mac install.
+    ///
+    /// A fourth rule (2.11): a backup whose manifest records a partial or failed Jamf
+    /// Protect part is left out of the candidates until a newer candidate's Protect part is
+    /// complete; from then on it is counted and pruned like any other. A backup whose Jamf
+    /// Pro part failed is held by the same rule and then removed without being counted. At
+    /// most `keep` (and at least `maxHeldBackups`) are held; older ones are released the same
+    /// way.
+    static let maxHeldBackups = 10
+
     static func pruneScheduledBackups(
         profile: String,
         keep: Int,
         onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil,
-        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        syncProbe: CloudStorage.SyncProbe = .live
     ) {
         guard let backupsRoot = backupsRoot(for: profile) else { return }
         let sharedWhere = sharedStorageDescription(
-            backupsRoot, profile: profile, volumeIsLocal: volumeIsLocal)
+            backupsRoot, profile: profile, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe)
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
             at: backupsRoot,
@@ -145,14 +155,67 @@ enum BackupMaintenance {
             return
         }
 
+        // A backup whose Protect part is partial or failed is the only copy of what did land,
+        // so retention neither counts nor removes it until a newer Protect part completes. One
+        // whose Jamf Pro part failed holds only Protect objects: held the same way, then
+        // removed without counting, so a run of Jamf Pro failures never displaces the newest
+        // Jamf Pro backups.
+        var newerProtectComplete = false
+        var held = 0
+        var released = 0
+        var superseded: [URL] = []
+        // Counted like any other backup from here on; one whose Jamf Pro part failed is removed.
+        func release(_ url: URL, proFailed: Bool) -> Bool {
+            guard proFailed else { return true }
+            // A manifest edited to say failed must not get a Jamf Pro backup removed.
+            guard holdsOnlyProtectPart(url) else {
+                onLine?(.init(
+                    timestamp: Date(), level: .warn,
+                    text: "[warn] backup \(url.lastPathComponent): manifest says the "
+                        + "Jamf Pro part failed but the folder holds Jamf Pro files — kept"
+                ))
+                return false
+            }
+            superseded.append(url)
+            return false
+        }
         let scheduled = stamped
             .sorted { lhs, rhs in
                 lhs.key.0 == rhs.key.0 ? lhs.key.1 > rhs.key.1 : lhs.key.0 > rhs.key.0
             }
             .map(\.url)
+            .filter { url in
+                let protect = BackupProductResult.protect(inBackup: url)
+                let proFailed = BackupProductResult.pro(inBackup: url)?.state == .failed
+                defer { if protect?.isComplete == true { newerProtectComplete = true } }
+                if newerProtectComplete { return release(url, proFailed: proFailed) }
+                guard protect?.keepsBackupFromPruning == true || proFailed else { return true }
+                // Only the newest few are held, so a Protect part that fails every day cannot
+                // keep every backup forever.
+                guard held < max(keep, maxHeldBackups) else {
+                    released += 1
+                    return release(url, proFailed: proFailed)
+                }
+                held += 1
+                return false
+            }
+        if held > 0 {
+            onLine?(.init(
+                timestamp: Date(), level: .info,
+                text: "[info] keeping \(held) scheduled backup(s) with an incomplete Jamf "
+                    + "Protect or failed Jamf Pro part until a later backup's Jamf Protect part "
+                    + "completes."
+            ))
+        }
+        if released > 0 {
+            onLine?(.init(
+                timestamp: Date(), level: .info,
+                text: "[info] \(released) older backup(s) with an incomplete part are past the "
+                    + "\(held) held and are pruned as usual."
+            ))
+        }
 
-        guard scheduled.count > keep else { return }
-        for url in scheduled.dropFirst(keep) {
+        for url in scheduled.dropFirst(keep) + superseded {
             do {
                 try fm.removeItem(at: url)
                 onLine?(.init(
@@ -166,6 +229,14 @@ enum BackupMaintenance {
                 ))
             }
         }
+    }
+
+    /// Whether `backup` holds only what a failed Jamf Pro part leaves: `protect/`, the manifest
+    /// and dotfiles (`.jrc-host`). A folder that cannot be listed does not.
+    static func holdsOnlyProtectPart(_ backup: URL) -> Bool {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: backup.path)
+        else { return false }
+        return names.allSatisfy { $0 == "protect" || $0 == "manifest.json" || $0.hasPrefix(".") }
     }
 
     /// Post-success housekeeping run by both the `jamf-reports backup` command
@@ -190,14 +261,16 @@ enum BackupMaintenance {
     @discardableResult
     static func cleanStaleTempDirs(
         profile: String, now: Date = Date(),
-        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume
+        volumeIsLocal: @Sendable (URL) -> Bool? = CloudStorage.isOnLocalVolume,
+        syncProbe: CloudStorage.SyncProbe = .live
     ) -> [String] {
         guard let backupsRoot = backupsRoot(for: profile) else { return [] }
         // Staleness here can only come from mtime — a `.tmp-<UUID>` name carries
         // no timestamp. On synced storage that mtime is the provider's, and the
         // directory may belong to another Mac's in-flight backup, so don't sweep.
         if sharedStorageDescription(
-            backupsRoot, profile: profile, volumeIsLocal: volumeIsLocal) != nil {
+            backupsRoot, profile: profile, volumeIsLocal: volumeIsLocal, syncProbe: syncProbe)
+            != nil {
             return []
         }
         let fm = FileManager.default
@@ -261,7 +334,7 @@ enum BackupMaintenance {
     /// Host id recorded for `backupDir`, or nil when unstamped.
     static func ownerHostID(of backupDir: URL) -> String? {
         let url = backupDir.appendingPathComponent(ownerStampName)
-        guard let data = try? Data(contentsOf: url), data.count <= 512,
+        guard let data = try? BoundedFile.read(url, limit: 512, followSymlinks: false),
               let id = String(data: data, encoding: .utf8) else { return nil }
         let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
@@ -290,7 +363,8 @@ enum BackupMaintenance {
 
     private static func manifestLabel(of backupDir: URL) -> String? {
         let manifestURL = backupDir.appendingPathComponent("manifest.json")
-        guard let data = try? Data(contentsOf: manifestURL),
+        guard let data = try? BoundedFile.read(
+                manifestURL, limit: BoundedFile.documentLimit, followSymlinks: false),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }

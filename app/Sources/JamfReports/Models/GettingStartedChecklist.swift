@@ -16,7 +16,7 @@ struct GettingStartedStep: Identifiable, Sendable, Equatable {
     /// Raw value of the `Tab` to route to when the CTA is tapped.
     let destinationTab: String
     /// True for a step that isn't required for `GettingStartedChecklist.isComplete`
-    /// (e.g. CSV mapping — jamf-cli data alone is enough for most dashboards).
+    /// (e.g. Extension Attribute tracking — jamf-cli data alone is enough for most dashboards).
     var isOptional: Bool = false
 
     var id: String { kind.rawValue }
@@ -35,7 +35,7 @@ struct GettingStartedChecklist: Sendable, Equatable {
     /// - Parameters:
     ///   - connected: At least one jamf-cli profile is configured.
     ///   - collected: At least one trend summary file exists.
-    ///   - customized: config.yaml contains at least one column mapping.
+    ///   - customized: config.yaml tracks at least one custom EA or security agent.
     ///   - scheduled: A hand-built schedule or managed automation covers this profile.
     ///   - reported: At least one generated report file exists.
     static func build(
@@ -64,12 +64,12 @@ struct GettingStartedChecklist: Sendable, Equatable {
             ),
             GettingStartedStep(
                 kind: .customize,
-                title: "Map your columns",
-                detail: "Tell the app which CSV columns match your Jamf field names. "
+                title: "Track your Extension Attributes",
+                detail: "Pick the collected Extension Attributes and agents to report on. "
                     + "Optional — jamf-cli data alone covers most dashboards.",
                 done: customized,
-                actionLabel: "Open Config",
-                destinationTab: Tab.config.rawValue,
+                actionLabel: "Open Data Sources",
+                destinationTab: Tab.sources.rawValue,
                 isOptional: true
             ),
             GettingStartedStep(
@@ -90,5 +90,32 @@ struct GettingStartedChecklist: Sendable, Equatable {
             ),
         ]
         return GettingStartedChecklist(steps: steps)
+    }
+    /// The Jamf School checklist: School has no Extension Attributes, so there is no
+    /// customize step, and the collect step is done once any School snapshot exists.
+    static func buildSchool(
+        connected: Bool, collected: Bool, scheduled: Bool, reported: Bool
+    ) -> GettingStartedChecklist {
+        let pro = build(connected: connected, collected: collected, customized: false,
+                        scheduled: scheduled, reported: reported)
+        let steps = pro.steps.compactMap { step -> GettingStartedStep? in
+            switch step.kind {
+            case .customize: return nil
+            case .connect:
+                return step.with(detail: "Authenticate jamf-cli with your Jamf School API key.")
+            case .collect:
+                return step.with(detail: "Pull a snapshot from Jamf School to list its devices.")
+            case .schedule, .report: return step
+            }
+        }
+        return GettingStartedChecklist(steps: steps)
+    }
+}
+
+extension GettingStartedStep {
+    func with(detail: String) -> GettingStartedStep {
+        GettingStartedStep(kind: kind, title: title, detail: detail, done: done,
+                           actionLabel: actionLabel, destinationTab: destinationTab,
+                           isOptional: isOptional)
     }
 }

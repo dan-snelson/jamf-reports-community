@@ -120,30 +120,6 @@ final class OnboardingFlowJamfCLIProbeTests: XCTestCase {
         XCTAssertEqual(flow.jamfCLIStatus, .installed(version: "1.29.0"))
     }
 
-    func test_refresh_setsThePlatformScopeDefaultFromTheVersion() async {
-        let old = makeFlow(log: ProbeLog(), answering: installation(version: "1.27.0"))
-        await old.refreshJamfCLIStatus()
-        XCTAssertEqual(old.platformScope, .tenant, "pre-1.28 rejects --environment-id")
-
-        let current = makeFlow(log: ProbeLog(), answering: installation(version: "1.31.1"))
-        await current.refreshJamfCLIStatus()
-        XCTAssertEqual(current.platformScope, .environment)
-    }
-
-    func test_refresh_keepsAScopeTheUserAlreadyChose() async {
-        let chosenEnvironment = makeFlow(
-            log: ProbeLog(), answering: installation(version: "1.27.0"))
-        chosenEnvironment.choosePlatformScope(.environment)
-        await chosenEnvironment.refreshJamfCLIStatus()
-        XCTAssertEqual(chosenEnvironment.platformScope, .environment)
-
-        let chosenTenant = makeFlow(
-            log: ProbeLog(), answering: installation(version: "1.31.1"))
-        chosenTenant.choosePlatformScope(.tenant)
-        await chosenTenant.refreshJamfCLIStatus()
-        XCTAssertEqual(chosenTenant.platformScope, .tenant)
-    }
-
     private final class AnswerBox: @unchecked Sendable {
         private let lock = NSLock()
         private var stored: JamfCLIInstaller.Installation?

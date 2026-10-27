@@ -25,11 +25,17 @@ output:
 ```
 
 Raw snapshots, run logs, backups, and `config.yaml` stay local, where their
-permissions and single-writer assumptions still hold. Run Check confirms this
+permissions and single-writer assumptions still hold. Config Doctor confirms this
 with a green **"Reports publish to …"** row.
 
 `~` is expanded; a folder the app will not use is named in the run log and
 reports go to `Generated Reports` in the workspace.
+
+A symbolic link at the default `Generated Reports` or `archive` folder, such as one another
+Mac planted on a shared folder, is refused: the app logs one warning naming the folder and
+writes nothing through the link. When the report folder cannot be used at all, the run stops
+with an error that names the profile instead of writing somewhere else, and an archive
+folder that is refused skips archiving old runs, with one warning.
 
 The Reports screen lists the folder the reports go to, and Reveal in Finder, Open and
 Quick Look work there for that profile. Nothing else outside the workspace is opened, and a
@@ -86,12 +92,14 @@ shared workspace gets none of the stand-down or claim behavior above, by design
 — School collects on its own schedule with no cross-Mac awareness. Jamf Protect
 runs only after a Jamf Pro collect that actually collected: when the Pro collect
 stands down for another Mac, or skips because today's collect already ran,
-Protect is skipped with it and the run log says so.
+Protect is skipped with it and the run log says so. On a Jamf School workspace
+(experimental) Protect follows every School collect.
 
 **Every Mac must reach Jamf the same way under the same profile name.** The
 workspace's `config.yaml` names the jamf-cli profile collects use
 (`jamf_cli.profile`), but each Mac looks that name up in its own jamf-cli
-configuration and keychain, which never sync. Give every Mac a jamf-cli
+configuration and credential store (the keychain, or the files its profile points to),
+which never sync. Give every Mac a jamf-cli
 profile of that name that reaches the same Jamf Pro instance the same way:
 all direct, or all through the Jamf Platform API with the same environment
 ID. If one Mac's profile points elsewhere, its collects either write another
@@ -123,7 +131,7 @@ Once one Mac has its workspace in the shared folder, do this on each Mac that jo
    **Settings → Workspace location** does the same.
 6. Leave automation off. One Mac should run the schedules; see
    [Several Macs, one workspace](https://github.com/tonyyo11/jamf-reports-community/wiki/05-Scheduling-and-Automation#several-macs-one-workspace).
-7. Run **Config → Run check**. It should list the other Macs and raise no version or clock
+7. Open **Health Audit → Config**. It should list the other Macs and raise no version or clock
    warning.
 
 If first launch shows the Welcome chooser (**Connect Jamf Pro**, **Try the demo first**)
@@ -144,7 +152,7 @@ POSIX permission model at all. `.metadata_never_index` suppresses local
 Spotlight only; it does nothing server-side.
 
 This is the one thing coordination does not solve. The app asks you to confirm
-it when you choose the folder, and Run Check repeats it on every shared
+it when you choose the folder, and Config Doctor repeats it on every shared
 workspace — but the decision is yours to make and to justify. In a regulated environment, decide deliberately who the
 folder is shared with, and get it reviewed before the first collect. If the
 audience for the reports is wider than the audience for device-level inventory,
@@ -157,6 +165,30 @@ one machine's retention budget on everyone's backups. Backups made before this
 version carry no ownership record and are never auto-removed, so clear those out
 once by hand.
 
+**Jamf Protect backups hold credentials, so on shared storage your policy decides.** When a
+Jamf Pro workspace has Protect connected, each backup also holds a `protect/` folder from
+`jamf-cli protect backup`. jamf-cli writes the documents that can carry a third-party
+credential (HTTP action configs' request headers, data forwarding settings) with mode 0600,
+and the app keeps that mode. On a shared workspace (a sync provider, a network volume, a sync
+tool's folder, or `shared_workspace.enabled: true`) those files would reach every Mac and
+account that can read the folder, so by default the backup skips Protect there. Many
+organizations require that kind of storage (it is covered by their DLP, EDR, backups and
+sharing audits), so the choice is yours: if your storage and access policy allows it, turn on
+**Back up Jamf Protect in this folder** on the Backups screen, or set
+`protect.backup_on_synced_storage: true`. Because every Mac sharing the folder can write
+`config.yaml`, each Mac confirms the setting once (the Backups switch or Config Doctor) before
+it applies there. Turning it off, on any Mac, applies at once; turning it on again needs that
+confirm. A backup that does include Protect on such storage logs one line saying where and that
+the setting allowed it. The backup also skips
+Protect when `protect.profile` changed in the shared `config.yaml` and has not been confirmed
+on this Mac. Either way the run logs one `[warn]` line saying why and the Jamf Pro backup is
+unaffected. If Protect fails or comes back partial, the Jamf Pro
+backup stands, Run History shows the run as Partial, `protect/_failures.yaml` lists the
+resources that failed, and that backup is kept from automatic pruning until a later backup's
+Protect part completes. Protect is backed up even when the Jamf Pro backup fails: the folder
+then holds only Protect, the run still reads as failed, and the Backups screen marks it and
+offers no diff for it. The app never runs `jamf-cli protect restore`.
+
 **Config copies.** Before a save or a scaffold drops text from config.yaml,
 the app copies it to `config.yaml.bak-<date-time>` beside it (the newest five
 are kept). The copy holds whatever the file holds, including a webhook URL,
@@ -165,16 +197,16 @@ config.yaml itself.
 
 **Keep every Mac on the same app version.** Versions before 2.7.0 order
 snapshots by modification date and prune backups without checking whose they
-are. Run Check warns when it sees a peer reporting a different version.
+are. Config Doctor warns when it sees a peer reporting a different version.
 
 **Clocks matter.** Freshness compares timestamps written by different machines,
-so leave "Set date and time automatically" on everywhere. Run Check warns when a
+so leave "Set date and time automatically" on everywhere. Config Doctor warns when a
 peer's timestamps are more than five minutes ahead.
 
 **Conflict copies.** When two machines do write the same file at once, providers
 keep both as `summary_2026-08-20 2.json` or `computers_… (1).json`. The app
 ignores any file whose name is not in canonical form, so no report is ever built
-from a duplicate. Run Check lists them so you can delete them; if they keep
+from a duplicate. Config Doctor lists them so you can delete them; if they keep
 appearing, raise `min_collect_interval_hours`.
 
 **Per-machine scheduling state is never safe to sync.** The background item is
@@ -214,7 +246,7 @@ Raw mode shows the full payload as jamf-cli returned it.
 
 ### Check it
 
-**Config → Run check** reports the whole picture for the active profile: which
+**Health Audit → Config** reports the whole picture for the active profile: which
 layout is in effect, whether the workspace folder is reachable and writable,
 which other Macs write there and when each last collected, whether their clocks
 and app versions agree, any live or stale claim, and every conflict copy it can
@@ -228,7 +260,7 @@ pins what matters.** On a shared workspace (a sync-provider or `/Volumes` folder
 it decide where data goes or what runs: the report, archive, data and chart-history folders with
 `output.allow_absolute_paths`, the retention switch, `retention.mode` (archive or delete) and
 `retention.archive_dir`, the `protect.profile` this Mac collects from, the `notify.detail` level,
-and the `notify.url` webhook. Each Mac records the values it was set up with in its own
+the `notify.heartbeat` switch, and the `notify.url` webhook. Each Mac records the values it was set up with in its own
 Application Support folder (for the webhook only the host and port and a SHA-256 of the URL,
 never the URL) and compares them with `config.yaml` at the start of every collect and report.
 If a value changed, a scheduled run, the background item, an automatic collect in the app or the
@@ -320,8 +352,8 @@ The diagnostic bundle includes:
 
 - Redacted `config.yaml` (secrets and webhook URLs removed; exception approvers and
   descriptions replaced with placeholders)
-- Recent logs (secrets, webhook URLs, the Jamf server address and the profile's tenant and
-  environment IDs removed)
+- Recent logs (secrets, webhook URLs, phone numbers, the Jamf server address and the
+  profile's tenant and environment IDs removed)
 - Recent daily summaries (`summary_<date>.json`), with PII redacted by stable hash
   placeholders such as `device-<8hex>` and `serial-<8hex>`
 - A workspace tree listing (paths visible, but no data)
@@ -338,7 +370,10 @@ and named in the bundle's manifest.
 Run History's **Copy log** and **Export log…**, and the export in Settings › Logging, apply
 the same redaction before the text reaches the clipboard or a file: secrets, webhook URLs
 (Slack, Teams, Teams Workflows, Power Automate), the Jamf server address and the profile's
-tenant and environment IDs are removed. The log on screen is not changed.
+tenant and environment IDs are removed. The server address is removed even for an
+on-premises host written without `https://` (for example `jss.example.org:8443`); it is read
+from the profile's entry in jamf-cli's config file. Phone numbers are masked too, in free
+text and under phone-number keys. The log on screen is not changed.
 
 **IP addresses:** IPv4 addresses are redacted wherever they appear in the text, and so are
 the values of the last-reported-IP fields (`lastIpAddress`, `lastReportedIp`). That
@@ -385,8 +420,8 @@ two apart.
   [Permissions & Access](https://github.com/tonyyo11/jamf-reports-community/wiki/13-Permissions-and-Access)).
   Separate credentials keep Jamf's own audit trail attributable and let you
   revoke one without breaking the rest. The jamf-cli configuration
-  (`~/.config/jamf-cli/`) and its keychain items stay on each Mac; never
-  sync or copy them.
+  (`~/.config/jamf-cli/`), its keychain items and any credential files it
+  points to stay on each Mac; never sync or copy them.
 - **Share data deliberately.** Keep one workspace per person or role (for
   example `prod-ops` and `prod-audit`), or pool several Macs into one
   history with a
@@ -406,6 +441,34 @@ more than one of them. Create each JamfReports integration for the single
 environment its profile reports on, with read permissions only. An
 integration spanning every environment, or carrying write permissions, turns
 a secret leaked from one Mac into access to all of them.
+
+### Where jamf-cli keeps credentials
+
+jamf-cli's configuration file (`~/.config/jamf-cli/config.yaml`) holds a
+reference for each secret, not the secret. A reference is one of:
+
+- `keychain:<ref>`: the macOS system keychain.
+- `env:<VAR>`: an environment variable.
+- `file:/path`: a file on disk, in plain text.
+
+jamf-cli 1.33.0 rejects a bare secret in the configuration file. Its
+environment variables (`JAMF_CLIENT_ID`, `JAMF_CLIENT_SECRET`, `JAMF_TENANT_ID`
+and the `JAMFSCHOOL_*` set) can also supply credentials directly. See the
+[jamf-cli Setup Guide](https://github.com/Jamf-Concepts/jamf-cli/wiki/Setup-Guide).
+
+- **Jamf Reports' own setup uses the keychain.** Onboarding and Update
+  credentials have jamf-cli write `keychain:` references, passing the secret
+  over a pseudo-terminal. The app stores no secret itself.
+- **Environment-variable credentials do not reach jamf-cli from Jamf
+  Reports.** It starts jamf-cli with a cleaned environment that keeps only
+  `PATH`, `HOME`, `LANG`, `TMPDIR` and the proxy variables (`HTTP_PROXY`,
+  `HTTPS_PROXY`, `NO_PROXY`, in either case). A credential supplied by a
+  variable, or by an `env:` reference in jamf-cli's configuration, is not seen
+  by the app, the included command-line tool or scheduled runs (the background
+  item starts from launchd, which loads no shell profile). Use `keychain:` or
+  `file:` references for a profile Jamf Reports runs.
+- **Keep a `file:` credential readable by you alone.** The secret sits in plain
+  text on disk, so set its mode to 0600 (`chmod 600 <file>`).
 
 ## External Network Calls
 
@@ -512,10 +575,6 @@ a workspace coordinate through the shared-workspace claim described above.
 
 ## Known Issues
 
-**`pro report security` on jamf-cli 1.24.0 through 1.27.0 requires a Jamf Security Cloud
-subscription — fixed in 1.28.0.** On those releases this Jamf Pro report is routed through
-the Jamf Security Cloud client and fails on any tenant without a subscription — Security
-Posture, the weighted security score, and every FileVault, SIP, firewall and Gatekeeper
-figure derived from it show their last collected values. jamf-cli 1.28.0 resolves the
-report as Jamf Pro again, so upgrading restores all of it. If you cannot move past 1.27.0,
-pin jamf-cli to 1.23.x instead; see the CHANGELOG's Known Issues entry.
+**`pro report security` on jamf-cli 1.24.0 through 1.27.0 needed a Jamf Security Cloud
+subscription.** Fixed in jamf-cli 1.28.0. Jamf Reports now needs 1.29.0 or later, so no
+supported jamf-cli has this problem; the CHANGELOG's Known Issues entry has the history.

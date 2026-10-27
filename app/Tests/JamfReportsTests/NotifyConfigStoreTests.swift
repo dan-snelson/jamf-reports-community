@@ -107,7 +107,6 @@ final class NotifyConfigStoreTests: XCTestCase {
 
         let reloaded = try ConfigLoader.load(from: configURL)
         XCTAssertEqual(reloaded.notify?.isEnabled, true)
-        XCTAssertEqual(reloaded.columns?.computerName, "Computer Name")
         XCTAssertEqual(reloaded.thresholds?.staleDeviceDays, 30)
     }
 
@@ -193,6 +192,13 @@ final class NotifyConfigStoreTests: XCTestCase {
             ),
             "save must throw rather than silently no-op on a non-mapping config root"
         )
+    }
+
+    func testMissingURLWarningPredicate() {
+        XCTAssertTrue(NotifyConfigWriter.showsMissingURLWarning(enabled: true, url: " "))
+        XCTAssertFalse(NotifyConfigWriter.showsMissingURLWarning(enabled: false, url: ""),
+                       "disabled never warns")
+        XCTAssertFalse(NotifyConfigWriter.showsMissingURLWarning(enabled: true, url: "https://x.com"))
     }
 
     func testInsecureURLWarningPredicate() {

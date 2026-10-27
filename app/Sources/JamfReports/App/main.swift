@@ -146,34 +146,59 @@ func notifyOverdueSchedulesHeadless(
     }
 
     for batch in routing.batches {
-        // Reuse the GUI's fact builder so the two paths emit byte-identical cards
-        // (and honor notify.detail minimal/full the same way).
-        let facts = WorkspaceStore.overdueFacts(
-            detail: batch.notify.resolvedDetail, profile: batch.profiles.joined(separator: ", "),
-            overdue: batch.issues
-        )
-        let count = batch.issues.count
-        let outcome = await marker.sendOnce(
-            day: today, in: batch.targets.map(\.workspace),
-            onLine: { fputs($0 + "\n", stderr) }
-        ) {
-            await WebhookNotifier.sendFailed(
-                config: batch.notify,
-                title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
-                facts: facts
-            )
-        }
-        // Stamped only after a confirmed send, so a transient webhook failure retries next run.
-        guard outcome == .sent else { continue }
-        print("[info] overdue schedule digest posted headlessly for "
-            + "\(batch.profiles.joined(separator: ", ")) (\(count) overdue)")
+        await postOverdueDigest(batch, marker: marker, today: today)
     }
 }
 
+/// One overdue card for `batch`. Its outcome opens or clears `webhookRejected` for every
+/// profile on the card, each in its own attention record (the app record, as for a heartbeat).
+@discardableResult
+func postOverdueDigest(
+    _ batch: OverdueDigestRouting.Batch, marker: DayMarker, today: String
+) async -> DayMarker.SendOutcome {
+    // Reuse the GUI's fact builder so the two paths emit byte-identical cards
+    // (and honor notify.detail minimal/full the same way).
+    let names = batch.profiles.joined(separator: ", ")
+    let facts = WorkspaceStore.overdueFacts(
+        detail: batch.notify.resolvedDetail, profile: names, overdue: batch.issues)
+    let count = batch.issues.count
+    // One card can cover several workspaces; it names their organisation only when they agree.
+    let organizations = Set(batch.profiles.compactMap(WebhookNotifier.organization(profile:)))
+    let organization = organizations.count == 1 ? organizations.first : nil
+    let failure = WebhookNotifier.DeliveryFailure()
+    let outcome = await marker.sendOnce(
+        day: today, in: batch.targets.map(\.workspace),
+        onLine: { fputs($0 + "\n", stderr) }
+    ) {
+        await WebhookNotifier.sendFailed(
+            config: batch.notify,
+            title: "Scheduled run overdue — \(count) schedule" + (count == 1 ? "" : "s"),
+            facts: facts, organization: organization, failure: failure
+        )
+    }
+    for profile in batch.profiles {
+        await AttentionLog.recording(profile: profile) {
+            ScheduledRunSignals.noteWebhook(outcome, failure: failure)
+        }
+    }
+    switch outcome {
+    case .sent:
+        print("[info] overdue schedule digest posted headlessly for \(names) (\(count) overdue)")
+    case .failed:
+        // Stamped only after a confirmed send, so a failed one retries next run.
+        let message = "[warn] overdue digest notification failed for \(names): "
+            + (failure.reason ?? "unknown")
+        fputs(message + "\n", stderr)
+        AppLogger.webhook.error("\(message, privacy: .public)")
+    case .skipped: break
+    }
+    return outcome
+}
+
 /// A target for each profile in `profiles` whose `config.yaml` `notify:` block is
-/// usable, in discovery order. Best-effort per profile — an unreadable or
-/// undecodable config is left out.
-private func notifyTargets(
+/// usable, in discovery order. Best-effort per profile — an unreadable config is left out; one
+/// that does not decode still contributes its `notify:` block.
+func notifyTargets(
     in profiles: [String], sentToday: (URL) -> Bool
 ) -> [OverdueDigestRouting.Target] {
     profiles.compactMap { profile in
@@ -181,8 +206,9 @@ private func notifyTargets(
               let workspace = ProfileService.workspaceURL(for: profile) else { return nil }
         let url = workspace.appendingPathComponent("config.yaml")
         guard FileManager.default.fileExists(atPath: url.path),
-              let config = try? ConfigLoader.load(from: url),
-              let notify = SharedConfigPin.effectiveNotify(config.notify, profile: profile),
+              let notify = SharedConfigPin.effectiveNotify(
+                  (try? ConfigLoader.load(from: url))?.notify ?? NotifyConfigLoader.scoped(at: url),
+                  profile: profile),
               notify.isUsable else { return nil }
         return OverdueDigestRouting.Target(
             profile: profile, notify: notify, workspace: workspace,
@@ -190,23 +216,26 @@ private func notifyTargets(
     }
 }
 
-/// The installed jamf-cli version when it is present but below the supported
-/// floor; nil when jamf-cli is absent (optional) or meets the floor. Uses the
-/// nonisolated probe so it is callable from the headless `@Sendable` runner
-/// without a MainActor hop.
-@Sendable
-private func jamfCLIVersionBelowFloor() -> String? {
-    guard let binary = ExecutableLocator.locate("jamf-cli"),
-          let installed = JamfCLIInstaller.installedVersion(at: binary),
-          JamfCLIInstaller.isBelowMinimumSupported(installed) else { return nil }
-    return installed
-}
-
-
 /// True unless `value` looks like another flag — guards `args[idx + 1]` reads
 /// against silently consuming a missing value's own flag name (e.g.
 /// `--profile --all-profiles` taking "--all-profiles" as the profile).
 private func isFlagValue(_ value: String) -> Bool { !value.hasPrefix("--") }
+
+/// A workspace in `missing` (its jamf-cli profile does not exist) is skipped, not run: every
+/// command would fail. One `[warn]` line, and a Needs attention item in that workspace that a
+/// run of it clears once the profile exists.
+private func skippedForMissingProfile(_ profile: String, missing: Set<String>) async -> Bool {
+    guard missing.contains(profile) else { return false }
+    let line = "[warn] skipping \(profile): jamf-cli has no profile of that name. Finish its "
+        + "setup, exclude it in Automation, or remove its workspace folder."
+    fputs(line + "\n", stderr)
+    AppLogger.schedule.warning("\(line, privacy: .public)")
+    await AttentionLog.recording(profile: profile) {
+        AttentionLog.raise(.jamfCLIProfileMissing,
+            "jamf-cli has no profile for this workspace, so scheduled runs skip it")
+    }
+    return true
+}
 
 @Sendable
 private func scheduledRunSingle(
@@ -215,12 +244,17 @@ private func scheduledRunSingle(
     tiers: Set<CollectionTier>?,
     verbose: Bool,
     label: String?,
-    honesty: CollectHonestyWatcher
+    honesty: CollectHonestyWatcher,
+    retiredCSVAssisted: Bool
 ) async -> Int32 {
-    await SharedConfigPin.announcingOnce {
-        await scheduledRunSingleBody(
-            profile: profile, mode: mode, tiers: tiers, verbose: verbose,
-            label: label, honesty: honesty)
+    // Its attention items go into the run's status file once the recorder opens it, after
+    // the failure card; a run refused before that writes none.
+    await AttentionLog.recording(profile: profile, usesAppRecord: false) {
+        await SharedConfigPin.announcingOnce {
+            await scheduledRunSingleBody(
+                profile: profile, mode: mode, tiers: tiers, verbose: verbose,
+                label: label, honesty: honesty, retiredCSVAssisted: retiredCSVAssisted)
+        }
     }
 }
 
@@ -231,7 +265,8 @@ private func scheduledRunSingleBody(
     tiers: Set<CollectionTier>?,
     verbose: Bool,
     label: String?,
-    honesty: CollectHonestyWatcher
+    honesty: CollectHonestyWatcher,
+    retiredCSVAssisted: Bool
 ) async -> Int32 {
     guard ProfileService.isValid(profile) else {
         fputs("[error] Invalid profile '\(profile)'\n", stderr)
@@ -241,6 +276,55 @@ private func scheduledRunSingleBody(
         fputs("[error] No workspace for profile '\(profile)'\n", stderr)
         return 1
     }
+    // `runSchedule` skips a workspace with no jamf-cli profile before this, so it has one now.
+    if mode != .jamfCLIOnly { AttentionLog.clear(.jamfCLIProfileMissing) }
+
+    // Loaded once for the product refusal, the version preflight, routing and generate. A
+    // config.yaml that exists but does not decode is kept as an error, not read as "no config":
+    // the product (School, Pro) cannot be told from it, and reading it as Jamf Pro refused a
+    // School profile with exit 0 on every run.
+    let configURL = workspace.appendingPathComponent("config.yaml")
+    var configError: Error?
+    let routingConfig: ReportConfig?
+    do {
+        routingConfig = FileManager.default.fileExists(atPath: configURL.path)
+            ? try ConfigLoader.load(from: configURL) : nil
+    } catch {
+        routingConfig = nil
+        configError = error
+    }
+    // A config the full decode rejects still carries the webhook the failure card goes to.
+    let routingNotify = configError == nil ? nil : NotifyConfigLoader.scoped(at: configURL)
+    if routingConfig == nil {
+        AppLogger.schedule.warning(
+            "[routing] no usable config for \(profile, privacy: .public) — treating as Jamf Pro")
+    }
+
+    let labelProfile = ProfileName.labelComponent(profile)
+    let runLabel = label ?? "\(LaunchAgentWriter.labelPrefix).\(labelProfile).\(mode.rawValue)"
+    // One failure card a day per schedule and profile for the same failure (hourly retries).
+    let cardKey = "\(runLabel).\(labelProfile)"
+
+    // A profile of another product (Protect, Security Cloud, organization level) can never run
+    // a Jamf Pro schedule, so every retry would fail the same way. Refused before the recorder
+    // creates anything in the workspace; like a School backup, it ends the run as a success
+    // so the tick does not retry it and no failure webhook is posted. jamf-cli-only reads the
+    // cache and sends no command.
+    if mode != .jamfCLIOnly, configError == nil || mode == .backup,
+       let refusal = CollectRouter.proRunRefusal(
+        profile: profile, operation: "Scheduled \(mode.rawValue) run", config: routingConfig
+    ) {
+        let message = "[skip] scheduled \(mode.rawValue) run skipped for '\(profile)': "
+            + "\(refusal). Not a failure. Exclude this profile from the schedule to stop "
+            + "scheduling it."
+        fputs(message + "\n", stderr)
+        AppLogger.schedule.notice("\(LogRedactor.redact(message), privacy: .public)")
+        // Exit 0 so the tick does not retry it, but not silence: one card a day.
+        await ScheduledRunSignals.notifyScheduledRunFailure(
+            config: routingConfig, profile: profile, mode: mode,
+            errorDescription: refusal, recorder: nil, scheduleKey: cardKey)
+        return 0
+    }
 
     // Per-run record in <workspace>/automation/ — this is what Run History
     // and the Schedules "Last Run" column read. The launchd stdout/stderr
@@ -248,10 +332,11 @@ private func scheduledRunSingleBody(
     // stream capture); the recorder is the structured per-run record.
     // Legacy plists without --label fall back to a profile+mode label so
     // their runs are recorded too.
-    let labelProfile = ProfileName.labelComponent(profile)
-    let runLabel = label ?? "\(LaunchAgentWriter.labelPrefix).\(labelProfile).\(mode.rawValue)"
     let recorder = ScheduledRunRecorder(workspace: workspace, label: runLabel)
-    if recorder == nil {
+    if let recorder {
+        AttentionLog.current?.record(
+            into: recorder.statusURL, runLog: recorder.logURL.lastPathComponent)
+    } else {
         fputs("[warn] could not open run record in automation/logs — run will not appear in Run History\n", stderr)
     }
 
@@ -265,43 +350,52 @@ private func scheduledRunSingleBody(
     let onLine: @Sendable (CLIBridge.LogLine) -> Void = { line in
         honesty.observe(line.text)
         recorder?.record(line.text)
-        if let echo = scheduledRunEcho(line, verbose: verbose) { print(echo) }
+        if let echo = scheduledRunEcho(line, verbose: verbose) {
+            print(isatty(STDOUT_FILENO) == 1 ? CLIRun.terminalSafe(echo) : echo)
+        }
+    }
+
+    if retiredCSVAssisted {
+        onLine(.init(timestamp: Date(), level: .info, text:
+            "[info] schedule \(runLabel): csv-assisted mode was retired in 2.11; "
+            + "ran as jamf-cli-full"))
+    }
+
+    // A backup needs only the profile, so it runs; a collect cannot be routed without the file.
+    // A backup that reaches Protect warns about the file itself (`backupProtect`).
+    if mode != .jamfCLIOnly, mode != .backup, let configError {
+        let message = LogRedactor.redact(
+            "[error] '\(profile)': config.yaml does not decode, so the product cannot be told "
+                + "and nothing ran: \(configError.localizedDescription)")
+        fputs(message + "\n", stderr)
+        recorder?.record(message)
+        recorder?.finish(exitCode: 1)
+        await ScheduledRunSignals.notifyScheduledRunFailure(
+            config: nil, profile: profile, mode: mode,
+            errorDescription: configError.localizedDescription, recorder: nil,
+            fallbackNotify: routingNotify, scheduleKey: cardKey)
+        return 1
     }
 
     // Shared workspace: a config.yaml value another Mac changed since this one pinned it is
     // not followed (folders, retention, webhook); the run says which and carries on.
     SharedConfigPin.checkpoint(profile: profile, onLine: onLine)
 
-    // Version-floor preflight (v2.2.0 Phase 3; split in 2.10): below the runnable floor a
-    // scheduled run stops before any collect/backup, so it never writes data from a binary
-    // the app cannot drive; below the supported floor it warns and carries on. jamf-cli-only
-    // generates from cache and never calls jamf-cli, so it is exempt; an absent jamf-cli is
-    // also exempt (the collect path handles it).
-    if mode != .jamfCLIOnly, let belowVersion = jamfCLIVersionBelowFloor() {
+    // Version-floor preflight (v2.2.0 Phase 3): below the floor a scheduled run stops before
+    // any collect/backup, so it never writes data from a binary the app cannot drive.
+    // jamf-cli-only generates from cache and never calls jamf-cli, so it is exempt; an absent
+    // jamf-cli or an unknown version is also exempt (the collect path handles it).
+    if mode != .jamfCLIOnly, let belowVersion = JamfCLIInstaller.installedVersionBelowFloor() {
         let line = JamfCLIInstaller.floorLine(installed: belowVersion, profile: profile)
-        fputs(line.text + "\n", stderr)
-        recorder?.record(line.text)
-        if line.stops {
-            recorder?.finish(exitCode: 1)
-            return 1
-        }
+        fputs(line + "\n", stderr)
+        recorder?.record(line)
+        recorder?.finish(exitCode: 1)
+        await ScheduledRunSignals.notifyScheduledRunFailure(
+            config: routingConfig, profile: profile, mode: mode,
+            errorDescription: line, recorder: nil, fallbackNotify: routingNotify,
+            scheduleKey: cardKey)
+        return 1
     }
-
-    // Load config once, before the backup branch (product-type routing needs
-    // it), before collect (routing needs it) and before generate. Failure
-    // degrades routing to Jamf Pro and still fails generate with the real error
-    // (ConfigLoader.LoadError) so the recorded run shows a meaningful message.
-    // nil config in routing logs loudly and uses Pro.
-    let configURL = workspace.appendingPathComponent("config.yaml")
-    let routingConfig: ReportConfig? = {
-        guard let loaded = try? ConfigLoader.load(from: configURL) else {
-            AppLogger.schedule.warning(
-                "[routing] could not load config for \(profile, privacy: .public) — defaulting to Jamf Pro"
-            )
-            return nil
-        }
-        return loaded
-    }()
 
     // Backup mode (v2.2.0): export configuration objects; no collect, no
     // generate. Retention prunes scheduled backups beyond the newest 10 and
@@ -315,10 +409,10 @@ private func scheduledRunSingleBody(
         // schedule — log why and return success.
         let backupDetected = ProfileProductType.detect(from: routingConfig, profile: profile)
         guard backupDetected.type == .jamfPro else {
-            let message = "[skip] scheduled backup skipped for '\(profile)': `pro backup` is a "
-                + "Jamf Pro command and this profile is configured for Jamf School "
-                + "(school_cli.enabled in config.yaml). Nothing to back up — not a failure. "
-                + "Exclude this profile from the backup schedule to stop scheduling it."
+            let message = "[skip] scheduled backup skipped for '\(profile)': "
+                + "\(CollectRouter.schoolBackupReason(profile: profile)). Nothing to back up — "
+                + "not a failure. Exclude this profile from the backup schedule to stop "
+                + "scheduling it."
             print(message)
             recorder?.record(message)
             recorder?.finish(exitCode: 0)
@@ -344,8 +438,14 @@ private func scheduledRunSingleBody(
             let failureDetail: String? = exit == 0 ? nil : CLIBridge.explainExit(
                 exit, operation: "Scheduled backup for '\(profile)'"
             )
+            // The Jamf Pro backup stands when only Protect fell short: exit stays 0 and the
+            // `[partial]` line, kept inside the log tail Run History reads, makes it Partial.
+            // Backup mode never retries within the day, so Partial does not repeat the run.
             let message = failureDetail.map { "[error] " + $0 }
-                ?? "[ok] scheduled backup complete for '\(profile)'"
+                ?? (honesty.incomplete
+                    ? "[partial] scheduled backup for '\(profile)' kept the Jamf Pro backup; "
+                        + "the Jamf Protect part is incomplete"
+                    : "[ok] scheduled backup complete for '\(profile)'")
             if failureDetail == nil { print(message) } else { fputs(message + "\n", stderr) }
             recorder?.record(message)
             recorder?.finish(exitCode: exit)
@@ -357,7 +457,8 @@ private func scheduledRunSingleBody(
             if let failureDetail {
                 await ScheduledRunSignals.notifyScheduledRunFailure(
                     config: routingConfig, profile: profile, mode: mode,
-                    errorDescription: failureDetail, recorder: nil
+                    errorDescription: failureDetail, recorder: nil, fallbackNotify: routingNotify,
+                    scheduleKey: cardKey
                 )
             }
             return exit
@@ -370,37 +471,16 @@ private func scheduledRunSingleBody(
             recorder?.finish(exitCode: 1)
             await ScheduledRunSignals.notifyScheduledRunFailure(
                 config: routingConfig, profile: profile, mode: mode,
-                errorDescription: errorDesc, recorder: nil
+                errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify,
+                scheduleKey: cardKey
             )
             return 1
         }
     }
 
-    // PR-21: csv-assisted hard-fails when csv-inbox/ is empty. Resolve up
-    // front so we don't run an expensive collect just to fail at generate.
-    let resolvedCSV: URL?
-    if mode == .csvAssisted {
-        let picked = CLIBridge.newestCSV(in: profile) { warning in
-            print(warning)
-            recorder?.record(warning)
-        }
-        guard let csv = picked else {
-            let message = "[error] csv-assisted requires a CSV in csv-inbox/ — none found for '\(profile)'"
-            fputs(message + "\n", stderr)
-            recorder?.record(message)
-            recorder?.finish(exitCode: 1)
-            return 1
-        }
-        resolvedCSV = csv
-    } else if mode == .jamfCLIFull {
-        resolvedCSV = nil  // jamf-cli-full is the no-CSV path
-    } else {
-        resolvedCSV = nil
-    }
-
     do {
         // jamf-cli-only generates from cache only — no collect, no fresh API calls.
-        // The other three modes all need fresh snapshots.
+        // The other modes all need fresh snapshots.
         if mode != .jamfCLIOnly {
             // PR-23 T-20: the schedule's plist pins the tier set via
             // --tiers. When present, it wins — it's the operator's choice
@@ -410,10 +490,13 @@ private func scheduledRunSingleBody(
             // the generate modes → all tiers.
             let resolvedTiers = tiers ?? mode.defaultTiers
             // Route to the correct collect function(s) based on profile product type.
-            // Scheduled collects never bypass the once-per-day guard (force: false).
+            // Scheduled collects never bypass the Jamf Pro once-per-day guard; a School
+            // collect-then-generate forces past School's 12 h cadence (`forcesCollect`).
             try await CollectRouter.run(
                 profile: profile,
                 tiers: resolvedTiers,
+                force: mode.forcesCollect(
+                    for: ProfileProductType.detect(from: routingConfig, profile: profile).type),
                 config: routingConfig,
                 onLine: onLine
             )
@@ -496,33 +579,36 @@ private func scheduledRunSingleBody(
         defer { if holdsGenerateClaim { SharedWorkspace.release(profile: profile) } }
 
         let engine = ReportEngine(config: config, dataDir: dataDir, profile: profile)
-        let outputURL = engine.resolveOutputURL(stem: "report", profile: profile, onLine: onLine)
+        // A School workspace has no Jamf Pro snapshots: the Pro engine would write a
+        // workbook with every sheet skipped.
+        let isSchool = ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool
+        let outputURL = try engine.resolveOutputURL(
+            stem: ExportNaming.reportKind(for: .xlsx, schoolMode: isSchool),
+            profile: profile, onLine: onLine)
         // onLine only carries CLIBridge.LogLine progress during generate; per-sheet
         // [fail] lines are raw `print` calls in SheetRegistry and bypass both onLine
         // and the recorder — they reach the console/launchd log only, not Run History.
         let template = FullInstanceTemplate()
-        let failures = try await engine.generate(
-            csvURL: resolvedCSV,
-            outputURL: outputURL,
-            template: template,
-            onLine: onLine
-        )
-        if let csv = resolvedCSV {
-            do {
-                try CSVInboxService.markConsumed(csv, profile: profile)
-            } catch {
-                let warning = "[warn] \(error.localizedDescription)"
-                print(warning)
-                recorder?.record(warning)
-            }
+        let failures: [SheetFailure]
+        if isSchool {
+            failures = try await ReportEngine.schoolGenerate(
+                config: config, dataDir: dataDir, outputURL: outputURL, profile: profile,
+                onLine: onLine)
+        } else {
+            failures = try await engine.generate(
+                outputURL: outputURL, template: template, onLine: onLine)
         }
         if !failures.isEmpty {
             let partialMsg = partialRunMarker(sheetFailures: failures.count)
             recorder?.record(partialMsg)
         }
         // html.with_workbook: a failure is one [warn] line and leaves this run's result alone.
-        let htmlURL = await engine.writeHTMLWithWorkbook(
-            besideWorkbook: outputURL, template: template, onLine: onLine)
+        // There is no School HTML report.
+        var htmlURL: URL?
+        if !isSchool {
+            htmlURL = await engine.writeHTMLWithWorkbook(
+                besideWorkbook: outputURL, template: template, onLine: onLine)
+        }
         let message = "[ok] scheduled run complete for '\(profile)': \(outputURL.lastPathComponent)"
         print(message)
         recorder?.record(message)
@@ -559,7 +645,8 @@ private func scheduledRunSingleBody(
         // webhook send latency never blocks the exit path.
         await ScheduledRunSignals.notifyScheduledRunFailure(
             config: routingConfig, profile: profile, mode: mode,
-            errorDescription: errorDesc, recorder: nil
+            errorDescription: errorDesc, recorder: nil, fallbackNotify: routingNotify,
+            scheduleKey: cardKey
         )
         return 1
     }
@@ -571,14 +658,13 @@ private func scheduledRun(profile: String) async -> Int32 {
     let verbose = args.contains("--verbose")
     let allProfiles = args.contains("--all-profiles")
     // Legacy plists (pre-PR-20) omit --mode; fall back to jamf-cli-only so the
-    // existing behavior (collect + generate, no CSV) is preserved verbatim.
-    let mode: Schedule.RunMode = {
+    // existing behavior is preserved verbatim. The retired csv-assisted reads as jamf-cli-full.
+    let modeArg: String? = {
         guard let idx = args.firstIndex(of: "--mode"), idx + 1 < args.count,
-              isFlagValue(args[idx + 1]) else {
-            return .jamfCLIOnly
-        }
-        return Schedule.RunMode(rawValue: args[idx + 1]) ?? .jamfCLIOnly
+              isFlagValue(args[idx + 1]) else { return nil }
+        return args[idx + 1]
     }()
+    let mode = modeArg.flatMap(Schedule.RunMode.init(stored:)) ?? .jamfCLIOnly
 
     // PR-23 T-20: --tiers <csv> pins the collect tier set. Absent (pre-PR-23
     // plists) → nil, and scheduledRunSingle falls back to the mode default.
@@ -626,7 +712,8 @@ private func scheduledRun(profile: String) async -> Int32 {
         launchAgentLabel: label,
         multiTarget: allProfiles ? MultiTarget(scope: .all, sequential: true) : nil,
         tiers: tiers,
-        excludedProfiles: allProfiles ? Array(ProfileService.parseExclusions(excludeArg)) : nil
+        excludedProfiles: allProfiles ? Array(ProfileService.parseExclusions(excludeArg)) : nil,
+        retiredCSVAssisted: modeArg == Schedule.RunMode.retiredCSVAssistedRaw
     )
     // The external scheduler sees the exit code alone — retries are the tick's. Under the
     // tick lock like the tick's own runs; a run it turns away is queued, not failed.
@@ -650,14 +737,22 @@ private func scheduledRun(profile: String) async -> Int32 {
 @Sendable
 func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcome {
     let label = schedule.launchAgentLabel
+    let missing = schedule.mode == .jamfCLIOnly
+        ? [] : ProfileService.workspacesMissingJamfCLIProfile()
     guard schedule.isMulti else {
+        if await skippedForMissingProfile(schedule.profile, missing: missing) {
+            return ScheduleRunOutcome(exitCode: 0, incomplete: false)
+        }
         let honesty = CollectHonestyWatcher()
+        let start = Date()
         let code = await scheduledRunSingle(
             profile: schedule.profile, mode: schedule.mode, tiers: schedule.tiers,
-            verbose: verbose, label: label, honesty: honesty)
+            verbose: verbose, label: label, honesty: honesty,
+            retiredCSVAssisted: schedule.retiredCSVAssisted)
         return ScheduleRunOutcome(
             exitCode: code, incomplete: honesty.incomplete,
-            retryCouldHelp: honesty.retryCouldHelp(profile: schedule.profile))
+            retryCouldHelp: honesty.retryCouldHelp(
+                profile: schedule.profile, exitCode: code, since: start))
     }
     let excluded = Set(schedule.excludedProfiles ?? [])
     let discovered = ProfileService.discoverLocal()
@@ -681,17 +776,22 @@ func runSchedule(_ schedule: Schedule, verbose: Bool) async -> ScheduleRunOutcom
     var anyIncomplete = false
     var anyRetryable = false
     for p in profiles {
+        if await skippedForMissingProfile(p.name, missing: missing) { continue }
         // One watcher per profile: a shared one would carry profile A's
         // stand-down into profile B's completion line.
         let honesty = CollectHonestyWatcher()
+        let start = Date()
         let code = await scheduledRunSingle(
             profile: p.name, mode: schedule.mode, tiers: schedule.tiers,
-            verbose: verbose, label: label, honesty: honesty)
+            verbose: verbose, label: label, honesty: honesty,
+            retiredCSVAssisted: schedule.retiredCSVAssisted)
         if code != 0 { anyFailed = true }
         if honesty.incomplete { anyIncomplete = true }
-        if honesty.retryCouldHelp(profile: p.name) { anyRetryable = true }
+        if honesty.retryCouldHelp(profile: p.name, exitCode: code, since: start) {
+            anyRetryable = true
+        }
     }
-    if [.jamfCLIOnly, .jamfCLIFull, .csvAssisted].contains(schedule.mode) {
+    if [.jamfCLIOnly, .jamfCLIFull].contains(schedule.mode) {
         emitConsolidatedReports()
     }
     return ScheduleRunOutcome(
@@ -719,7 +819,9 @@ func runCheck(profile: String) -> Int32 {
         let config = try ConfigLoader.load(from: configURL)
         let cliProfile = config.jamfCli?.resolvedProfile ?? profile
         print("[ok] config.yaml decoded successfully")
-        print("[ok] jamf_cli.profile: \(cliProfile.isEmpty ? "(not set)" : cliProfile)")
+        // A peer on a shared workspace can write config.yaml, so the value is shown filtered.
+        print("[ok] jamf_cli.profile: "
+            + (cliProfile.isEmpty ? "(not set)" : ConfigSchema.displayText(cliProfile)))
         let dataDir = (try? WorkspacePaths.dataDir(for: profile)) ?? workspace
             .appendingPathComponent("jamf-cli-data")
         var isDir: ObjCBool = false
@@ -738,8 +840,7 @@ func runCheck(profile: String) -> Int32 {
         }
 
         // The checks above only prove the file parses. Everything an operator
-        // actually gets wrong — column mappings that no longer match their CSV,
-        // baselines pointing at absent EAs, malformed alert rules, a workspace
+        // actually gets wrong — baselines pointing at absent EAs, malformed alert rules, a workspace
         // on a shared folder with no coordination — lives in the Config Doctor,
         // which the GUI has surfaced since 2.3.0 while `check` did not. Same
         // report, same rules, one implementation.
@@ -819,13 +920,15 @@ func runSchoolCheck(profile: String) -> Int32 {
         return 1
     }
     do {
-        _ = try ConfigLoader.load(from: configURL)
+        let config = try ConfigLoader.load(from: configURL)
+        // Without this a Jamf Pro workspace prints a [miss] line per School kind and exits 0.
+        guard ProfileProductType.detect(from: config, profile: profile).type == .jamfSchool else {
+            fputs("[error] '\(profile)' is not a Jamf School workspace (school_cli.enabled is "
+                + "not set in its config.yaml); use `jamf-reports check` instead\n", stderr)
+            return 1
+        }
         print("[ok] config.yaml decoded successfully")
-        let schoolSnapshotKinds = [
-            "school-overview", "school-devices", "school-device-groups",
-            "school-users", "school-classes", "school-apps",
-            "school-profiles", "school-locations",
-        ]
+        let schoolSnapshotKinds = ReportEngine.schoolCommandMatrix(profile: profile).map(\.kind)
         if let dataDir = try? WorkspacePaths.dataDir(for: profile) {
             let fm = FileManager.default
             for kind in schoolSnapshotKinds {
@@ -863,6 +966,16 @@ func runIncludedCLI(_ arguments: [String]) async {
 
 // MARK: - Entry point
 
+// Run through the `jamf-reports` link, re-exec the bundled executable (same pid, arguments and
+// streams) so every preference read, `--scheduled-run` and the CLI included, uses the app's domain.
+if let realPath = CLIInstaller.relaunchPath(
+    bundleIdentifier: Bundle.main.bundleIdentifier, executablePath: Bundle.main.executablePath) {
+    var argv: [UnsafeMutablePointer<CChar>?] = CommandLine.arguments.map { strdup($0) } + [nil]
+    execv(realPath, &argv)
+    fputs("[warn] could not run \(realPath): \(String(cString: strerror(errno))); "
+        + "preferences are read from the jamf-reports domain\n", stderr)
+}
+
 // Install uncaught-exception handler before any UI or CLI work. Crash logs land at
 // ~/Library/Logs/JamfReports/crash_<timestamp>.log.
 CrashReporter.install()
@@ -873,6 +986,9 @@ let cliArgs = CommandLine.arguments
 // LaunchAgentWriter's plist parser (`args[1] == "--scheduled-run"`) and the
 // routesToCLI check below (`cliArgs[1]`).
 if cliArgs.count > 1, cliArgs[1] == "--tick" {
+    // Run now streams this process's output through a pipe; if the GUI quits mid-run, a write
+    // must fail with EPIPE instead of killing the tick (and the collect) with SIGPIPE.
+    signal(SIGPIPE, SIG_IGN)
     let code = Task.detached { await runTick(arguments: cliArgs) }
     exit(await code.value)
 } else if cliArgs.count > 1, cliArgs[1] == "--scheduled-run",

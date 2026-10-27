@@ -88,7 +88,7 @@ final class HtmlReportDataSourceTests: XCTestCase {
     func testNoComplianceHeroWhenTheRowsCarryNoFailureCount() async throws {
         let html = try await renderedReport()
         XCTAssertFalse(html.contains("class=\"compliance-hero "), "no 100% claim without counts")
-        XCTAssertFalse(html.contains("Device Compliance &middot;"))
+        XCTAssertFalse(html.contains("Computer Compliance &middot;"))
     }
 
     func testAgentHealthReadsEAResults() async throws {

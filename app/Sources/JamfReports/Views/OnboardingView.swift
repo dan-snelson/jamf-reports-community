@@ -1,13 +1,11 @@
 import AppKit
 import SwiftUI
 import TipKit
-import UniformTypeIdentifiers
 
 struct OnboardingView: View {
     @Environment(WorkspaceStore.self) private var workspaceStore
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var flow = OnboardingFlow()
-    @State private var showingCSVImporter = false
     @State private var confirmingStartOver = false
     @State private var isStartingOver = false
     /// Set on first launch only: returns to the chooser, where the path was picked.
@@ -48,6 +46,15 @@ struct OnboardingView: View {
         // The jamf-cli probe waits on child processes, so it starts here and runs off the main
         // actor, never from `OnboardingFlow.init()` while this view is being built.
         .task { await flow.refreshJamfCLIStatus() }
+        // The flow goes with the view (the Add sheet starting a new onboarding, a tab switch),
+        // so its typed secrets are wiped first.
+        .onDisappear { [flow, workspaceStore] in
+            flow.clearAllSecrets()
+            workspaceStore.onboardingRunHasWork = false
+        }
+        .onChange(of: flow.startOverRemovesSomething) { _, hasWork in
+            workspaceStore.onboardingRunHasWork = hasWork
+        }
         .confirmationDialog(
             "Start over?", isPresented: $confirmingStartOver, titleVisibility: .visible
         ) {
@@ -56,32 +63,13 @@ struct OnboardingView: View {
         } message: {
             Text(flow.startOverMessage)
         }
-        .fileImporter(isPresented: $showingCSVImporter, allowedContentTypes: csvTypes) { result in
-            switch result {
-            case .success(let url):
-                let scoped = url.startAccessingSecurityScopedResource()
-                Task {
-                    defer {
-                        if scoped { url.stopAccessingSecurityScopedResource() }
-                    }
-                    await flow.scaffoldCSV(from: url)
-                }
-            case .failure(let error):
-                flow.lastError = error.localizedDescription
-            }
-        }
-    }
-
-    private var csvTypes: [UTType] {
-        [UTType(filenameExtension: "csv") ?? .commaSeparatedText]
     }
 
     private var progressStrip: some View {
         let sequence = flow.stepSequence
         let currentIndex = sequence.firstIndex(of: flow.currentStep) ?? 0
-        // The 8-step Pro strip, named, needs about 920 pt, more than the 800 pt setup column at
-        // any window size, so it always falls to the compact row; the 6-step School strip
-        // stays named on a wide window.
+        // The named Pro strip is the widest and falls to the compact row first; the shorter
+        // School strip stays named on a wide window.
         return ViewThatFits(in: .horizontal) {
             stepRow(sequence, currentIndex: currentIndex, compact: false)
             stepRow(sequence, currentIndex: currentIndex, compact: true)
@@ -97,7 +85,7 @@ struct OnboardingView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "Step \(flow.stepPosition) of \(flow.stepCount): \(flow.label(for: flow.currentStep))"
+            "Step \(flow.stepPosition) of \(flow.stepCount): \(flow.currentStep.label)"
         )
     }
 
@@ -132,7 +120,7 @@ struct OnboardingView: View {
                     .foregroundStyle(current ? Theme.Colors.goldBright : Theme.Text.tertiary(contrast))
             }
             if !compact || current {
-                Text(flow.label(for: step))
+                Text(step.label)
                     .font(.caption)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -155,14 +143,14 @@ struct OnboardingView: View {
                 lineWidth: 0.5
             )
         )
-        .help(flow.label(for: step))
+        .help(step.label)
     }
 
     private var stepHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
             Kicker(
                 text: "Step \(flow.stepPosition) of \(flow.stepCount) - "
-                    + flow.label(for: flow.currentStep),
+                    + flow.currentStep.label,
                 tone: .gold
             )
             Text(headerTitle)
@@ -186,8 +174,6 @@ struct OnboardingView: View {
                 : "Connect to Jamf Pro."
         case .validate: "Validate the profile."
         case .addProducts: "Add more products."
-        case .csvMapping:
-            flow.offersCSVMapping ? "Map your first CSV export." : "Write the workspace config."
         case .firstReport:
             flow.productPath == .school
                 ? "Generate the first report."
@@ -213,10 +199,6 @@ struct OnboardingView: View {
             "jamf-cli validates the saved profile before report setup continues."
         case .addProducts:
             "Optionally connect Jamf Protect. It is skippable — you can add it later from Data Sources. Jamf School uses its own workspace."
-        case .csvMapping:
-            flow.offersCSVMapping
-                ? "CSV imports are accepted from ~/Documents, ~/Downloads, or ~/Desktop. The app's scaffold tool reads the CSV headers and writes the workspace config."
-                : "Jamf School reports come from jamf-cli, so there is no CSV to map. This writes the workspace's config.yaml; the next step connects Jamf School to it."
         case .firstReport:
             flow.productPath == .school
                 ? "The final step runs generate for the new profile and streams output here."
@@ -242,8 +224,6 @@ struct OnboardingView: View {
             validateStep
         case .addProducts:
             addProductsStep
-        case .csvMapping:
-            csvMappingStep
         case .firstReport:
             firstReportStep
         case .schoolConnect:
@@ -309,7 +289,7 @@ struct OnboardingView: View {
                     .background(Theme.Colors.gold.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("A workspace is a local, per-Jamf-instance home for config, snapshots, generated reports, automation logs, and CSV intake.")
+                    Text("A workspace is a local, per-Jamf-instance home for config, snapshots, generated reports, and automation logs.")
                         .font(.title3)
                         .foregroundStyle(Theme.Colors.fg2)
                         .frame(maxWidth: 640, alignment: .leading)
@@ -559,7 +539,7 @@ struct OnboardingView: View {
                         SegmentedControl(
                             selection: Binding(
                                 get: { flow.platformScope },
-                                set: { flow.choosePlatformScope($0) }
+                                set: { flow.platformScope = $0 }
                             ),
                             options: OnboardingFlow.PlatformScope.allCases.map {
                                 ($0, $0.label, nil)
@@ -617,8 +597,8 @@ struct OnboardingView: View {
     private var addProductsStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             protectProductCard
-            Text("Jamf School uses its own workspace. Add one later from the workspace menu "
-                + "in the sidebar: Add Jamf School workspace.")
+            Text("Jamf School uses its own workspace. Add one later with Settings › Add "
+                + "connection, or Add workspace or product in the sidebar's workspace menu.")
                 .font(.footnote)
                 .foregroundStyle(Theme.Text.tertiary(contrast))
                 .fixedSize(horizontal: false, vertical: true)
@@ -773,13 +753,16 @@ struct OnboardingView: View {
                     }
 
                     InlineBanner(icon: "info.circle.fill", tone: .info) {
-                        Text("Jamf School support ships community-validated — the maintainer has no Jamf School tenant to test against. If something looks off, please open an issue or pull request.")
+                        Text("If something in Jamf School support looks off, please open an issue or pull request.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Colors.fg2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
                     configNote(flow.schoolConfigNote)
+                    if flow.schoolConnected, let check = flow.schoolPlatformCheck {
+                        SchoolPlatformFields.banner(check)
+                    }
 
                     if !flow.schoolConnected {
                         Divider().background(Theme.Colors.hairline)
@@ -822,6 +805,8 @@ struct OnboardingView: View {
                             .frame(maxWidth: .infinity)
                         }
 
+                        SchoolPlatformFields(flow: flow)
+
                         if let err = flow.schoolConnectionError {
                             Text(err)
                                 .font(.caption)
@@ -847,108 +832,6 @@ struct OnboardingView: View {
         }
     }
 
-    @ViewBuilder
-    private var csvMappingStep: some View {
-        if flow.offersCSVMapping {
-            proCSVMappingStep
-        } else {
-            schoolConfigStep
-        }
-    }
-
-    /// The School path's CSV step: no CSV, one button that writes config.yaml.
-    private var schoolConfigStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Card(padding: 22) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "doc.badge.gearshape")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.goldBright)
-                            .frame(width: 40, height: 40)
-                            .background(
-                                Theme.Colors.gold.opacity(0.14),
-                                in: RoundedRectangle(cornerRadius: 8))
-                        Text("Workspace config")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(Theme.Colors.fg)
-                        Spacer()
-                        PNPButton(title: "Write config", icon: "square.and.pencil") {
-                            Task { await flow.skipCSVMapping() }
-                        }
-                        .disabled(flow.isSkippingCSVMapping)
-                    }
-                    if flow.csvMappingSkipped {
-                        Pill(text: "CONFIG WRITTEN", tone: .teal, icon: "checkmark")
-                    }
-                }
-            }
-            logViewer(
-                title: csvLogViewerTitle,
-                lines: flow.csvOutput,
-                exitCode: flow.csvMappingSkipped ? 0 : nil
-            )
-        }
-    }
-
-    private var proCSVMappingStep: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Card(padding: 22) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "tablecells")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.goldBright)
-                            .frame(width: 40, height: 40)
-                            .background(Theme.Colors.gold.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("First Jamf Pro CSV export")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(Theme.Colors.fg)
-                            Text("Policy: accepted locations are Documents, Downloads, and Desktop.")
-                                .font(.footnote)
-                                .foregroundStyle(Theme.Text.tertiary(contrast))
-                        }
-                        Spacer()
-                        PNPButton(title: "Choose CSV", icon: "folder") {
-                            showingCSVImporter = true
-                        }
-                        .disabled(flow.isScaffoldingCSV || flow.isSkippingCSVMapping)
-                        PNPButton(title: "Skip for now", icon: "forward.fill") {
-                            Task { await flow.skipCSVMapping() }
-                        }
-                        .disabled(flow.isScaffoldingCSV || flow.isSkippingCSVMapping)
-                    }
-
-                    if let selected = flow.selectedCSVURL {
-                        HStack(spacing: 8) {
-                            Image(systemName: flow.csvScaffolded ? "checkmark.circle.fill" : "doc.text")
-                                .foregroundStyle(flow.csvScaffolded ? Theme.Colors.ok : Theme.Colors.fgMuted)
-                            Mono(text: selected.path, size: 11.5, color: Theme.Colors.fg2)
-                        }
-                    }
-
-                    if flow.csvMappingSkipped {
-                        Pill(text: "MINIMAL CONFIG SEEDED", tone: .teal, icon: "checkmark")
-                    }
-                }
-            }
-
-            logViewer(
-                title: csvLogViewerTitle,
-                lines: flow.csvOutput,
-                exitCode: (flow.csvScaffolded || flow.csvMappingSkipped) ? 0 : nil
-            )
-        }
-    }
-
-    private var csvLogViewerTitle: String {
-        if flow.isScaffoldingCSV { return "Scaffold running" }
-        if flow.isSkippingCSVMapping { return "Workspace init running" }
-        if flow.csvMappingSkipped || !flow.offersCSVMapping { return "Workspace init output" }
-        return "Scaffold output"
-    }
-
     private var firstReportStep: some View {
         VStack(alignment: .leading, spacing: 14) {
             Card(padding: 18) {
@@ -969,6 +852,8 @@ struct OnboardingView: View {
                 }
             }
 
+            automationAndWebhookCard
+
             skipFinishCard
 
             logViewer(
@@ -979,13 +864,54 @@ struct OnboardingView: View {
         }
     }
 
+    /// "Run automatically" (on by default) and the optional webhook, applied when setup
+    /// finishes, whether by the first report or by Skip & finish. Open in demo mode too: setup
+    /// creates a real profile and finishing it leaves demo mode.
+    private var automationAndWebhookCard: some View {
+        let locked = flow.isRunningFirstReport
+        return Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Run automatically").font(.body.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.fg)
+                AutomationChoiceFields(choice: $flow.automation, isLocked: locked)
+                Divider().background(Theme.Colors.hairline)
+                Text("Webhook (optional)").font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.fg)
+                Text("Scheduled runs post digests and failure alerts to a Teams or Slack "
+                    + "incoming webhook. Leave empty to skip; change it anytime under "
+                    + "Automation › Notifications.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.fgMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Picker("Service", selection: $flow.webhookProvider) {
+                    ForEach(NotifyConfig.Provider.allCases, id: \.self) { provider in
+                        Text(provider == .teams ? "Microsoft Teams" : "Slack").tag(provider)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 260, alignment: .leading)
+                .disabled(locked)
+                // The URL is a bearer secret: anyone holding it can post to the channel.
+                SecureField("https://...", text: $flow.webhookURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.body.monospaced())
+                    .frame(maxWidth: 420, alignment: .leading)
+                    .disabled(locked)
+                    .accessibilityLabel("Webhook URL")
+                if NotifyConfigWriter.showsInsecureURLWarning(enabled: true, url: flow.webhookURL) {
+                    Text("URL must start with https:// — it will not be saved.")
+                        .font(.footnote).foregroundStyle(Theme.Colors.warn)
+                }
+            }
+        }
+    }
+
     /// Secondary "Skip & finish setup" affordance on the First Report step.
     ///
     /// Surfaced as a sibling card under the Run card so the user sees an
     /// explicit "safe to skip" message instead of having to abandon the
-    /// wizard. By the time this step renders the profile is registered,
-    /// validated, and `config.yaml` is on disk — so skipping the generate
-    /// run is safe; the user can run reports later from the Reports tab.
+    /// wizard. The profile is registered and `config.yaml` is on disk, but
+    /// the profile may not have validated (Continue without validating).
     private var skipFinishCard: some View {
         Card(padding: 18) {
             HStack(spacing: 12) {
@@ -996,7 +922,7 @@ struct OnboardingView: View {
                     Text("Skip the first run?")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(Theme.Colors.fg)
-                    Text("Your workspace is fully set up. Skip if the generate output below looks off — you can run reports later from the Reports tab.")
+                    Text(Self.skipFinishText(validated: flow.connectionValidated))
                         .font(.footnote)
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                         .fixedSize(horizontal: false, vertical: true)
@@ -1014,6 +940,15 @@ struct OnboardingView: View {
         }
     }
 
+    nonisolated static func skipFinishText(validated: Bool) -> String {
+        validated
+            ? "Your workspace is fully set up. Skip if the generate output below looks off — "
+                + "you can run reports later from the Reports tab."
+            : "Your workspace is saved, but the profile did not validate, so the first run "
+                + "will probably fail. Skip it, fix the connection from Data Sources, then run "
+                + "reports from the Reports tab."
+    }
+
     /// Dismiss onboarding without running a report.
     ///
     /// Works from all three entry points:
@@ -1021,12 +956,11 @@ struct OnboardingView: View {
     ///     `workspace.profiles`, ContentView swaps in the shell, the default
     ///     `tab = .overview` takes effect. The `.navigateToTab` post is a no-op
     ///     here because the shell's listener isn't registered yet.
-    ///   - Settings "Add connection" → in-shell OnboardingView: the active tab
+    ///   - The Add sheet's New workspace → in-shell OnboardingView: the active tab
     ///     is `.onboarding`; the `.navigateToTab(.overview)` post lands the
     ///     user back on Overview where progress is visible.
-    ///   - Sidebar "Add workspace…" → same as Settings path above.
-    /// Restarts this screen on the Jamf School steps, as the sidebar's "Add Jamf School
-    /// workspace…" does. The profile saved for the Platform ID stays in jamf-cli.
+    /// Restarts this screen on the Jamf School steps, as the Add sheet's Jamf School card
+    /// does. The profile saved for the Platform ID stays in jamf-cli.
     private func startSchoolWorkspace() {
         flow.clearAllSecrets()
         OnboardingFlow.pendingProductPath = .school
@@ -1037,12 +971,14 @@ struct OnboardingView: View {
     private func skipAndFinishOnboarding() {
         // Leave demo mode, through its cleanup, so the newly created real
         // profile replaces the demo; otherwise reload to pick it up.
-        flow.finishSetup(in: workspaceStore)
-        NotificationCenter.default.post(
-            name: .navigateToTab,
-            object: nil,
-            userInfo: ["tab": Tab.overview.rawValue]
-        )
+        Task {
+            await flow.finishSetup(in: workspaceStore)
+            NotificationCenter.default.post(
+                name: .navigateToTab,
+                object: nil,
+                userInfo: ["tab": Tab.overview.rawValue]
+            )
+        }
     }
 
     private var privilegesBox: some View {
@@ -1154,10 +1090,6 @@ struct OnboardingView: View {
             if flow.isValidatingConnection { "Validating" }
             else { flow.connectionValidated ? "Continue" : "Validate" }
         case .addProducts: "Continue"
-        case .csvMapping:
-            if flow.isScaffoldingCSV { "Mapping" }
-            else if flow.isSkippingCSVMapping { "Seeding" }
-            else { "Continue" }
         case .firstReport: flow.isRunningFirstReport ? "Running" : "Run now"
         case .schoolConnect: flow.schoolConnected ? "Continue" : "Connect School to continue"
         }
@@ -1171,7 +1103,6 @@ struct OnboardingView: View {
         case .authenticate: "checkmark"
         case .validate: flow.connectionValidated ? "arrow.right" : "network.badge.shield.half.filled"
         case .addProducts: "arrow.right"
-        case .csvMapping: "arrow.right"
         case .firstReport: "play.fill"
         case .schoolConnect: flow.schoolConnected ? "arrow.right" : "graduationcap.fill"
         }
@@ -1211,8 +1142,6 @@ struct OnboardingView: View {
                 }
             }
         case .addProducts:
-            flow.nextStep()
-        case .csvMapping:
             flow.nextStep()
         case .schoolConnect:
             // The connection itself is driven by the in-card Connect button;

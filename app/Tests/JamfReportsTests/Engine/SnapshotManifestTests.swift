@@ -235,6 +235,25 @@ final class SnapshotManifestTests: XCTestCase {
         XCTAssertEqual(summary.omitted, 0)
     }
 
+    /// A sync provider's `… 2.json` copy carries the freshest mtime; the scan must verify the
+    /// real snapshot, as every other picker does.
+    func testScanWorkspaceIgnoresSyncConflictCopy() throws {
+        let dir = tempRoot.appendingPathComponent("audit", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let data = Data(#"{"ok":true}"#.utf8)
+        let real = dir.appendingPathComponent("audit_20260101T000000.json")
+        try data.write(to: real)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -86400)], ofItemAtPath: real.path)
+        try Data(#"{"ok":false}"#.utf8)
+            .write(to: dir.appendingPathComponent("audit_20260201T000000 2.json"))
+        try writeManifest(at: dir, files: [real.lastPathComponent: sha256Hex(data)])
+
+        let summary = SnapshotManifest.scanWorkspace(dataDir: tempRoot)
+        XCTAssertEqual(summary.verified, 1)
+        XCTAssertEqual(summary.omitted, 0)
+    }
+
     /// jamf-cli's dashboard is saved as `.html` and runs as script in the report, so the
     /// strict-mode scan has to verify it like the JSON kinds.
     func testScanWorkspaceVerifiesTheDashboardPage() throws {

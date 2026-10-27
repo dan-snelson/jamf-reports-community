@@ -300,6 +300,17 @@ enum ProfileService {
             }
     }
 
+    /// Workspaces whose jamf-cli profile does not exist: a setup left part way, or a profile
+    /// removed in Terminal. Empty when jamf-cli's list could not be read (`listed` nil), since
+    /// "could not ask" must not stop every workspace collecting.
+    static func workspacesMissingJamfCLIProfile(
+        listed: [String]? = listJamfCLIProfiles(scheduleCounts: [:])?.map(\.name),
+        under root: URL = workspacesRoot()
+    ) -> Set<String> {
+        guard let listed else { return [] }
+        return Set(localOnlyWorkspaces(under: root, cliNames: listed))
+    }
+
     /// The profiles a multi-profile run collects: exclusions applied, and the
     /// `.error` ones dropped. Discovery marks a profile the app can't use that way
     /// (unsupported name, or a case variant sharing another's folder); it has no
@@ -520,8 +531,8 @@ enum ProfileService {
     // MARK: - Product
 
     /// The product a profile logs in to, first answer wins: (a) the `product:` key in jamf-cli's
-    /// config file (`pro`, `protect`, `school`, `security`; a value this build does not know is
-    /// `.unknown`, never Pro); (b) the auth method, where `apikey` is Jamf School (`school
+    /// config file (`pro`, `protect`, `school`, `security`, which is Jamf Pro on a `platform`
+    /// profile; a value this build does not know is `.unknown`, never Pro); (b) the auth method, where `apikey` is Jamf School (`school
     /// setup`), `security` is Security Cloud (`security setup`) and `platform` is Jamf Pro;
     /// (c) the host, where `*.protect.jamfcloud.com` is Protect and `*.jamfschool.com` is Jamf
     /// School. Protect's `protect setup` writes plain `oauth2`, so only (a) and (c) can tell it
@@ -530,12 +541,24 @@ enum ProfileService {
     static func derivedProduct(
         configProduct: String?, authMethod: String?, url: String?, configFileRead: Bool
     ) -> JamfCLIProduct {
+        explicitProduct(configProduct: configProduct, authMethod: authMethod, url: url)
+            ?? (configFileRead ? .pro : .unknown)
+    }
+
+    /// The product an explicit signal names, or nil when nothing does and `derivedProduct`
+    /// falls back to its default: (a) to (c) above.
+    static func explicitProduct(
+        configProduct: String?, authMethod: String?, url: String?
+    ) -> JamfCLIProduct? {
         switch configProduct?.trimmingCharacters(in: .whitespaces).lowercased() ?? "" {
         case "": break
         case "pro": return .pro
         case "protect": return .protect
         case "school": return .school
-        case "security": return .securityCloud
+        case "security":
+            // `security setup` on a Platform API profile keeps `platform`: jamf-cli still
+            // serves `pro` through the gateway, so the merged login is a Jamf Pro workspace.
+            return JamfCLIAuthMethod(raw: authMethod) == .platform ? .pro : .securityCloud
         default: return .unknown
         }
         switch JamfCLIAuthMethod(raw: authMethod) {
@@ -548,7 +571,7 @@ enum ProfileService {
             if host.hasSuffix(".protect.jamfcloud.com") { return .protect }
             if host.hasSuffix(".jamfschool.com") { return .school }
         }
-        return configFileRead ? .pro : .unknown
+        return nil
     }
 
     /// `listed` (from `config list`) with each profile's `product:` key from the config file. A

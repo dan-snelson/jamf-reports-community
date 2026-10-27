@@ -5,7 +5,7 @@ import TipKit
 /// TipKit identifies a tip by its conforming type and persists each tip's
 /// shown/dismissed state in a datastore. We configure that datastore once at
 /// launch; the per-surface tip definitions live alongside this file (see
-/// `ConfigTips`, `SourcesTips`, `OnboardingTips`, `WalkthroughTips`) and are
+/// `SourcesTips`, `OnboardingTips`, `WalkthroughTips`) and are
 /// attached to controls via `.popoverTip(_:)` or rendered inline with
 /// `TipView(_:)`.
 enum AppTips {

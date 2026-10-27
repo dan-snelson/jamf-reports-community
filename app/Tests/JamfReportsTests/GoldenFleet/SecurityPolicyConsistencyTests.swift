@@ -164,7 +164,9 @@ final class SecurityPolicyConsistencyTests: XCTestCase {
         var factors: [String: Set<DeviceRisk.Factor>] = [:]
         for item in items {
             let record = DeviceInventoryService.recordFromComputer(item, source: "jamf-cli")
-            let risk = RiskScoringService.score(input: .from(record: record, policy: policy))
+            let input = RiskScoringService.Input.from(
+                record: record, policy: policy, staleRule: StaleRule(days: 30))
+            let risk = RiskScoringService.score(input: input)
             factors[record.serial] = Set(risk.triggered.map(\.factor))
         }
         return factors

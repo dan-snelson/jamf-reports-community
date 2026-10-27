@@ -95,8 +95,8 @@ extension HtmlReport {
             ("Security score", "A weighted share of the Macs that pass each factor. Factors and "
                 + "weights: \(factorText). A factor with no data is dropped and the rest "
                 + "renormalised."),
-            ("Patch compliance", "Devices on the latest version of their patch title, over all "
-                + "devices on tracked titles. Not an average of the titles' percentages."),
+            ("Patch compliance", "Computers on the latest version of their patch title, over all "
+                + "computers on tracked titles. Not an average of the titles' percentages."),
             ("On current macOS", "A Mac running the newest release of its own major version, "
                 + "per the SOFA feed."),
             ("Compliance", compliance),
@@ -136,8 +136,8 @@ extension HtmlReport {
         for label in glance?.missing ?? [] {
             lines.append("At a glance: \(label) — the daily summary has no value for it")
         }
-        lines.append("Device inventory — full device lists are in the workbook, not in an HTML "
-            + "report that is forwarded")
+        lines.append("Computer and mobile device inventory — the full lists are in the workbook, "
+            + "not in an HTML report that is forwarded")
         return lines
     }
 }

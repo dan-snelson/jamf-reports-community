@@ -65,7 +65,7 @@ final class CLIParsingTests: XCTestCase {
         XCTAssertThrowsError(try Generate.parse([]))
     }
 
-    func testScaffoldRequiresCsvAndOut() throws {
+    func testScaffoldParsesCsvAndOut() throws {
         let cmd = try Scaffold.parse(["--csv", "/tmp/x.csv", "--out", "/tmp/config.yaml"])
         XCTAssertEqual(cmd.csv, "/tmp/x.csv")
         XCTAssertEqual(cmd.out, "/tmp/config.yaml")
@@ -152,5 +152,42 @@ final class CLIParsingTests: XCTestCase {
             XCTAssertEqual(CLIBridge.backupOutputIsPrunable(exit: code), expected,
                             "exit \(code)")
         }
+    }
+
+    /// An error thrown out of `run()` reaches ArgumentParser, which exits 1: the shell never
+    /// sees 3 for expired credentials from `collect` (docs/wiki/07-Command-Line.md says so).
+    func testAnEngineErrorExitsOneNotThree() {
+        let expired = ReportEngineError.authExpired(profile: "p", failedCount: 2)
+        XCTAssertEqual(JamfReportsCLI.exitCode(for: expired), ExitCode(1))
+    }
+
+    func testTerminalSafeEscapesControlsAndKeepsTabsAndNewlines() {
+        // ESC clear-screen, OSC 52 clipboard write ending in BEL, DEL, C1 CSI, CR.
+        let hostile = "Mac\u{1B}[2J\u{1B}]52;c;aGk=\u{07}\u{7F}\u{9B}31m\r\tok\n"
+        XCTAssertEqual(
+            CLIRun.terminalSafe(hostile),
+            #"Mac\u001b[2J\u001b]52;c;aGk=\u0007\u007f\u009b31m\u000d"# + "\tok\n")
+        XCTAssertEqual(CLIRun.terminalSafe("Büro-Mac — 15.7 ✓"), "Büro-Mac — 15.7 ✓")
+        // Right-to-left override and isolate, and a line separator, reorder or split a line.
+        XCTAssertEqual(
+            CLIRun.terminalSafe("Mac\u{202E}gpj.exe\u{2066}x\u{2028}y"),
+            #"Mac\u202egpj.exe\u2066x\u2028y"#)
+    }
+
+    func testTerminalSafeJSONDecodesToTheSameValue() throws {
+        let name = "Mac\u{7F}\u{85}\u{9B}"
+        let json = try JSONSerialization.data(withJSONObject: ["name": name])
+        let shown = CLIRun.terminalSafe(String(decoding: json, as: UTF8.self))
+        XCTAssertFalse(shown.unicodeScalars.contains { (0x7F...0x9F).contains($0.value) }, shown)
+        let decoded = try JSONSerialization.jsonObject(with: Data(shown.utf8)) as? [String: String]
+        XCTAssertEqual(decoded?["name"], name)
+    }
+
+    func testWriteLeavesBytesUnchangedWhenNotATerminal() throws {
+        let pipe = Pipe()
+        CLIRun.write("a\u{1B}[2Jb\n", to: pipe.fileHandleForWriting)
+        try pipe.fileHandleForWriting.close()
+        let read = pipe.fileHandleForReading.readDataToEndOfFile()
+        XCTAssertEqual(String(decoding: read, as: UTF8.self), "a\u{1B}[2Jb\n")
     }
 }

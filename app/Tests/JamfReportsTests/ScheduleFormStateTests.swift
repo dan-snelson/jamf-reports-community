@@ -16,7 +16,6 @@ final class ScheduleFormStateTests: XCTestCase {
     func testGenerateModesDefaultToAllTiers() {
         let all = Set(CollectionTier.allCases)
         XCTAssertEqual(Schedule.RunMode.jamfCLIFull.defaultTiers, all)
-        XCTAssertEqual(Schedule.RunMode.csvAssisted.defaultTiers, all)
     }
 
     func testJamfCLIOnlyDefaultIsHarmlessAllTiers() {

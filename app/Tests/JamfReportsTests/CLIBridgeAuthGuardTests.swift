@@ -3,7 +3,7 @@ import XCTest
 @testable import JamfReports
 
 /// The exit-code constants the auth guard and its callers branch on, and the apikey bypass
-/// (`CLIBridge.shouldSkipAuthProbe`). The guard calls `pro auth token`; the timeout test injects a
+/// (`JamfCLIAuthMethod.apiKey`). The guard calls `pro auth token`; the timeout test injects a
 /// sleeping stub, and no test runs a real jamf-cli.
 @MainActor
 final class CLIBridgeAuthGuardTests: XCTestCase {
@@ -35,16 +35,13 @@ final class CLIBridgeAuthGuardTests: XCTestCase {
         XCTAssertEqual(CLIBridge.exitCodeNotFound, 4)
     }
 
-    // MARK: - shouldSkipAuthProbe unit tests
+    // MARK: - apikey auth method
 
-    func test_shouldSkipAuthProbe_trueForAPIKey() {
-        XCTAssertTrue(CLIBridge.shouldSkipAuthProbe(for: "apikey"))
-    }
-
-    func test_shouldSkipAuthProbe_falseForBearer() {
-        XCTAssertFalse(CLIBridge.shouldSkipAuthProbe(for: "bearer"))
-        XCTAssertFalse(CLIBridge.shouldSkipAuthProbe(for: ""))
-        XCTAssertFalse(CLIBridge.shouldSkipAuthProbe(for: "APIKEY")) // case-sensitive
+    func test_apiKeyAuthMethodIsReadExactly() {
+        XCTAssertEqual(JamfCLIAuthMethod(raw: "apikey"), .apiKey)
+        XCTAssertNotEqual(JamfCLIAuthMethod(raw: "bearer"), .apiKey)
+        XCTAssertNotEqual(JamfCLIAuthMethod(raw: ""), .apiKey)
+        XCTAssertNotEqual(JamfCLIAuthMethod(raw: "APIKEY"), .apiKey) // case-sensitive
     }
 
     // MARK: - Probe timeout
@@ -69,6 +66,33 @@ final class CLIBridgeAuthGuardTests: XCTestCase {
         XCTAssertFalse(texts.contains { $0.contains("[error]") || $0.contains("re-authenticate") },
                        "a timeout must not read as rejected credentials; got: \(texts)")
         XCTAssertLessThan(Date().timeIntervalSince(started), 20)
+    }
+}
+
+extension CLIBridgeAuthGuardTests {
+    /// `pro auth token` is meaningless on a profile of another product: the guard passes it
+    /// without running the probe (a sleeping stub would time out and warn if it ran), while a
+    /// Jamf Pro profile is still probed.
+    func test_authGuard_skipsTheProbeForAnotherProductOnly() async throws {
+        let dir = try SleepingCLIStub.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir); ProfileAuthMethod.invalidateCache() }
+        let stub = try SleepingCLIStub.make(in: dir)
+        ProfileAuthMethod.invalidateCache()
+        try ProductGuardSeed.seed(profile: "guard-protect", product: "protect", in: dir)
+        try ProductGuardSeed.seed(profile: "guard-pro", product: "pro", in: dir)
+
+        let skipped = ProductGuardLines()
+        let passed = await CLIBridge().authGuard(
+            profile: "guard-protect", probeTimeout: 0.5, _testExecutable: stub, onLine: skipped.add)
+        XCTAssertTrue(passed)
+        XCTAssertTrue(skipped.all.isEmpty, "\(skipped.all)")
+        let status = await CLIBridge().tokenStatus(for: "guard-protect")
+        XCTAssertNil(status)
+
+        let probed = ProductGuardLines()
+        _ = await CLIBridge().authGuard(
+            profile: "guard-pro", probeTimeout: 0.5, _testExecutable: stub, onLine: probed.add)
+        XCTAssertEqual(probed.all.filter { $0.hasPrefix("[warn] auth check timed out") }.count, 1)
     }
 }
 

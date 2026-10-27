@@ -5,10 +5,9 @@ work from **one bundled background item** — a single macOS agent, shipped insi
 itself, that wakes every five minutes and runs whatever schedule is due, as the logged-in
 user, never as root.
 
-Every run mode below collects via `jamf-cli` — there is no schedule that reads only a
-CSV. A CSV-only workspace (no jamf-cli connection) can't use managed automation, the
-per-schedule builder, alerts, the dead-man switch, or webhook digests; generate reports
-there manually by dropping a fresh CSV export and clicking **Generate Report**.
+Every run mode below works from `jamf-cli` data. A workspace with no jamf-cli connection
+can't use managed automation, the per-schedule builder, alerts, the dead-man switch, or
+webhook digests.
 
 There are two ways to schedule work, and they are mutually exclusive per host:
 
@@ -50,7 +49,7 @@ background item runs them one at a time, never in parallel:
 | Freshness | Daily | A light collect — the Refresh and Inventory tiers, everything except the two heavy per-device scans. Writes a daily `summary.json` per profile (one trend point/day). | +0 min |
 | Scan | Weekly (default Monday) | The two `--scan-failures` fan-outs (patch + update device failures) — the per-device-heavy queries kept off the daily path. | +10 min |
 | Reports | Off / Daily / Weekly / Monthly | Generates workbooks for every profile from the already-fresh cache. | +20 min |
-| Backup | Weekly (default Sunday) | A `jamf-cli pro backup` of your Jamf Pro configuration objects. | +30 min |
+| Backup | Weekly (default Sunday) | A `jamf-cli pro backup` of your Jamf Pro configuration objects, plus a `jamf-cli protect backup` when Protect is connected (see Security and Operational Considerations). | +30 min |
 
 Freshness and Scan collect data; Reports and Backup do not collect (Reports generates from
 cache, Backup exports config). Each schedule can be enabled independently — for example,
@@ -145,12 +144,13 @@ Each run mode is strict — it does exactly one thing:
 |---|---|---|
 | `snapshot-only` | Collect only — refreshes snapshots and writes `summary.json`, no workbook | Yes |
 | `jamf-cli-only` | Generate only, from the latest cached snapshots — no collect | No |
-| `jamf-cli-full` | Collect + generate, no CSV | Yes |
-| `csv-assisted` | Collect + generate, using a CSV from the inbox — **hard-fails if no CSV is present** | Yes |
-| `backup` | `jamf-cli pro backup` only — config objects to `backups/`, no collect, no report | No |
+| `jamf-cli-full` | Collect + generate (**Refresh + Generate** in the app) | Yes |
+| `backup` | `jamf-cli pro backup` (and `protect backup` when Protect is connected) only — config objects to `backups/`, no collect, no report | No |
 
-`csv-assisted` fails loudly when its inbox has no CSV rather than silently degrading to a
-no-CSV workbook — use `jamf-cli-full` explicitly if you want the no-CSV path.
+The `csv-assisted` mode was retired in 2.11. A schedule saved with it runs as
+`jamf-cli-full`, and Run History notes that on each run until you save the schedule again. Adding one from the command line
+(`jamf-reports schedules add --mode csv-assisted`) is refused with a message that names
+`jamf-cli-full`.
 
 With `html.with_workbook: true` in the profile's `config.yaml` (the Customize screen's
 **Write the HTML report with every workbook**), the three modes that generate also write the
@@ -203,7 +203,7 @@ inside the installed `.app`.
 A wake happens every five minutes. If the Mac was asleep or logged out through one or more
 scheduled fires, the next wake catches up:
 
-- `snapshot-only`, `jamf-cli-full`, and `csv-assisted` schedules catch up from **any**
+- `snapshot-only` and `jamf-cli-full` schedules catch up from **any**
   missed fire, however long ago.
 - `jamf-cli-only` and `backup` schedules only catch up when the missed fire was within the
   **last 15 minutes** — the same rule these modes have always followed.

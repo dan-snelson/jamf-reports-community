@@ -4,6 +4,13 @@ import XCTest
 /// Tests for UpdateStatusService and UpdatesView instantiation.
 @MainActor
 final class UpdateStatusServiceTests: XCTestCase {
+    func test_failedPlansTrailing_saysSampledWhenJamfCLIListedFewerThanFailing() {
+        XCTAssertEqual(
+            UpdatesView.failedPlansTrailing(listed: 200, failing: 3481), "200 sampled of 3481")
+        XCTAssertEqual(UpdatesView.failedPlansTrailing(listed: 12, failing: 12), "12 total")
+        XCTAssertEqual(UpdatesView.failedPlansTrailing(listed: 3, failing: 0), "3 total")
+    }
+
 
     func testUpdatesViewInstantiatesInDemoMode() throws {
         let workspace = WorkspaceStore()
@@ -22,6 +29,13 @@ final class UpdateStatusServiceTests: XCTestCase {
     }
 
     /// Tests decode parity with summary-only JSON (no failure arrays).
+    func testSubtitleCountsStatusesNotDevices() {
+        XCTAssertNil(UpdatesView.subtitle(total: 0))
+        XCTAssertEqual(UpdatesView.subtitle(total: 1), "1 update status, one per device and update.")
+        XCTAssertEqual(
+            UpdatesView.subtitle(total: 3832), "3832 update statuses, one per device and update.")
+    }
+
     func testUpdateStatusServiceDecodesSummaryOnlyReport() throws {
         let json = """
         [

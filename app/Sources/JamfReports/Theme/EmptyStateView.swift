@@ -12,14 +12,20 @@ struct EmptyStateView: View {
 
     @Environment(\.colorSchemeContrast) private var contrast
 
-    /// Internal accessibility label text for testing
+    /// The combined label of the title and message. Commands are their own elements, so
+    /// each can be read, selected and copied.
     internal var accessibilityLabelText: String {
-        [title, message, commands.joined(separator: ", ")].filter { !$0.isEmpty }.joined(separator: ". ")
+        [title, message].filter { !$0.isEmpty }.joined(separator: ". ")
     }
 
-    /// Internal accessibility hint text for testing
-    internal var accessibilityHintText: String {
-        primaryAction != nil ? "Activate to \(primaryAction?.label ?? "")" : ""
+    /// `jamf-reports collect` for the tiers that collect `kinds` (no `--tiers` when none
+    /// maps). `collect` has no default profile, so the profile is always named.
+    nonisolated static func collectCommand(profile: String, kinds: [String]) -> String {
+        let tiers = Set(kinds.compactMap(CollectionTier.tier(forReport:)))
+        let command = "jamf-reports collect \(ProfileName.profileOption(profile))"
+        guard !tiers.isEmpty else { return command }
+        let list = CollectionTier.allCases.filter(tiers.contains).map(\.rawValue)
+        return command + " --tiers " + list.joined(separator: ",")
     }
 
     init(
@@ -53,30 +59,48 @@ struct EmptyStateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let icon = icon {
-                HStack {
-                    icon
-                        .font(.system(size: 28))
-                        .foregroundStyle(Theme.Colors.fgMuted)
-                        .accessibilityHidden(true)
-                    Spacer()
+            // Only the text is one element; the button stays reachable on its own.
+            VStack(alignment: .leading, spacing: 8) {
+                if let icon = icon {
+                    HStack {
+                        icon
+                            .font(.system(size: 28))
+                            .foregroundStyle(Theme.Colors.fgMuted)
+                            .accessibilityHidden(true)
+                        Spacer()
+                    }
                 }
+
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.fg)
+
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
             }
-
-            Text(title)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(Theme.Colors.fg)
-
-            Text(message)
-                .font(.footnote)
-                .foregroundStyle(Theme.Text.tertiary(contrast))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabelText)
 
             if !commands.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(commands, id: \.self) { command in
-                        Text(command)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(Theme.Colors.fgMuted)
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(command)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(Theme.Colors.fgMuted)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button {
+                                SystemActions.copyToClipboard(command)
+                            } label: {
+                                Image(systemName: "doc.on.doc").font(.system(size: 11))
+                                    .foregroundStyle(Theme.Colors.fgMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Copy command")
+                            .help("Copy to clipboard")
+                        }
                     }
                 }
                 .padding(.top, 4)
@@ -95,9 +119,6 @@ struct EmptyStateView: View {
                 .padding(.top, 4)
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabelText)
-        .accessibilityHint(accessibilityHintText)
     }
 }
 
@@ -130,7 +151,7 @@ struct EmptyStateAction {
     Card(padding: 32) {
         EmptyStateView(
             systemImage: "desktopcomputer.and.arrow.down",
-            title: "No device inventory yet",
+            title: "No computer inventory yet",
             message: "run Generate Report to populate"
         )
     }

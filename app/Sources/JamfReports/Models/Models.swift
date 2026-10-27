@@ -130,18 +130,25 @@ struct Schedule: Identifiable, Sendable {
         case snapshotOnly  = "snapshot-only"
         case jamfCLIOnly   = "jamf-cli-only"
         case jamfCLIFull   = "jamf-cli-full"
-        case csvAssisted   = "csv-assisted"
         /// v2.2.0: scheduled `jamf-cli pro backup` — exports configuration
         /// objects into the workspace's backups/ folder. No collect, no report.
         case backup        = "backup"
         var id: String { rawValue }
+
+        /// The mode 2.11 retired. Anything that reads a stored or typed mode goes through
+        /// `init?(stored:)`, so such a schedule keeps collecting as `jamf-cli-full`; a fall to
+        /// the `jamf-cli-only` default would stop it collecting without a word.
+        static let retiredCSVAssistedRaw = "csv-assisted"
+
+        init?(stored raw: String) {
+            self.init(rawValue: raw == Self.retiredCSVAssistedRaw ? Self.jamfCLIFull.rawValue : raw)
+        }
 
         var displayTitle: String {
             switch self {
             case .snapshotOnly: "Refresh data only"
             case .jamfCLIOnly: "Generate from cached data"
             case .jamfCLIFull: "Refresh + Generate"
-            case .csvAssisted: "Refresh + Generate (CSV required)"
             case .backup: "Configuration Backup"
             }
         }
@@ -153,9 +160,7 @@ struct Schedule: Identifiable, Sendable {
             case .jamfCLIOnly:
                 "Generates a workbook from the latest cached jamf-cli data. Does NOT collect fresh data first. Use this for a fast re-render after a recent collect — for example, after editing config.yaml or templates."
             case .jamfCLIFull:
-                "Runs collect to refresh jamf-cli data, then generates a workbook. No CSV input. Use this for a self-contained scheduled run that does not depend on a CSV export."
-            case .csvAssisted:
-                "Runs collect, then combines the newest CSV in csv-inbox/ with cached jamf-cli data. The run fails if no CSV is available — use this when CSV data is required (e.g. for custom inventory columns jamf-cli can't reach)."
+                "Runs collect to refresh jamf-cli data, then generates a workbook. Use this for a self-contained scheduled run."
             case .backup:
                 "Runs jamf-cli pro backup to export Jamf Pro configuration objects (policies, profiles, scripts, groups) into the workspace's backups folder. Keeps the last 10 scheduled backups. No data collection, no report."
             }
@@ -175,11 +180,19 @@ struct Schedule: Identifiable, Sendable {
             switch self {
             case .snapshotOnly:
                 return [.refresh]
-            case .jamfCLIOnly, .jamfCLIFull, .csvAssisted:
+            case .jamfCLIOnly, .jamfCLIFull:
                 return Set(CollectionTier.allCases)
             case .backup:
                 return []
             }
+        }
+
+        /// Whether a scheduled run of this mode forces the collect. Only `jamf-cli-full` on a
+        /// Jamf School workspace: its workbook must come from data collected in the run, not
+        /// held back by School's 12 h cadence. Jamf Pro keeps its once-a-day guard and the
+        /// shared-workspace freshness check, which `force` would also bypass.
+        func forcesCollect(for product: ProfileProductType) -> Bool {
+            self == .jamfCLIFull && product == .jamfSchool
         }
 
         /// Whether this mode may CATCH UP a fire it missed (`TickScheduler.due`).
@@ -198,7 +211,7 @@ struct Schedule: Identifiable, Sendable {
         /// on its next scheduled fire.
         var runsAtLoad: Bool {
             switch self {
-            case .snapshotOnly, .jamfCLIFull, .csvAssisted: true
+            case .snapshotOnly, .jamfCLIFull: true
             case .jamfCLIOnly, .backup: false
             }
         }
@@ -243,6 +256,9 @@ struct Schedule: Identifiable, Sendable {
     /// → none excluded (run-time discovery picks up every profile). Ignored
     /// for single-profile schedules.
     var excludedProfiles: [String]? = nil
+    /// The schedule was stored or typed as the retired `csv-assisted`; its run logs that it ran
+    /// as `jamf-cli-full`.
+    var retiredCSVAssisted = false
 
     var isMulti: Bool { multiTarget != nil }
     var profileDisplayLabel: String { multiTarget?.displayLabel ?? profile }
@@ -330,6 +346,10 @@ struct BackupRecord: Identifiable, Sendable, Hashable {
     let sizeBytes: Int64
     let fileCount: Int
     let url: URL
+    /// The Jamf Protect part, when the backup's manifest records one.
+    var protect: BackupProductResult?
+    /// The Jamf Pro part failed, so the folder holds only what Jamf Protect exported.
+    var proFailed = false
 
     var createdLabel: String { FileDisplay.date(created) }
     var sizeLabel: String { FileDisplay.size(sizeBytes) }
@@ -337,9 +357,12 @@ struct BackupRecord: Identifiable, Sendable, Hashable {
     /// A backup with no files: an interrupted run, or one whose contents were cleared.
     var isEmpty: Bool { fileCount == 0 }
 
+    /// The backup holds Jamf Protect objects, which a diff does not compare.
+    var includesProtectFiles: Bool { (protect?.objectTotal ?? 0) > 0 }
+
     /// A diff compares the contents of two backups, so both need files and they must differ.
     static func canDiff(_ backup: BackupRecord, against other: BackupRecord?) -> Bool {
-        guard let other else { return false }
+        guard let other, !backup.proFailed, !other.proFailed else { return false }
         return backup.id != other.id && !backup.isEmpty && !other.isEmpty
     }
 
@@ -366,7 +389,8 @@ struct BackupRecord: Identifiable, Sendable, Hashable {
     /// VoiceOver label for a backup row: display name, file count, size, date.
     var accessibilityLabel: String {
         let displayName = label.isEmpty ? name : label
-        return "\(displayName), \(fileCount) files, \(sizeLabel), created \(createdLabel)"
+        let failed = proFailed ? ", Jamf Pro part failed" : ""
+        return "\(displayName)\(failed), \(fileCount) files, \(sizeLabel), created \(createdLabel)"
     }
 
     /// VoiceOver summary describing the backup's content and purpose.
@@ -374,18 +398,6 @@ struct BackupRecord: Identifiable, Sendable, Hashable {
         let displayName = label.isEmpty ? name : label
         return "Configuration backup: \(displayName), \(fileCount) files, created \(createdLabel)"
     }
-}
-
-// MARK: - Column mappings (Config screen)
-
-struct ColumnMapping: Identifiable, Sendable {
-    enum Status: String, Sendable { case ok, warn, fail, skip }
-    var id: String { key }
-    let key: String
-    let label: String
-    var value: String
-    var required: Bool
-    var status: Status
 }
 
 // MARK: - Custom EAs
@@ -483,8 +495,6 @@ struct DeviceInventoryRecord: Identifiable, Sendable, Hashable {
     var firewall: String
     var gatekeeper: String
     var bootstrapToken: String
-    var diskUsage: String
-    var failedRules: Int
     var patchFailures: [DevicePatchFailure]
     var source: String
     /// Whether the internal volume is hardware-encrypted (`HardwareEncryption`); nil unknown.
@@ -569,8 +579,6 @@ struct DeviceInventoryRecord: Identifiable, Sendable, Hashable {
         firewall = firstNonEmpty(firewall, other.firewall)
         gatekeeper = firstNonEmpty(gatekeeper, other.gatekeeper)
         bootstrapToken = firstNonEmpty(bootstrapToken, other.bootstrapToken)
-        diskUsage = firstNonEmpty(diskUsage, other.diskUsage)
-        failedRules = max(failedRules, other.failedRules)
         // Sources that disagree are not a guess either way (the hardware index's rule).
         if let mine = hardwareEncrypted, let theirs = other.hardwareEncrypted {
             hardwareEncrypted = mine == theirs ? mine : nil
@@ -613,8 +621,6 @@ struct DeviceInventoryRecord: Identifiable, Sendable, Hashable {
             firewall: "",
             gatekeeper: "",
             bootstrapToken: "",
-            diskUsage: "",
-            failedRules: 0,
             patchFailures: [],
             source: source
         )
@@ -1054,11 +1060,9 @@ struct TrendSeries: Identifiable, Sendable {
         /// of device counts by compliance band (Pass/Low/Medium/High) over time.
         /// Only appears in TrendsView metric picker when mscpBands history exists.
         case mscpBandTrend
-        /// Historical computers-vs-mobile device count, split into two series
-        /// in the chart (`TrendStore.managedDeviceSeries()`) while this single
-        /// case drives the pill/hero headline number via `value(for:in:)`
-        /// (computer count — Jamf Pro itself can't answer "how many managed
-        /// Macs did we have on <past date>", but every archived summary can).
+        /// Historical Mac count (`totalDevices`; labelled "Managed Computers"). Jamf Pro itself
+        /// can't answer "how many managed Macs did we have on <past date>", but every archived
+        /// summary can. Mobile devices are `.mobileManaged`. Raw value kept for stored selections.
         case managedDevices
         /// Share of Macs with each control on, read from the summary's own shares.
         /// Appended last so `allCases` keeps every older position.
@@ -1067,6 +1071,9 @@ struct TrendSeries: Identifiable, Sendable {
         /// `securityAgentCoverage`. The agent the score counts as EDR is `.edrAgent`, so a
         /// workspace offers `.agent` only for the others. Its raw value is `agent:<name>`.
         case agent(String)
+        /// The summary's `mobile` figures (mobile spec 4.1), counted apart from Macs.
+        case mobileManaged, mobileOSCurrent, mobilePasscode, mobileSupervised,
+             mobileDataProtection, mobileStale, mobileJailbroken
 
         /// Every metric that does not depend on the workspace, in their original order. The
         /// agent metrics come from `security_agents`, so they are not listed here.
@@ -1075,6 +1082,23 @@ struct TrendSeries: Identifiable, Sendable {
             .patch, .securityScore, .mscpBandTrend, .managedDevices, .sip, .firewall,
             .gatekeeper,
         ]
+
+        /// The mobile metrics, offered only where a summary carries them, so they are not in
+        /// `allCases` (whose list the Overview's score cards also offer).
+        static let mobileMetrics: [Metric] = [
+            .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+            .mobileDataProtection, .mobileStale, .mobileJailbroken,
+        ]
+
+        /// What a Jamf School summary can measure: device counts, the Mac stale count and OS
+        /// currency, and the mobile figures School rows carry (the Trends screen offers each only
+        /// once a summary has it). Every other metric reads a figure School does not carry.
+        static let schoolMetrics: [Metric] = [
+            .managedDevices, .stale, .osCurrent,
+            .mobileManaged, .mobileSupervised, .mobileStale, .mobileOSCurrent,
+        ]
+
+        var isMobile: Bool { Self.mobileMetrics.contains(self) }
 
         static let agentPrefix = "agent:"
 
@@ -1097,6 +1121,13 @@ struct TrendSeries: Identifiable, Sendable {
             case .firewall: return "firewall"
             case .gatekeeper: return "gatekeeper"
             case .agent(let name): return Self.agentPrefix + Self.encoded(name)
+            case .mobileManaged: return "mobileManaged"
+            case .mobileOSCurrent: return "mobileOSCurrent"
+            case .mobilePasscode: return "mobilePasscode"
+            case .mobileSupervised: return "mobileSupervised"
+            case .mobileDataProtection: return "mobileDataProtection"
+            case .mobileStale: return "mobileStale"
+            case .mobileJailbroken: return "mobileJailbroken"
             }
         }
 
@@ -1109,7 +1140,8 @@ struct TrendSeries: Identifiable, Sendable {
                 self = .agent(name)
                 return
             }
-            guard let match = Self.allCases.first(where: { $0.rawValue == rawValue }) else {
+            guard let match = (Self.allCases + Self.mobileMetrics)
+                .first(where: { $0.rawValue == rawValue }) else {
                 return nil
             }
             self = match
@@ -1129,20 +1161,27 @@ struct TrendSeries: Identifiable, Sendable {
         var displayLabel: String {
             switch self {
             case .stability:     return "Stability Index"
-            case .activeDevices: return "Active Devices"
+            case .activeDevices: return "Active Computers"
             case .compliance:    return "Compliance Benchmark"
             case .fileVault:     return "FileVault Encryption"
             case .osCurrent:     return "On Current macOS"
             case .edrAgent:      return "EDR agent coverage"
-            case .stale:         return "Stale Devices (>30d)"
+            case .stale:         return "Stale Computers (>30d)"
             case .patch:         return "Patch Compliance"
             case .securityScore: return "Security Score (Weighted)"
             case .mscpBandTrend: return "mSCP Compliance Bands"
-            case .managedDevices: return "Managed Devices"
+            case .managedDevices: return "Managed Computers"
             case .sip:           return "System Integrity Protection"
             case .firewall:      return "Firewall Enabled"
             case .gatekeeper:    return "Gatekeeper Enabled"
             case .agent(let name): return "\(name) coverage"
+            case .mobileManaged: return "Managed mobile devices"
+            case .mobileOSCurrent: return "Mobile devices on current OS"
+            case .mobilePasscode: return "Mobile passcode compliant"
+            case .mobileSupervised: return "Supervised mobile devices"
+            case .mobileDataProtection: return "Mobile data protection"
+            case .mobileStale: return "Stale mobile devices"
+            case .mobileJailbroken: return "Jailbroken mobile devices"
             }
         }
 
@@ -1157,7 +1196,8 @@ struct TrendSeries: Identifiable, Sendable {
         }
         var unit: String {
             switch self {
-            case .stale, .activeDevices, .mscpBandTrend, .managedDevices: return ""
+            case .stale, .activeDevices, .mscpBandTrend, .managedDevices, .mobileManaged,
+                 .mobileStale, .mobileJailbroken: return ""
             default: return "%"
             }
         }
@@ -1167,15 +1207,28 @@ struct TrendSeries: Identifiable, Sendable {
         /// needs a decision here. Read by the Trends colours and the AI trend input alike.
         var polarity: FleetInsightInput.Polarity {
             switch self {
-            case .stale: .lowerIsBetter
-            case .activeDevices, .mscpBandTrend, .managedDevices: .neutral
+            case .stale, .mobileStale, .mobileJailbroken: .lowerIsBetter
+            case .activeDevices, .mscpBandTrend, .managedDevices, .mobileManaged: .neutral
             case .stability, .compliance, .fileVault, .osCurrent, .edrAgent, .agent, .patch,
-                 .securityScore, .sip, .firewall, .gatekeeper: .higherIsBetter
+                 .securityScore, .sip, .firewall, .gatekeeper, .mobileOSCurrent, .mobilePasscode,
+                 .mobileSupervised, .mobileDataProtection: .higherIsBetter
+            }
+        }
+        /// A count of devices, not a share or score: the Trends axis fits its top to the data
+        /// instead of a fixed frame, so a small fleet is not drawn flat at the bottom.
+        var isDeviceCount: Bool {
+            switch self {
+            case .managedDevices, .activeDevices, .stale, .mobileManaged, .mobileStale,
+                 .mobileJailbroken: true
+            default: false
             }
         }
         var minY: Double {
             switch self {
-            case .activeDevices, .mscpBandTrend, .managedDevices: return 0
+            case .activeDevices, .mscpBandTrend, .managedDevices, .mobileManaged, .mobileStale,
+                 .mobileJailbroken: return 0
+            case .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+                 .mobileDataProtection: return 50
             case .stability:     return 40
             case .compliance:    return 40
             case .fileVault, .sip, .firewall, .gatekeeper: return 60
@@ -1189,8 +1242,9 @@ struct TrendSeries: Identifiable, Sendable {
         }
         var maxY: Double {
             switch self {
-            case .activeDevices, .managedDevices: return 1000
-            case .stale:         return 60
+            case .activeDevices, .managedDevices, .mobileManaged: return 1000
+            case .stale, .mobileStale: return 60
+            case .mobileJailbroken: return 10
             case .mscpBandTrend: return 500  // Per-band device count max
             default:             return 100
             }
@@ -1212,6 +1266,13 @@ struct TrendSeries: Identifiable, Sendable {
             case .firewall:      return 0x5E5CE6
             case .gatekeeper:    return 0xAC8E68
             case .agent(let name): return Self.agentColor(name)
+            case .mobileManaged: return 0x9B59B6  // Matches the Mobile devices series line
+            case .mobileOSCurrent: return 0x0A84FF
+            case .mobilePasscode: return 0x30D158
+            case .mobileSupervised: return 0x5E5CE6
+            case .mobileDataProtection: return 0x64D2FF
+            case .mobileStale: return 0xFF9F0A
+            case .mobileJailbroken: return 0xFF453A
             }
         }
 
@@ -1367,6 +1428,7 @@ struct CustomSheetGroup: Sendable {
             .mobileSupervisionStatus,
             .checkinHealth,
             .activeDevices,
+            .fleetDrift,
             .groupHygiene,
             .smartGroups,
             .environmentStats,

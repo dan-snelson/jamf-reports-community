@@ -113,7 +113,7 @@ permission:
 - **No Jamf Pro:** the ID is valid but no Jamf Pro tenant answers behind it, including an
   environment that holds no tenant. That environment's MDM is probably Jamf School, which
   Jamf Reports reads with a School API key, so setup offers **Set up Jamf School** (or
-  **Add Jamf School workspace** in the sidebar's workspace menu) and no way to continue with
+  **Settings → Add connection**, then Jamf School) and no way to continue with
   this profile. If it should be Jamf Pro, check that the ID is for the environment that
   holds your Jamf Pro tenant.
 - **Missing permission:** the gateway did not reject the ID but refused the request with a
@@ -212,7 +212,12 @@ page, which says so at the top; the rest of the page still lands.
 
 **Backups** (optional) read every object type they export. A type the credential cannot
 read is listed in the backup's `_failures` file and the rest is kept, so a read-limited
-credential produces a partial backup rather than none.
+credential produces a partial backup rather than none. When Jamf Protect is connected to
+the workspace, a Jamf Pro backup also runs `jamf-cli protect backup` with the Protect API
+client, which needs read access to everything Protect exports; a Protect part that fails or
+comes back partial is marked on the Backups screen. On shared storage it is skipped unless you
+turn on **Back up Jamf Protect in this folder** (see
+[Security & Operational Considerations](https://github.com/tonyyo11/jamf-reports-community/wiki/10-Security-and-Operational-Considerations)).
 
 ## Jamf Protect and Jamf School
 
@@ -223,12 +228,19 @@ Clients**, with the **Read Only** role or a custom role; jamf-cli's setup guide 
 **Settings > API Clients**. Connect it with the Protect URL, client ID and client secret. It
 is not covered by your Jamf Account integration. **Data Sources > Additional Products >
 Disconnect** turns Protect off in the workspace and leaves the jamf-cli profile, which
-`jamf-cli config remove-profile <name>` removes.
+`jamf-cli config remove-profile <name>` removes. Protect can be connected to a Jamf Pro or,
+experimentally, a Jamf School workspace.
 
 **Jamf School.** Generate an API key at **Organization > Settings > API**, and find the
 Network ID at **Devices > Enroll Device(s)**. Each School API key is limited to the API
 methods chosen for it: allow only what the School data sources above need, and nothing that
 changes data. Connect it from **Connect Jamf School** on the Welcome screen.
+
+**Jamf School blueprints (experimental).** Blueprints are not part of the School API key. They
+come from a Jamf Account integration for the Platform API, whose region, tenant ID, client ID
+and secret are saved on the same School profile. The integration needs `blueprints:read`; when
+the tenant ID or the permission is wrong, setup says which, and the School API key keeps
+working either way. Without these fields a School collect skips blueprints.
 
 ## Reading a permission error
 

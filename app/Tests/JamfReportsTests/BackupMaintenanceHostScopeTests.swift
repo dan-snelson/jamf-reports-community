@@ -150,6 +150,28 @@ final class BackupMaintenanceHostScopeTests: XCTestCase {
         XCTAssertEqual(remaining.count, 3, "ambiguous ordering must abort the whole prune")
     }
 
+    /// Another Mac's complete Protect part does not release this Mac's incomplete one: it
+    /// could be pruned there, leaving no copy of what landed here.
+    func testAnotherMachinesCompleteProtectPartDoesNotReleaseThisMachinesPartial() throws {
+        try makeSyncedWorkspaceRoot()
+        let mine = SharedWorkspace.currentHost.id
+        func protect(_ dir: URL, _ result: BackupProductResult) throws {
+            let manifest: [String: Any] = [
+                "label": "scheduled-20260825", "products": ["protect": result.manifestValue]]
+            try JSONSerialization.data(withJSONObject: manifest)
+                .write(to: dir.appendingPathComponent("manifest.json"))
+        }
+        try protect(try makeBackup("20260825T010000", owner: mine),
+                    BackupProductResult(state: .partial, exitCode: 7, objectCounts: ["plans": 1]))
+        try protect(try makeBackup("20260825T020000", owner: "some-other-host-abc123"),
+                    BackupProductResult(state: .ok, exitCode: 0, objectCounts: ["plans": 2]))
+
+        BackupMaintenance.pruneScheduledBackups(profile: profile, keep: 0)
+
+        let remaining = Set(try FileManager.default.contentsOfDirectory(atPath: backupsDir.path))
+        XCTAssertTrue(remaining.contains("20260825T010000"), "still held: no newer one of ours")
+    }
+
     // MARK: - Shared storage the path alone does not reveal
 
     private func seedMixedOwnerBackups() throws {
@@ -175,6 +197,15 @@ final class BackupMaintenanceHostScopeTests: XCTestCase {
         try seedMixedOwnerBackups()
         BackupMaintenance.pruneScheduledBackups(
             profile: profile, keep: 0, volumeIsLocal: { _ in false })
+        try assertOnlyOwnBackupPruned()
+    }
+
+    /// iCloud Desktop & Documents syncs `~/Documents` with no path that says so.
+    func testAnICloudDesktopAndDocumentsFolderIsScopedToThisMachine() throws {
+        try seedMixedOwnerBackups()
+        BackupMaintenance.pruneScheduledBackups(
+            profile: profile, keep: 0, volumeIsLocal: { _ in true },
+            syncProbe: .iCloudEverywhere)
         try assertOnlyOwnBackupPruned()
     }
 

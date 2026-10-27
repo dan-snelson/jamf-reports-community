@@ -11,7 +11,13 @@ import Foundation
 /// Config-tab save contract. Reads go straight through `ConfigLoader`, mirroring
 /// how `CLIBridge.loadConfig` handles the same file.
 enum AIConfigLoader {
-    static func load(profile: String) -> AIConfig {
+    /// Every reader of a workspace's AI settings comes through here, so `AIPolicy` applies to
+    /// all of them.
+    static func load(profile: String, defaults: UserDefaults = .standard) -> AIConfig {
+        fileConfig(profile: profile).effective(policy: AIPolicy.current(defaults: defaults))
+    }
+
+    private static func fileConfig(profile: String) -> AIConfig {
         guard let workspace = ProfileService.workspaceURL(for: profile) else { return AIConfig() }
         let url = workspace.appendingPathComponent("config.yaml")
         guard FileManager.default.fileExists(atPath: url.path) else { return AIConfig() }

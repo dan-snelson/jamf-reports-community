@@ -58,8 +58,8 @@ final class ConfigViewReaderCardTests: XCTestCase {
         ])
     }
 
-    /// The EA walkthrough and the re-scaffold save too; their messages carry the same notes.
-    func testTheWalkthroughAndRescaffoldMessagesCarryTheSaveNotes() {
+    /// The EA walkthrough saves too; its message carries the same notes.
+    func testTheWalkthroughMessageCarriesTheSaveNotes() {
         let notes = ConfigSaveReport(keptBlocks: ["custom_eas"]).notes
         XCTAssertEqual(
             CSVEAWalkthroughSheet.adoptionMessage(eas: 0, agents: 0, notes: notes, profile: "p"),
@@ -71,13 +71,6 @@ final class ConfigViewReaderCardTests: XCTestCase {
         XCTAssertEqual(
             CSVEAWalkthroughSheet.adoptionMessage(eas: 0, agents: 0, notes: [], profile: "p"),
             "Those columns are already in config.yaml.")
-        XCTAssertEqual(
-            ConfigView.rescaffoldMessage(
-                profile: "p", familyLabel: "computer export", summary: "1 added",
-                notes: notes),
-            "Merged computer export column mappings into p's config — 1 added. Security "
-                + "agents, custom EAs and thresholds were kept. Review the Columns tab, then "
-                + "Save. " + notes[0])
     }
 
     func testASaveThatDroppedCommentsNamesTheCopy() throws {

@@ -142,7 +142,6 @@ struct DevicesView: View {
                 return device.patchFailureCount > 0
             case .security:
                 return device.securityGapCount(policy: activeSnapshot.securityPolicy) > 0
-                    || device.failedRules > 0
             case .priorityAction:
                 // The Critical or High band of the same score the Risk pill shows.
                 return priorityRisk(for: device).level >= .high
@@ -165,7 +164,7 @@ struct DevicesView: View {
     private func priorityRisk(for device: DeviceInventoryRecord) -> DeviceRisk {
         RiskScoringService.risk(
             for: device, agentCheck: agentCheck(for: device),
-            policy: activeSnapshot.securityPolicy)
+            policy: activeSnapshot.securityPolicy, staleRule: staleRule)
     }
 
     /// The device's status against the tenant's configured security agent, or
@@ -274,7 +273,7 @@ struct DevicesView: View {
         .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
             isSearchFocused = true
         }
-        .searchable(text: $query, placement: .toolbar, prompt: "Search devices")
+        .searchable(text: $query, placement: .toolbar, prompt: "Search computers")
     }
 
     /// The table with the detail panel beside it when the page is wide enough for both, and
@@ -317,7 +316,7 @@ struct DevicesView: View {
         PageHeader(
             kicker: isLoading ? "Loading inventory" : "Detailed Inventory · \(activeSnapshot.generatedAt)",
             breadcrumbs: [Breadcrumb(label: "Overview", action: { navigateToOverview() })],
-            title: "Devices",
+            title: "Computers",
             subtitle: "\(activeSnapshot.totalDevices) records · \(workspace.profile)",
             // The demo dataset is frozen on purpose; an age warning on it is noise.
             lastModified: workspace.demoMode ? nil : activeSnapshot.generatedDate
@@ -328,7 +327,7 @@ struct DevicesView: View {
                     PNPButton(title: "Refresh", icon: "arrow.clockwise") {
                         Task { await reload() }
                     }
-                    .help("Reload device inventory from the cached jamf-cli snapshots.")
+                    .help("Reload computer inventory from the cached jamf-cli snapshots.")
                     PNPButton(
                         title: isExportingCSV ? "Exporting…" : "Export CSV",
                         icon: "square.and.arrow.up",
@@ -339,7 +338,7 @@ struct DevicesView: View {
                     .disabled(workspace.demoMode || isExportingCSV || filteredDevices.isEmpty)
                     .help(workspace.demoMode
                           ? DemoData.liveOnlyHelp
-                          : "Export the currently filtered device list to a CSV file")
+                          : "Export the currently filtered computer list to a CSV file")
                 }
             )
         }
@@ -352,7 +351,8 @@ struct DevicesView: View {
             range: AppConstants.staleDaysMin...AppConstants.staleDaysMax,
             prefix: "Stale",
             suffix: "d",
-            help: "Devices with no \(staleRule.basisPhrase) for more than this many days are "
+            label: "Stale after days",
+            help: "Computers with no \(staleRule.basisPhrase) for more than this many days are "
                 + "flagged stale."
         )
     }
@@ -388,12 +388,12 @@ struct DevicesView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.Colors.fgMuted)
-            TextField("Search devices", text: $query)
+            TextField("Search computers", text: $query)
                 .textFieldStyle(.plain)
                 .font(.callout)
                 .foregroundStyle(Theme.Colors.fg)
                 .focused($isSearchFocused)
-                .accessibilityLabel("Search devices")
+                .accessibilityLabel("Search computers")
         }
         .padding(.horizontal, 10)
         .frame(width: 260, height: 30)
@@ -448,7 +448,7 @@ struct DevicesView: View {
 
     private var summary: some View {
         HStack(spacing: 12) {
-            StatTile(label: "Devices", value: "\(activeSnapshot.totalDevices)",
+            StatTile(label: "Computers", value: "\(activeSnapshot.totalDevices)",
                      sub: activeSnapshot.isDemo ? "Demo inventory" : "Current workspace")
             StatTile(label: "Stale", value: "\(activeSnapshot.staleCount(staleRule))",
                      sub: staleTileSub)
@@ -490,12 +490,12 @@ struct DevicesView: View {
                 // instead of hyphenating its words.
                 ViewThatFits(in: .horizontal) {
                     HStack {
-                        SectionHeader(title: "Device Inventory")
+                        SectionHeader(title: "Computer Inventory")
                         Spacer()
                         riskLegend
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        SectionHeader(title: "Device Inventory")
+                        SectionHeader(title: "Computer Inventory")
                         riskLegend
                     }
                 }
@@ -507,7 +507,7 @@ struct DevicesView: View {
                     // line is preserved on roomier windows where it earns the height.
                     // The model string remains accessible via the detail panel and the
                     // row's textSelection — no popover added to keep table scroll perf.
-                    TableColumn("Device", value: \.device.displayName) { row in
+                    TableColumn("Computer", value: \.device.displayName) { row in
                         let device = row.device
                         if isCompact {
                             Text(device.displayName)
@@ -585,7 +585,7 @@ struct DevicesView: View {
                     if filteredDevices.isEmpty && !activeSnapshot.devices.isEmpty {
                         EmptyStateView(
                             systemImage: "line.3.horizontal.decrease.circle",
-                            title: "No matching devices",
+                            title: "No matching computers",
                             message: "No inventory rows match the current filters."
                         )
                         .padding(24)
@@ -695,13 +695,13 @@ struct DevicesView: View {
                         PNPButton(title: "Copy Serial", icon: "doc.on.doc", size: .sm) {
                             SystemActions.copyToClipboard(device.serial)
                         }
-                        .help("Copy this device's serial number to the clipboard.")
+                        .help("Copy this computer's serial number to the clipboard.")
                     }
                 }
                 .textSelection(.enabled)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
-                    SectionHeader(title: "No Device Selected")
+                    SectionHeader(title: "No Computer Selected")
                     Text("No inventory rows match the current filters.")
                         .font(.footnote)
                         .foregroundStyle(Theme.Text.tertiary(contrast))
@@ -734,13 +734,13 @@ struct DevicesView: View {
             } else {
                 switch deviceDetailState {
                 case .idle:
-                    Text("Select a device to load jamf-cli detail.")
+                    Text("Select a computer to load jamf-cli detail.")
                         .font(.footnote)
                         .foregroundStyle(Theme.Text.tertiary(contrast))
                 case .loading:
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("Loading device detail...")
+                        Text("Loading computer detail...")
                             .font(.footnote)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                     }
@@ -813,7 +813,7 @@ struct DevicesView: View {
                 } else {
                     Chart(activeSnapshot.osDistribution.prefix(6)) { item in
                         BarMark(
-                            x: .value("Devices", item.count),
+                            x: .value("Computers", item.count),
                             y: .value("Version", item.version)
                         )
                         .foregroundStyle(Color(hex: item.colorHex))
@@ -829,7 +829,7 @@ struct DevicesView: View {
                     .frame(height: 150)
                     .accessibilityChartDescriptor(BarDistributionChartDescriptor(
                         title: "macOS Version Distribution",
-                        unit: " devices",
+                        unit: " computers",
                         bars: activeSnapshot.osDistribution.prefix(6).map {
                             .init(label: $0.version, value: Double($0.count))
                         }
@@ -914,7 +914,7 @@ struct DevicesView: View {
         Card(padding: 32) {
             EmptyStateView(
                 systemImage: "desktopcomputer.and.arrow.down",
-                title: "No device inventory yet",
+                title: "No computer inventory yet",
                 message: "run Generate Report to populate"
             )
             .frame(maxWidth: .infinity)
@@ -927,7 +927,7 @@ struct DevicesView: View {
     private var deviceErrorState: some View {
         Card(padding: 32) {
             ErrorStateView(
-                title: "Couldn't read device inventory",
+                title: "Couldn't read computer inventory",
                 message: activeSnapshot.warnings.joined(separator: "\n"),
                 commands: ["Re-run collection from Data Sources, then Refresh."],
                 retry: { Task { await reload() } }
@@ -993,18 +993,6 @@ struct DevicesView: View {
                     securityRow("Bootstrap", value: device.bootstrapToken,
                                 tone: bootstrapTone(device.bootstrapToken))
                 }
-                HStack(alignment: .firstTextBaseline) {
-                    Text("FAILED RULES")
-                        .font(Theme.Fonts.mono(10.5, weight: .semibold))
-                        .tracking(1.0)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .frame(width: Self.detailLabelWidth, alignment: .leading)
-                    Text(device.failedRules == 0 ? "0" : "\(device.failedRules)")
-                        .font(.footnote)
-                        .foregroundStyle(device.failedRules == 0 ? Theme.Colors.fg2 : Theme.Colors.warn)
-                    Spacer(minLength: 0)
-                }
-                .padding(.vertical, 4)
             }
         }
     }
@@ -1367,7 +1355,8 @@ struct DevicesView: View {
         }
         guard let lookup = detailLookupID(for: device) else {
             deviceDetail = nil
-            deviceDetailState = .unavailable("Device detail needs a serial number or device name.")
+            deviceDetailState = .unavailable(
+                "Computer detail needs a serial number or computer name.")
             return
         }
 
@@ -1379,7 +1368,7 @@ struct DevicesView: View {
 
         guard let data = await CLIBridge().deviceDetailWithProvenance(profile: profile, deviceID: lookup)?.data else {
             if deviceDetailRequestKey == requestKey {
-                deviceDetailState = .unavailable("Device detail unavailable for \(lookup).")
+                deviceDetailState = .unavailable("Computer detail unavailable for \(lookup).")
             }
             return
         }
@@ -1392,7 +1381,7 @@ struct DevicesView: View {
             }
         } catch {
             if deviceDetailRequestKey == requestKey {
-                deviceDetailState = .unavailable("Could not decode device detail for \(lookup).")
+                deviceDetailState = .unavailable("Could not decode computer detail for \(lookup).")
             }
         }
     }

@@ -11,16 +11,25 @@ struct TickState: Codable, Sendable {
     var lastSucceeded: [String: Date] = [:]
     /// Retries run for the fire `lastStarted` belongs to; a new fire resets it.
     var retryCount: [String: Int] = [:]
+    /// When the previous wake that took the lock ran. A long gap before the next wake means the
+    /// Mac was off or asleep, which lets a daily schedule run on the first wake of a day.
+    var lastTick: Date?
+    /// Labels whose last run failed in a way a retry repeats (`ScheduleRunOutcome.retryCouldHelp`
+    /// false): the hourly retries after the backoffs skip them.
+    var retryWouldRepeat: Set<String> = []
 
     init() {}
 
     /// Lenient on purpose: a pre-retry `tick-state.json` carries only
-    /// `lastStarted`, and dropping those stamps would re-run every schedule.
+    /// `lastStarted`, and dropping those stamps would re-run every schedule. Keys a later build
+    /// dropped (`catchUpStarted`) are ignored.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         lastStarted = try c.decodeIfPresent([String: Date].self, forKey: .lastStarted) ?? [:]
         lastSucceeded = try c.decodeIfPresent([String: Date].self, forKey: .lastSucceeded) ?? [:]
         retryCount = try c.decodeIfPresent([String: Int].self, forKey: .retryCount) ?? [:]
+        lastTick = try c.decodeIfPresent(Date.self, forKey: .lastTick)
+        retryWouldRepeat = try c.decodeIfPresent(Set<String>.self, forKey: .retryWouldRepeat) ?? []
     }
 
     static func load(url: URL = TickState.defaultURL) -> TickState {
@@ -38,13 +47,16 @@ struct TickState: Codable, Sendable {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
-    /// Stamp a start. A calendar fire restarts the retry count, a retry
-    /// advances it, and a run-now leaves it alone — it belongs to no fire.
+    /// Stamp a scheduled start, which pays its local day. A fire or a catch-up restarts the retry
+    /// count, a retry advances it. A Run now writes nothing: it pays no day and ends no retries.
     mutating func noteStarted(_ label: String, at now: Date, reason: TickScheduler.Reason) {
-        lastStarted[label] = now
         switch reason {
-        case .fire: retryCount[label] = 0
-        case .retry: retryCount[label] = (retryCount[label] ?? 0) + 1
+        case .fire, .catchUp:
+            lastStarted[label] = now
+            retryCount[label] = 0
+        case .retry:
+            lastStarted[label] = now
+            retryCount[label] = (retryCount[label] ?? 0) + 1
         case .runNow: break
         }
     }
@@ -54,6 +66,13 @@ struct TickState: Codable, Sendable {
     mutating func noteSucceeded(_ label: String, startedAt: Date) {
         lastSucceeded[label] = startedAt
         retryCount[label] = 0
+        retryWouldRepeat.remove(label)
+    }
+
+    /// Records whether a retry of a run that did not end its retries could help. True when that
+    /// changed the state.
+    mutating func noteRetry(_ label: String, couldHelp: Bool) -> Bool {
+        couldHelp ? retryWouldRepeat.remove(label) != nil : retryWouldRepeat.insert(label).inserted
     }
 }
 
@@ -93,61 +112,151 @@ enum TickScheduler {
     /// tick alone never re-polls an on-prem server inside an hour.
     static let retryBackoffs: [TimeInterval] = [1 * 3600, 2 * 3600, 4 * 3600]
 
-    /// Why a run is due — the tick stamps each differently (`TickState.noteStarted`).
-    enum Reason: Sendable, Equatable { case runNow, fire, retry }
+    /// Wait between retries once `retryBackoffs` are spent, while today's summary is missing.
+    static let missingSummaryRetryInterval: TimeInterval = 3600
+
+    /// A longer gap between two wakes than this (the agent wakes every 300 s) means the Mac was
+    /// off or asleep.
+    static let offGap: TimeInterval = 15 * 60
+
+    /// Why a run is due — the tick stamps each differently (`TickState.noteStarted`). A
+    /// `catchUp` is a daily schedule's run on the first wake after the Mac was off, for a day
+    /// whose fire it may be off for again; it is stamped as a `fire`.
+    enum Reason: Sendable, Equatable { case runNow, fire, catchUp, retry }
 
     struct DueRun: Sendable {
         let schedule: Schedule
         let reason: Reason
     }
 
-    /// - Parameter nonCatchUpAnchor: When a wake was turned away by the lock,
-    ///   the time of the FIRST such refusal. The non-catch-up window is measured
+    /// - Parameter summaryMissingToday: Whether `schedule` should have produced today's daily
+    ///   summary and none exists. Asked only once the backoffs are spent: a collect that has not
+    ///   produced it keeps retrying hourly until local midnight (a laptop off the VPN until
+    ///   14:00 still gets its day). The default says it exists, so retries stop after the
+    ///   backoffs.
+    /// - Parameter nonCatchUpAnchor: When a wake was turned away by the lock, the time of the
+    ///   FIRST such refusal since the Mac was last off (`nonCatchUpAnchor(refusals:now:)`).
+    ///   The non-catch-up window is measured
     ///   from the earlier of it and `now`, so a 40-minute collect that blocks
     ///   three wakes cannot swallow the 07:00 backup that came due while it ran.
     ///   `nil` (the default) measures from `now`, the plain uncontended case.
+    /// - Parameter wasOff: This wake is the first after the Mac was off or asleep (`wasOff(...)`).
+    ///
+    /// A daily collect pays a local day when a scheduled run starts on it, and is due while
+    /// today is unpaid and either its latest fire's day is unpaid or the Mac was off: a Mac on
+    /// 08:00-17:00 runs its 18:00 schedule at 08:00, an always-on Mac waits for 18:00. Every
+    /// other schedule is due when its latest fire is later than its last start. A Run now
+    /// marker runs the schedule's own due reason when it has one, else as `runNow`.
     static func due(
         schedules: [Schedule],
         state: TickState,
         runNowLabels: Set<String>,
         now: Date,
-        nonCatchUpAnchor: Date? = nil
+        nonCatchUpAnchor: Date? = nil,
+        wasOff: Bool = false,
+        summaryMissingToday: (Schedule) -> Bool = { _ in false }
     ) -> [DueRun] {
         let anchor = min(nonCatchUpAnchor ?? now, now)
         return schedules.compactMap { schedule -> DueRun? in
             guard let label = schedule.launchAgentLabel else { return nil }
-            if runNowLabels.contains(label) { return DueRun(schedule: schedule, reason: .runNow) }
-            guard schedule.enabled else { return nil }
+            // A disabled schedule's marker still runs.
+            let runNow = runNowLabels.contains(label) ? DueRun(schedule: schedule, reason: .runNow)
+                : nil
+            guard schedule.enabled else { return runNow }
             guard let entries = try? LaunchAgentWriter.calendarIntervals(for: schedule.schedule),
                   let fire = LaunchAgentService.lastScheduledFireDate(from: entries, before: now)
             else {
                 AppLogger.schedule.warning(
                     "tick: \(label, privacy: .public) has an unreadable cadence and was skipped")
-                return nil
+                return runNow
             }
-            let started = state.lastStarted[label] ?? .distantPast
-            if fire > started {
-                let catchesUp = schedule.mode.runsAtLoad
-                    || anchor.timeIntervalSince(fire) <= nonCatchUpWindow
-                return catchesUp ? DueRun(schedule: schedule, reason: .fire) : nil
+            let daily = schedule.mode.runsAtLoad && isDaily(entries)
+            if let reason = scheduledReason(
+                fire: fire, started: startStamp(state.lastStarted[label], now: now),
+                daily: daily, wasOff: wasOff, now: now),
+               schedule.mode.runsAtLoad || anchor.timeIntervalSince(fire) <= nonCatchUpWindow {
+                return DueRun(schedule: schedule, reason: reason)
             }
             let retry = retryIsDue(
-                mode: schedule.mode, label: label, fire: fire, state: state, now: now)
-            return retry ? DueRun(schedule: schedule, reason: .retry) : nil
+                mode: schedule.mode, label: label, daily: daily, state: state, now: now,
+                summaryMissing: { summaryMissingToday(schedule) })
+            return retry ? DueRun(schedule: schedule, reason: .retry) : runNow
         }
     }
 
-    /// Same-day retry of a run that started for `fire` but never succeeded:
-    /// collect modes only, at most `retryBackoffs.count` per fire, each one its
-    /// backoff after the previous start. Only reached once the fire has started.
+    /// `.fire` when the latest fire is unpaid, `.catchUp` when only the off gap makes a daily
+    /// schedule due, nil when neither.
+    private static func scheduledReason(
+        fire: Date, started: Date, daily: Bool, wasOff: Bool, now: Date
+    ) -> Reason? {
+        guard daily else { return fire > started ? .fire : nil }
+        let calendar = Calendar.current
+        let paid = started == .distantPast ? .distantPast : calendar.startOfDay(for: started)
+        guard paid < calendar.startOfDay(for: now) else { return nil }
+        if calendar.startOfDay(for: fire) > paid { return .fire }
+        return wasOff ? .catchUp : nil
+    }
+
+    /// One fire a day: no weekday or day-of-month in any entry.
+    private static func isDaily(_ entries: [[String: Int]]) -> Bool {
+        !entries.isEmpty && entries.allSatisfy { $0["Weekday"] == nil && $0["Day"] == nil }
+    }
+
+    /// The Mac was off or asleep since the previous wake that took the lock: the first wake
+    /// since `lastTick`, a turned-away one included, came more than `offGap` after it; two
+    /// turned-away wakes were that far apart (a run held the lock through a night's sleep); or
+    /// this wake came that long after the latest turned-away one (a lid closed during a run). A
+    /// stamp ahead of now reads as absent; no `lastTick` (a file from before it) is no gap
+    /// before the refusals.
+    static func wasOff(lastTick: Date?, refusals: TickLock.Refusals?, now: Date) -> Bool {
+        func present(_ stamp: Date?) -> Date? { stamp.flatMap { $0 <= now ? $0 : nil } }
+        if present(refusals?.afterGap) != nil { return true }
+        if let latest = present(refusals?.latest), now.timeIntervalSince(latest) > offGap {
+            return true
+        }
+        guard let lastTick = present(lastTick) else { return false }
+        return (present(refusals?.first) ?? now).timeIntervalSince(lastTick) > offGap
+    }
+
+    /// Where the non-catch-up window is measured from: the first refusal since the Mac was last
+    /// off, so a refusal from the evening before cannot let a morning backup run late. Nil (this
+    /// wake) when no wake was refused since the last gap.
+    static func nonCatchUpAnchor(refusals: TickLock.Refusals?, now: Date) -> Date? {
+        guard let refusals, now.timeIntervalSince(refusals.latest) <= offGap else { return nil }
+        return refusals.afterGap ?? refusals.first
+    }
+
+    /// `stamp`, or `.distantPast` for none or one beyond clock skew in the future (a clock set
+    /// ahead once): a future stamp would otherwise cover every fire until then.
+    private static func startStamp(_ stamp: Date?, now: Date) -> Date {
+        guard let stamp, stamp.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance
+        else { return .distantPast }
+        return stamp
+    }
+
+    /// Retry of a scheduled run that did not end its retries: collect modes only, each one its
+    /// backoff after the previous start (`retryBackoffs.count` of them), then hourly on the same
+    /// local day while `summaryMissing`, unless the last run failed in a way a retry repeats. A
+    /// daily schedule's retries never cross local midnight; the next day is its own.
     private static func retryIsDue(
-        mode: Schedule.RunMode, label: String, fire: Date, state: TickState, now: Date
+        mode: Schedule.RunMode, label: String, daily: Bool, state: TickState, now: Date,
+        summaryMissing: () -> Bool
     ) -> Bool {
         guard mode.runsAtLoad else { return false }
-        guard (state.lastSucceeded[label] ?? .distantPast) < fire else { return false }
+        // A success stamped beyond clock skew ahead (a clock set ahead once) is no success yet.
+        let succeeded = state.lastSucceeded[label].flatMap {
+            $0.timeIntervalSince(now) <= SharedWorkspace.clockSkewTolerance ? $0 : nil
+        } ?? .distantPast
+        let started = startStamp(state.lastStarted[label], now: now)
+        let sameDay = Calendar.current.isDate(started, inSameDayAs: now)
+        guard succeeded < started, sameDay || !daily else { return false }
         let retries = state.retryCount[label] ?? 0
-        guard retryBackoffs.indices.contains(retries) else { return false }
-        let started = state.lastStarted[label] ?? .distantPast
+        guard retryBackoffs.indices.contains(retries) else {
+            return sameDay
+                && now.timeIntervalSince(started) >= missingSummaryRetryInterval
+                && !state.retryWouldRepeat.contains(label)
+                && summaryMissing()
+        }
         return now.timeIntervalSince(started) >= retryBackoffs[retries]
     }
 }
@@ -193,13 +302,14 @@ final class TickLockHold: @unchecked Sendable {
     }
 
     /// Runs `body` while touching the lock every `interval`; beats stop after `limit`, which
-    /// releases the lock (see `heartbeat`). Stopped before returning.
+    /// releases the lock and calls `onGiveUp` (see `heartbeat`). Stopped before returning.
     func keepingAlive<T: Sendable>(
         every interval: Duration = TickLock.heartbeatInterval,
         limit: Duration = TickLock.heartbeatLimit,
+        onGiveUp: (@Sendable () -> Void)? = nil,
         _ body: () async -> T
     ) async -> T {
-        let beats = heartbeat(every: interval, limit: limit)
+        let beats = heartbeat(every: interval, limit: limit, onGiveUp: onGiveUp)
         let result = await body()
         beats.cancel()
         await beats.value
@@ -209,11 +319,14 @@ final class TickLockHold: @unchecked Sendable {
     /// `keepingAlive`'s beats, for a holder whose body runs on the main actor and so cannot
     /// be handed over: touches the lock every `interval` until cancelled. At `limit` it gives
     /// up the lock instead: no real run lasts that long, and a wedged live holder must not
-    /// silence the ticker for good. The limit counts awake time only (`SuspendingClock`): a
-    /// Mac that slept through the run must not give the lock up while the run goes on.
+    /// silence the ticker for good. `onGiveUp` runs right after the release, for a holder that is
+    /// its own process and must not outlive its lock (the tick exits). The limit counts awake
+    /// time only (`SuspendingClock`): a Mac that slept through the run must not give the lock up
+    /// while the run goes on.
     func heartbeat(
         every interval: Duration = TickLock.heartbeatInterval,
-        limit: Duration = TickLock.heartbeatLimit
+        limit: Duration = TickLock.heartbeatLimit,
+        onGiveUp: (@Sendable () -> Void)? = nil
     ) -> Task<Void, Never> {
         Task.detached(priority: .utility) { [self] in
             let clock = SuspendingClock()
@@ -224,6 +337,7 @@ final class TickLockHold: @unchecked Sendable {
                 guard clock.now < deadline else {
                     AppLogger.schedule.warning("tick lock given up: the run passed its time limit")
                     release()
+                    onGiveUp?()
                     return
                 }
                 touch()
@@ -459,21 +573,40 @@ struct TickLock: Sendable {
         return now.timeIntervalSince(modified) > Self.staleAfter
     }
 
-    /// Record that a wake was turned away, once — the FIRST refusal is the one
-    /// the non-catch-up window should be measured from, so an existing stamp is
-    /// never overwritten by a later blocked wake.
+    /// The wakes the lock turned away since the last wake that took it: the first, the latest,
+    /// and the first after a gap of more than `TickScheduler.offGap` between two of them.
+    typealias Refusals = (first: Date, latest: Date, afterGap: Date?)
+
+    /// Record that a wake was turned away. The stamp holds `Refusals` one per line (the third
+    /// only once a gap happened) and is rewritten whole, atomically; the FIRST refusal is never
+    /// overwritten.
     static func noteBlocked(url: URL = defaultBlockedURL, now: Date = Date()) {
-        guard !FileManager.default.fileExists(atPath: url.path) else { return }
-        let text = ISO8601DateFormatter().string(from: now)
-        try? Data(text.utf8).write(to: url, options: .atomic)
+        let formatter = ISO8601DateFormatter()
+        let stamp = formatter.string(from: now)
+        let lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            .split(whereSeparator: \.isNewline).map(String.init)
+        var afterGap = lines.count > 2 ? lines[2] : nil
+        if let latest = (lines.count > 1 ? lines[1] : lines.first).flatMap(formatter.date),
+           now.timeIntervalSince(latest) > TickScheduler.offGap {
+            afterGap = stamp
+        }
+        let text = ([lines.first ?? stamp, stamp] + [afterGap].compactMap { $0 })
+            .joined(separator: "\n")
+        try? Data("\(text)\n".utf8).write(to: url, options: .atomic)
     }
 
-    /// Read and clear the stamp; nil when no wake was blocked since the last
-    /// successful tick.
-    static func takeBlockedSince(url: URL = defaultBlockedURL) -> Date? {
+    /// Read and clear the stamp; nil when no wake was blocked since the last wake that took the
+    /// lock. A stamp from an earlier build (one or two lines) reads as no gap, its one line as
+    /// both the first and the latest.
+    static func takeBlockedSince(url: URL = defaultBlockedURL) -> Refusals? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         try? FileManager.default.removeItem(at: url)
-        return ISO8601DateFormatter()
-            .date(from: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let formatter = ISO8601DateFormatter()
+        let stamps = text.split(whereSeparator: \.isNewline).map {
+            formatter.date(from: $0.trimmingCharacters(in: .whitespaces))
+        }
+        guard let parsed = stamps.first, let first = parsed else { return nil }
+        let latest = stamps.count > 1 ? stamps[1] : nil
+        return (first, latest ?? first, stamps.count > 2 ? stamps[2] : nil)
     }
 }

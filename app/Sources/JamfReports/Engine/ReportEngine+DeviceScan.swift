@@ -133,7 +133,7 @@ extension ReportEngine {
     /// Returns the kinds it wrote. Never throws: the matrix's verdicts have
     /// already run, and a scan problem must not turn a good run red.
     static func runDeviceScanPhase(
-        profile: String, bin: URL, specNames: Bool, dataDir: URL, plan: DeviceScanPlan,
+        profile: String, bin: URL, dataDir: URL, plan: DeviceScanPlan,
         recordManifest: Bool,
         stateStore: StateFileStore?, collectStart: Date,
         authConfirmationProbe: @escaping AuthConfirmationProbe,
@@ -184,7 +184,7 @@ extension ReportEngine {
         ))
 
         let (results, stops) = await scanDevices(
-            targets, profile: profile, bin: bin, specNames: specNames,
+            targets, profile: profile, bin: bin,
             probe: authConfirmationProbe, limits: limits, onLine: onLine
         )
         return reduceAndSave(
@@ -217,7 +217,7 @@ extension ReportEngine {
     /// both — a credential that died mid-scan will not come back for device 400. Timed-out
     /// calls stop their call type after `limits.stopAfterTimeouts` in a row (exit -2).
     private static func scanDevices(
-        _ targets: [DeviceScanTarget], profile: String, bin: URL, specNames: Bool,
+        _ targets: [DeviceScanTarget], profile: String, bin: URL,
         probe: @escaping AuthConfirmationProbe, limits: DeviceCallLimits,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async -> (results: [DeviceResult], stops: [CallType: Int32]) {
@@ -247,7 +247,7 @@ extension ReportEngine {
                 group.addTask {
                     await scanOne(
                         target, profile: profile, bin: bin, bridge: bridge,
-                        gate: gate, specNames: specNames, limits: limits, onLine: onLine
+                        gate: gate, limits: limits, onLine: onLine
                     )
                 }
             }
@@ -256,18 +256,14 @@ extension ReportEngine {
         return (results, await gate.stops())
     }
 
-    /// The status-items argv. `specNames` picks jamf-cli 1.29's resource name;
-    /// the old one warns until 2027-03-09 and the new one exits 2 before 1.29.
-    static func statusItemsArguments(
-        profile: String, managementId: String, specNames: Bool
-    ) -> [String] {
-        let resource = specNames ? "declarative-device-management" : "ddm-status"
-        return ["-p", profile, "pro", resource, "status-items", managementId, "--output", "json"]
+    static func statusItemsArguments(profile: String, managementId: String) -> [String] {
+        ["-p", profile, "pro", "declarative-device-management", "status-items", managementId,
+         "--output", "json"]
     }
 
     private static func scanOne(
         _ t: DeviceScanTarget, profile: String, bin: URL, bridge: CLIBridge, gate: StopGate,
-        specNames: Bool, limits: DeviceCallLimits,
+        limits: DeviceCallLimits,
         onLine: @Sendable @escaping (CLIBridge.LogLine) -> Void
     ) async -> DeviceResult {
         var history: CallOutcome = .notMade
@@ -285,9 +281,7 @@ extension ReportEngine {
                 if await gate.allows(.statusItems) {
                     status = await call(
                         .statusItems,
-                        statusItemsArguments(
-                            profile: profile, managementId: mgmt, specNames: specNames
-                        ),
+                        statusItemsArguments(profile: profile, managementId: mgmt),
                         bridge: bridge, bin: bin, gate: gate, timeout: limits.timeout,
                         onLine: onLine
                     )

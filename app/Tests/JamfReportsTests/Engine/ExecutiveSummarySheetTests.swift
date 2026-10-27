@@ -76,7 +76,7 @@ final class ExecutiveSummarySheetTests: XCTestCase {
         XCTAssertTrue(labels.contains("Metric"))
         XCTAssertTrue(labels.contains("Value"))
         XCTAssertTrue(labels.contains("Security Score"))
-        XCTAssertTrue(labels.contains("Total Devices"))
+        XCTAssertTrue(labels.contains("Total Computers"))
         XCTAssertTrue(labels.contains("Managed Devices"))
         XCTAssertTrue(labels.contains("Patch Fleet Compliance"))
         XCTAssertTrue(labels.contains("FileVault Coverage"))
@@ -132,7 +132,7 @@ final class ExecutiveSummarySheetTests: XCTestCase {
                       "nil metrics must render '—' placeholder")
         // All 13 metric labels still present
         XCTAssertTrue(values.contains("Security Score"))
-        XCTAssertTrue(values.contains("Total Devices"))
+        XCTAssertTrue(values.contains("Total Computers"))
         // No crash — cell count > header row alone
         XCTAssertGreaterThan(ws.cells.count, 4)
     }

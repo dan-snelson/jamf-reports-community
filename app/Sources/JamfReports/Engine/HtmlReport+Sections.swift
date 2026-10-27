@@ -74,7 +74,7 @@ extension HtmlReport {
         }
     }
 
-    private static func ageRank(_ daysAgo: Int) -> Int { daysAgo < 0 ? Int.max : daysAgo }
+    private static func ageRank(_ daysAgo: Int?) -> Int { daysAgo ?? Int.max }
 
     /// Device-level patch and update failures, newest first: ten shown, the rest behind
     /// "Show all". A row with no readable date is not the newest; it sorts last.
@@ -87,7 +87,7 @@ extension HtmlReport {
             let serial: String
             let title: String
             let source: String
-            let daysAgo: Int
+            let daysAgo: Int?
         }
 
         var rows: [FailureRow] = []
@@ -118,7 +118,7 @@ extension HtmlReport {
 
         let tableRows = rows.sorted { Self.ageRank($0.daysAgo) < Self.ageRank($1.daysAgo) }
             .map { row -> [String] in
-                let daysLabel = row.daysAgo >= 0 ? "\(row.daysAgo)d ago" : "—"
+                let daysLabel = row.daysAgo.map { "\($0)d ago" } ?? "—"
                 return [row.device, row.serial, row.title, row.source, daysLabel]
             }
 
@@ -264,7 +264,7 @@ extension HtmlReport {
         return .shown(f.block(
             id: "intervention-list", title: title,
             body: interventionNote(macs, rule: rule) + f.renderCappedTable(
-                headers: ["Device", "Serial", "Primary User", "Days Since \(rule.basisHeading)",
+                headers: ["Computer", "Serial", "Primary User", "Days Since \(rule.basisHeading)",
                           "Last Contact", "Reason"],
                 rows: tableRows, maxRows: f.maxInterventionRows, expanded: expandAll)))
     }
@@ -291,17 +291,19 @@ extension HtmlReport {
 
     // MARK: - patchQueue
 
-    /// A patch title's share of devices on its latest version: the row's own
-    /// `compliance_pct` ("83%") when it reads, else `on_latest` over `total`. Nil when
-    /// neither does, so a title with no devices is not a 0%.
+    /// A patch title's share of devices on its latest version: `on_latest` over `total`, since a
+    /// row's rounded `compliance_pct` ("50%") can sit on the wrong side of a threshold; that
+    /// text is the fallback when the counts do not read. Nil when neither does, and for a
+    /// title with no devices, so it is not a 0%.
     func patchTitlePct(_ item: [String: Any]) -> Double? {
-        if let text = item["compliance_pct"] as? String,
-           let value = Double(text.trimmingCharacters(in: CharacterSet(charactersIn: "% "))) {
-            return value
+        if let total = asInt(item["total"]) {
+            guard total > 0 else { return nil }
+            if let onLatest = asInt(item["on_latest"]) {
+                return Double(onLatest) / Double(total) * 100
+            }
         }
-        guard let total = asInt(item["total"]), total > 0,
-              let onLatest = asInt(item["on_latest"]) else { return nil }
-        return Double(onLatest) / Double(total) * 100
+        guard let text = item["compliance_pct"] as? String else { return nil }
+        return Double(text.trimmingCharacters(in: CharacterSet(charactersIn: "% ")))
     }
 
     /// Patch titles with devices on another version, largest gap first.
@@ -580,7 +582,7 @@ extension HtmlReport {
             <div class="audit-severity-group">
               <h4>\(f.renderSeverityPill(sev)) (\(sevAlerts.count))</h4>
               \(f.renderCappedRows(
-                  headers: ["Device", "Alert", "Date"], rowHTML: Array(alertRows),
+                  headers: ["Computer", "Alert", "Date"], rowHTML: Array(alertRows),
                   expanded: expandAll))
             </div>
             """)
@@ -731,7 +733,7 @@ extension HtmlReport {
             note += " A row marked name only carries no serial or ID; it is listed as reported."
         }
         return "<p class=\"block-note\">\(f.escapeHTML(note))</p>\n" + f.renderCappedTable(
-            headers: ["Device", "Serial", "Agent", "Value seen"], rows: rows,
+            headers: ["Computer", "Serial", "Agent", "Value seen"], rows: rows,
             maxRows: f.maxAgentGapRows, expanded: expandAll)
     }
 

@@ -49,12 +49,15 @@ enum ConfigSchema {
         "ai.external": "2.9",
         "ai.lock_on_device": "2.7.0",
         "branding.accent_dark": "2.9",
+        "charts.archive_current_csv": "2.11",
         "charts.compliance_trend.bands": "2.10",
         "charts.os_adoption.enabled": "2.9",
         "collect_cadence": "2.3.0",
-        "columns.warranty_expires": "2.6.1",
+        "columns": "2.11",
+        "exceptions.control_id": "2.11",
         "jamf_cli.allow_live_overview": "2.9",
         "jamf_cli.enabled": "2.9",
+        "mobile_columns": "2.11",
         "security_policy.score_weights": "2.9",
         "output.export_pptx": "2.4.0",
         "platform.enabled": "2.9",
@@ -66,10 +69,6 @@ enum ConfigSchema {
     /// Names people write instead of a real key, copied from CLAUDE.md's "Actual key names"
     /// table and keyed by the schema path of their mapping. Consulted before edit distance.
     static let misnames: [[String]: [String: String]] = [
-        ["columns"]: [
-            "os_version": "operating_system", "last_contact": "last_checkin",
-            "assigned_user_email": "email",
-        ],
         ["jamf_cli"]: ["jamf_profile": "profile"],
         ["security_agents"]: ["installed_value": "connected_value"],
         ["compliance"]: [
@@ -83,7 +82,7 @@ enum ConfigSchema {
         ],
         ["thresholds"]: ["inactive_device_days": "stale_device_days"],
         ["output"]: ["directory": "output_dir", "max_runs": "keep_latest_runs"],
-        ["charts"]: ["snapshot_dir": "historical_csv_dir", "auto_archive": "archive_current_csv"],
+        ["charts"]: ["snapshot_dir": "historical_csv_dir"],
     ]
 
     private static let displayCharacterCap = 60
@@ -213,8 +212,6 @@ enum ConfigSchema {
     }
 
     private static let tree = Node(ReportConfig.CodingKeys.self, [
-        "columns": Node(ColumnConfig.CodingKeys.self),
-        "mobile_columns": Node(MobileColumnConfig.CodingKeys.self),
         "security_agents": Node(SecurityAgentConfig.CodingKeys.self, list: true),
         "jamf_cli": Node(JamfCLIConfig.CodingKeys.self),
         "compliance": Node(ComplianceConfig.CodingKeys.self, [

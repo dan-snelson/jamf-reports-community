@@ -4,7 +4,7 @@ import Foundation
 //
 // The "Mobile devices" section (#275): counts by form factor, management and supervision,
 // passcode, Activation Lock and jailbreak status, and OS versions, read through `MobileFleetService` so the
-// numbers follow the same rules as the Mobile Fleet screen and the workbook's mobile
+// numbers follow the same rules as the Mobile Devices screen and the workbook's mobile
 // sheets. No per-device table: an HTML report is forwarded, and the workbook has the rows.
 
 extension HtmlReport {

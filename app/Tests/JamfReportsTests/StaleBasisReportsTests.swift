@@ -144,8 +144,8 @@ final class StaleBasisReportsTests: XCTestCase {
                 GoldenFleetWorkspace.patchRow(id: "1", title: "Chrome", onLatest: 8, total: 10),
             ])
         try dash.writePatchSummaryDashboard()
-        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Inactive Devices")[1], "2")
-        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Active Devices")[1], "2")
+        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Inactive Computers")[1], "2")
+        XCTAssertEqual(try row(dash, "Patch Summary Dashboard", "Active Computers")[1], "2")
     }
 
     func testTheExecutiveSummaryTiersBucketByStaleAge() throws {
@@ -189,78 +189,6 @@ final class StaleBasisReportsTests: XCTestCase {
                        "no snapshot: the basis falls back to the check-in")
         XCTAssertEqual(try subtitle(dash, "Check-in Health", prefix: "Threshold")?
             .hasPrefix("Threshold: 7 days since check-in or inventory update |"), true)
-    }
-
-    // MARK: - CSV sheets
-
-    private func staleSheet(_ yaml: String, rows: [String]) throws -> Worksheet {
-        var config = try ConfigLoader.loadFromString(yaml)
-        var columns = config.columns ?? ColumnConfig()
-        columns.computerName = "Computer Name"
-        columns.serialNumber = "Serial Number"
-        columns.lastCheckin = "Last Check-in"
-        config.columns = columns
-        let csv = (["Computer Name,Serial Number,Last Check-in,Last Inventory Update"] + rows)
-            .joined(separator: "\n") + "\n"
-        let book = Workbook()
-        let dashboard = try XCTUnwrap(
-            CSVDashboard(config: config, csvData: Data(csv.utf8), workbook: book))
-        dashboard.writeStaleDevices()
-        return try XCTUnwrap(book.sheet(named: "Stale Devices"))
-    }
-
-    private func stamp(_ days: Double) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter.string(from: Date().addingTimeInterval(-days * 86_400 - 3_600))
-    }
-
-    private func staleNames(_ sheet: Worksheet) -> [String] {
-        sheet.cells.filter { $0.col == 0 && $0.row >= 4 }.sorted { $0.row < $1.row }
-            .compactMap { cell -> String? in
-                if case .string(let s) = cell.value { return s }
-                return nil
-            }.filter { $0.hasPrefix("Mac-") }
-    }
-
-    private let mappedInventory = "thresholds:\n  stale_basis: [check_in, inventory]\n"
-        + "columns:\n  last_inventory: Last Inventory Update\n"
-
-    func testACSVRowIsStaleByItsInventoryDateWhenTheColumnIsMapped() throws {
-        let rows = ["Mac-A,A1,\(stamp(2)),\(stamp(2))", "Mac-B,B1,\(stamp(2)),\(stamp(50))"]
-        XCTAssertEqual(staleNames(try staleSheet(mappedInventory, rows: rows)), ["Mac-B"])
-        XCTAssertEqual(staleNames(try staleSheet("", rows: rows)), [],
-                       "the default basis ignores inventory")
-    }
-
-    func testInventoryDoesNotApplyToACSVWithoutTheMappedColumn() throws {
-        let rows = ["Mac-A,A1,\(stamp(2)),\(stamp(2))", "Mac-B,B1,\(stamp(2)),\(stamp(50))"]
-        XCTAssertEqual(staleNames(try staleSheet(both, rows: rows)), [],
-                       "columns.last_inventory is unmapped: the rule counts the check-in alone")
-    }
-
-    func testABlankInventoryCellInAMappedColumnIsNever() throws {
-        let rows = ["Mac-A,A1,\(stamp(2)),", "Mac-B,B1,\(stamp(2)),\(stamp(2))"]
-        XCTAssertEqual(staleNames(try staleSheet(mappedInventory, rows: rows)), ["Mac-A"])
-    }
-
-    func testTheStaleDevicesSheetNamesTheBasisInItsAgeColumn() throws {
-        let rows = ["Mac-B,B1,\(stamp(2)),\(stamp(50))", "Mac-C,C1,\(stamp(2)),"]
-        let sheet = try staleSheet(mappedInventory, rows: rows)
-        let strings = sheet.cells.compactMap { cell -> String? in
-            if case .string(let s) = cell.value { return s }
-            return nil
-        }
-        XCTAssertTrue(strings.contains("Days Since Check-in or Inventory Update"))
-        let ages = sheet.cells.filter { $0.col == 4 && $0.row >= 4 }.sorted { $0.row < $1.row }
-            .map { text($0.value) }
-        XCTAssertEqual(ages, ["never", "50"], "never inventoried first, then 50 days")
-        let plain = try staleSheet("", rows: ["Mac-D,D1,\(stamp(45)),"])
-        XCTAssertTrue(plain.cells.contains {
-            if case .string("Days Since Check-in") = $0.value { return true }
-            return false
-        })
     }
 
     // MARK: - HTML report

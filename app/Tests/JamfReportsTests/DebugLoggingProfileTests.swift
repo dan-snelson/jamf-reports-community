@@ -19,11 +19,19 @@ final class DebugLoggingProfileTests: XCTestCase {
                         "profile must target our OSLog subsystem")
     }
 
+    /// os_log(5): `Enable` and `Persist` sit in a `Level` dictionary under `DEFAULT-OPTIONS`.
     func test_profilePersistsVerbose() throws {
         let data = try Data(contentsOf: try profileURL())
-        let text = String(decoding: data, as: UTF8.self)
-        XCTAssertTrue(text.contains("Persist"), "profile must enable persistence")
-        XCTAssertTrue(text.contains("Debug"), "profile must persist at debug level")
+        let root = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        let payload = try XCTUnwrap((root["PayloadContent"] as? [[String: Any]])?.first)
+        let options = try XCTUnwrap(((payload["Subsystems"] as? [String: Any])?[
+            "com.github.tonyyo11.jamf-reports-community"] as? [String: Any])?["DEFAULT-OPTIONS"]
+            as? [String: Any])
+        let level = try XCTUnwrap(options["Level"] as? [String: String])
+        XCTAssertEqual(level["Enable"], "Debug")
+        XCTAssertEqual(level["Persist"], "Debug")
+        XCTAssertNil(options["Enable-Level"], "not an os_log key")
     }
 
     func test_profileDoesNotRevealPrivateData() throws {

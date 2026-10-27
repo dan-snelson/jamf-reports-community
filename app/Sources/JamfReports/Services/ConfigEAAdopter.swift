@@ -18,8 +18,8 @@ enum ConfigEAAdopter {
     ///   as typed or did not keep.
     @discardableResult
     static func adopt(
-        eaProposals: [ScaffoldService.ProposedEA],
-        agentProposals: [ScaffoldService.ProposedEA],
+        eaProposals: [ProposedEA],
+        agentProposals: [ProposedEA],
         connectedValues: [String: String] = [:],
         profile: String,
         workspaceRoot: URL? = nil
@@ -69,7 +69,7 @@ enum ConfigEAAdopter {
     /// For boolean EAs the sample value becomes a sensible default `true_value`.
     /// Threshold/version/date fields default empty — the user tunes them later
     /// in the Config screen.
-    static func customEA(from proposal: ScaffoldService.ProposedEA) -> ConfigCustomEA {
+    static func customEA(from proposal: ProposedEA) -> ConfigCustomEA {
         ConfigCustomEA(
             name: proposal.name,
             column: proposal.column,

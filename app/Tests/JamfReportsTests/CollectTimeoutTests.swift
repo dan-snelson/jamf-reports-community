@@ -33,6 +33,7 @@ final class CollectTimeoutTests: XCTestCase {
         let stub = root.appendingPathComponent("bin/stub-cli")
         let script = """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         case "$*" in
           *patch-status*) exec sleep 30 ;;
         esac
@@ -85,6 +86,7 @@ final class CollectTimeoutTests: XCTestCase {
         let stub = root.appendingPathComponent("bin/stub-cli")
         try """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         case "$*" in
           *" auth token "*) exec sleep 30 ;;
         esac
@@ -124,6 +126,7 @@ final class CollectTimeoutTests: XCTestCase {
         let stub = root.appendingPathComponent("bin/stub-cli")
         try """
         #!/bin/sh
+        [ "$1 $2" = "config list" ] && { printf '%s' '[{"name":"\(profile)"}]'; exit 0; }
         case "$*" in
           *patch-software-title-configurations*) echo x >> '\(calls.path)'; exec sleep 30 ;;
           *--scan-failures*) printf '[]'; exit 0 ;;

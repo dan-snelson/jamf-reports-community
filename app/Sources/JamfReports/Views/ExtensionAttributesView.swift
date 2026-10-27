@@ -13,6 +13,7 @@ struct ExtensionAttributesView: View {
     @State private var selectedEA: String?
     @State private var sortOrder: SortOrder = .devices
     @State private var coverageDrift: [EAParseHealthService.CoverageDrift] = []
+    @State private var showingAdopt = false
 
     /// Only EAs whose fleet coverage dropped sharply since the previous collect.
     private static let driftAlertThresholdPP: Double = -15
@@ -43,7 +44,18 @@ struct ExtensionAttributesView: View {
                 // The demo dataset is fixed; an age measured from today would grow
                 // for as long as the demo stays open.
                 lastModified: workspace.demoMode ? nil : snapshot.snapshotDate
-            )
+            ) {
+                AnyView(
+                    PNPButton(
+                        title: "Adopt EAs…", icon: "plus.circle", style: .ghost, size: .sm
+                    ) { showingAdopt = true }
+                    // Demo mode never writes a workspace.
+                    .disabled(workspace.demoMode)
+                    .help(workspace.demoMode
+                          ? DemoData.liveOnlyHelp
+                          : "Pick collected Extension Attributes to track in config.yaml.")
+                )
+            }
             if !workspace.demoMode {
                 CollectNowBanner(source: snapshot.cacheSource, tiers: [.inventory])
                 // Per-kind file dates are the honest per-screen signal here;
@@ -66,6 +78,9 @@ struct ExtensionAttributesView: View {
             }
         }
         .tint(Theme.Colors.goldBright)
+        .sheet(isPresented: $showingAdopt) {
+            CSVEAWalkthroughSheet(profile: workspace.profile)
+        }
         .onAppear(perform: loadIfNeeded)
         .onChange(of: dataSource) { _, _ in
             // The picked attribute belongs to the old source; reload picks the new default.
@@ -248,7 +263,10 @@ struct ExtensionAttributesView: View {
             EmptyStateView(
                 systemImage: "slider.horizontal.below.rectangle",
                 title: "No Extension Attribute data yet",
-                message: "Collect data for this screen — use the Collect now banner when shown, or run `jamf-cli pro report ea-results --all` — and it will populate."
+                message: "Collect data for this screen with the Collect now banner when it shows, "
+                    + "or run this command.",
+                commands: [EmptyStateView.collectCommand(
+                    profile: workspace.profile, kinds: ["ea-results", "computer-extension-attributes"])]
             )
         }
     }
@@ -267,7 +285,7 @@ struct ExtensionAttributesView: View {
                 sub: "In the latest results"
             )
             StatTile(
-                label: "Total Devices",
+                label: "Total Computers",
                 value: "\(snapshot.totalDevices)",
                 sub: "With EA result data"
             )

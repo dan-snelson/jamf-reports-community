@@ -140,7 +140,7 @@ struct OverviewView: View {
                     workspaceInitBanner
                 }
                 if !workspace.demoMode, let cl = checklist, !cl.isComplete {
-                    gettingStartedCard(cl)
+                    GettingStartedCard(checklist: cl, onAction: performStepAction)
                 }
                 // PR-13: shared StaleDataBanner surfaces freshness above
                 // the KPI grid. Suppressed in demo mode (canonical demo
@@ -335,6 +335,7 @@ struct OverviewView: View {
         } ?? "never"
         // Name the cause when the run recorded an exit code, so the banner
         // says WHY (401 / 403 / 429 / network) rather than just "failed".
+        if let reason = firstFailing.reason { return "\(name) can't run\(more). \(reason)" }
         if let code = firstFailing.lastRunExitCode {
             return "\(name) failed \(last)\(more). "
                 + CLIBridge.explainExit(code, operation: "Last run")
@@ -359,7 +360,7 @@ struct OverviewView: View {
             TrendStore.computeSnapshot(profile: profile)
         }.value
         trendStore.apply(snapshot, profile: profile, range: range, generation: generation)
-        await trendStore.backfillAgentCoverage(profile: profile)
+        await trendStore.backfillHistory(profile: profile)
     }
 
     /// First-load overlay: shown only while the initial scan runs with no cached
@@ -437,7 +438,7 @@ struct OverviewView: View {
     /// again, and this banner is where they land instead.
     private func chooseExistingRoot() {
         guard let url = WorkspaceFolderPicker.choose() else { return }
-        if CloudStorage.provider(for: url) != nil {
+        if CloudStorage.isSharedStorage(url) {
             pendingSharedRoot = url
         } else {
             adoptExistingRoot(url)
@@ -664,7 +665,7 @@ struct OverviewView: View {
                 exit = try await CLIBridge.holdingGenerate {
                     let narrative = await makeNarrative()
                     return try await bridge.generate(
-                        profile: profile, csvPath: nil, aiNarrative: narrative
+                        profile: profile, aiNarrative: narrative
                     ) { [weak workspace] line in
                         Task { @MainActor in
                             guard let workspace, self.isRunning else { return }
@@ -677,7 +678,7 @@ struct OverviewView: View {
                 }
             } else {
                 exit = try await bridge.collectThenGenerate(
-                    profile: profile, csvPath: nil, narrative: makeNarrative
+                    profile: profile, narrative: makeNarrative
                 ) { [weak workspace] line in
                     Task { @MainActor in
                         guard let workspace, self.isRunning else { return }
@@ -1635,11 +1636,12 @@ struct OverviewView: View {
                     }
                     Divider().background(Theme.Colors.hairline)
                     HStack {
-                        Text("Use Devices to inspect individual records and filter by OS version.")
+                        Text("Use Computers to inspect individual records and filter by OS "
+                             + "version.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                         Spacer()
-                        PNPButton(title: "Open Devices", icon: Tab.devices.sfSymbol, size: .sm) {
+                        PNPButton(title: "Open Computers", icon: Tab.devices.sfSymbol, size: .sm) {
                             navigate(to: .devices)
                         }
                     }
@@ -1721,11 +1723,11 @@ struct OverviewView: View {
                     )
                     Divider().background(Theme.Colors.hairline)
                     HStack {
-                        Text("Open Devices for host-level status, or Config to adjust tracked agent columns.")
+                        Text("Open Computers for host-level status, or Config to adjust tracked agent columns.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                         Spacer()
-                        PNPButton(title: "Devices", icon: Tab.devices.sfSymbol, size: .sm) {
+                        PNPButton(title: "Computers", icon: Tab.devices.sfSymbol, size: .sm) {
                             navigate(to: .devices)
                         }
                         PNPButton(title: "Config", icon: Tab.config.sfSymbol, size: .sm) {
@@ -1750,7 +1752,7 @@ struct OverviewView: View {
             }
             HStack {
                 Spacer()
-                PNPButton(title: "Open Full Device Inventory", icon: Tab.devices.sfSymbol) {
+                PNPButton(title: "Open Full Computer Inventory", icon: Tab.devices.sfSymbol) {
                     navigate(to: .devices)
                 }
             }
@@ -1800,27 +1802,30 @@ struct OverviewView: View {
             "Excludes devices stale beyond \(workspace.configState.staleRule.days)d"
             + (workspace.configState.staleRule.usesDefaultBasis
                 ? "" : " (\(workspace.configState.staleRule.basisPhrase))")
-            + ". Open Devices to inspect records contributing to this count."
+            + ". Open Computers to inspect records contributing to this count."
         case .compliance:
             latest?.complianceIsProxy == true
                 ? "Control-gap proxy (FileVault/SIP/Firewall/Gatekeeper). Configure a Compliance EA for true mSCP banding."
                 : "Open Health Audit for controls, findings, and recommendations."
         case .fileVault:
-            "Open Devices to inspect FileVault state on individual Macs."
+            "Open Computers to inspect FileVault state on individual Macs."
         case .osCurrent:
-            "Open Devices to inspect macOS versions and filter inventory."
+            "Open Computers to inspect macOS versions and filter inventory."
         case .edrAgent, .agent:
-            "Open Devices or Config to review security-agent tracking."
+            "Open Computers or Config to review security-agent tracking."
         case .stale:
-            "Open Devices to focus on stale inventory records."
+            "Open Computers to focus on stale inventory records."
         case .patch:
-            "Open Devices to review devices with patch failures."
+            "Open Computers to review computers with patch failures."
         case .securityScore:
             "Weighted composite from Security Posture. Open that tab to see the breakdown."
         case .mscpBandTrend:
             "Per-baseline mSCP compliance band trends over time. Open Compliance Posture for current distribution."
         case .managedDevices:
-            "Historical computers-vs-mobile split. Open Devices or Mobile Fleet to inspect current records."
+            "Historical Mac count. Open Computers to inspect current records."
+        case .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+             .mobileDataProtection, .mobileStale, .mobileJailbroken:
+            "Open Mobile Devices to inspect current records."
         case .sip, .firewall, .gatekeeper:
             "Open Security Posture for the per-control breakdown."
         }
@@ -1840,7 +1845,10 @@ struct OverviewView: View {
         case .edrAgent, .agent:
             return [.devices, .config]
         case .managedDevices:
-            return [.devices, .mobileFleet]
+            return [.devices]
+        case .mobileManaged, .mobileOSCurrent, .mobilePasscode, .mobileSupervised,
+             .mobileDataProtection, .mobileStale, .mobileJailbroken:
+            return [.mobileFleet]
         case .sip, .firewall, .gatekeeper:
             return [.securityPosture, .devices]
         }
@@ -1919,7 +1927,7 @@ struct OverviewView: View {
         let customized = await Task.detached(priority: .utility) {
             (try? ConfigService.load(profile: profile))
                 .map { loaded in
-                    loaded.state.columns.values.contains { !$0.isEmpty }
+                    !loaded.state.customEAs.isEmpty || !loaded.state.securityAgents.isEmpty
                 } ?? false
         }.value
 
@@ -1933,59 +1941,6 @@ struct OverviewView: View {
             customized: customized,
             scheduled: scheduled,
             reported: reported
-        )
-    }
-
-    /// Card rendered above StaleDataBanner for new users.
-    /// Auto-hides once all steps are done — no stored dismiss flag.
-    @ViewBuilder
-    private func gettingStartedCard(_ cl: GettingStartedChecklist) -> some View {
-        Card(padding: 16) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Kicker(
-                        text: "Getting started — \(cl.completedCount) of \(cl.steps.count)",
-                        tone: cl.completedCount > 0 ? .teal : .muted
-                    )
-                    Spacer(minLength: 8)
-                }
-                ForEach(cl.steps) { step in
-                    gettingStartedRow(step, isActive: cl.firstIncomplete?.id == step.id)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func gettingStartedRow(_ step: GettingStartedStep, isActive: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: step.done ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(step.done ? Theme.Colors.ok : Theme.Text.tertiary(contrast))
-                    .accessibilityHidden(true)
-                Text(step.title)
-                    .font(.callout.weight(isActive ? .semibold : .regular))
-                    .foregroundStyle(step.done ? Theme.Text.tertiary(contrast) : Theme.Colors.fg)
-                    .strikethrough(step.done, color: Theme.Text.tertiary(contrast))
-            }
-            if !step.done {
-                Text(step.detail)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                    .padding(.leading, 24)
-            }
-            if isActive {
-                PNPButton(title: step.actionLabel, style: .gold, size: .sm) {
-                    performStepAction(step)
-                }
-                .padding(.leading, 24)
-                .padding(.top, 2)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(step.title): \(step.done ? "complete" : "incomplete"). \(step.done ? "" : step.detail)"
         )
     }
 

@@ -89,6 +89,19 @@ final class WorkspaceRootStoreTests: XCTestCase {
         XCTAssertEqual(root.path, other.path)
     }
 
+    /// A profile's root is the organization's choice; a shell variable cannot override it.
+    func testManagedRootBeatsTheEnvironmentVariable() throws {
+        let forced = try XCTUnwrap(ForcedDefaults(
+            suiteName: suiteName, forced: [WorkspaceRootStore.defaultsKey]))
+        forced.set(scratch.path, forKey: WorkspaceRootStore.defaultsKey)
+        let other = scratch.appendingPathComponent("elsewhere")
+        let root = WorkspaceRootStore.current(
+            defaults: forced,
+            environment: [WorkspaceRootStore.environmentKey: other.path]
+        )
+        XCTAssertEqual(root.resolvingSymlinksInPath().path, scratch.resolvingSymlinksInPath().path)
+    }
+
     func testEmptyEnvironmentValueIsIgnored() throws {
         try WorkspaceRootStore.set(scratch, defaults: defaults)
         let root = WorkspaceRootStore.current(
@@ -106,6 +119,21 @@ final class WorkspaceRootStoreTests: XCTestCase {
             WorkspaceRootStore.defaultRoot.path
         )
         XCTAssertFalse(WorkspaceRootStore.isCustomised(defaults: defaults))
+    }
+
+    /// A root a configuration profile sets cannot be changed or cleared, and nothing is written
+    /// or created: the call says so instead of reporting a change macOS would ignore.
+    func testManagedRootRefusesSetAndUseDefault() throws {
+        let forced = try XCTUnwrap(ForcedDefaults(
+            suiteName: suiteName, forced: [WorkspaceRootStore.defaultsKey]))
+        let fresh = scratch.appendingPathComponent("never-created", isDirectory: true)
+        for url in [fresh, nil] {
+            XCTAssertThrowsError(try WorkspaceRootStore.set(url, defaults: forced)) {
+                XCTAssertTrue($0.localizedDescription.contains("configuration profile"))
+            }
+        }
+        XCTAssertNil(defaults.string(forKey: WorkspaceRootStore.defaultsKey))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fresh.path))
     }
 
     /// A share that has unmounted must NOT silently fall back to `~/Jamf-Reports`:
@@ -342,4 +370,16 @@ final class WorkspaceRootStoreTests: XCTestCase {
         try WorkspaceRootStore.set(scratch, defaults: defaults)
         XCTAssertTrue(WorkspaceRootStore.isCustomised(defaults: defaults))
     }
+}
+
+/// Stands in for a configuration profile: `objectIsForced` is all `ManagedPreference` reads.
+final class ForcedDefaults: UserDefaults {
+    private let forced: Set<String>
+
+    init?(suiteName: String, forced: Set<String>) {
+        self.forced = forced
+        super.init(suiteName: suiteName)
+    }
+
+    override func objectIsForced(forKey key: String) -> Bool { forced.contains(key) }
 }

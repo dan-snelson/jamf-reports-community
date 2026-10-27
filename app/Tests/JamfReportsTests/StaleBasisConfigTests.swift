@@ -136,37 +136,13 @@ final class StaleBasisConfigTests: XCTestCase {
         XCTAssertEqual(try doctorRows("thresholds:\n  stale_device_days: 30\n"), [])
     }
 
-    func testDoctorSaysInventoryHasNoDateOnACSVWithoutTheColumn() throws {
-        let withInventory = try config("thresholds:\n  stale_basis: [check_in, inventory]\n")
-        let rows = ConfigDoctorService.csvInventoryColumnRows(
-            config: withInventory, csvHeaders: ["Computer Name"], csvFamily: .computers)
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows.first?.severity, .warn)
-        XCTAssertTrue(rows.first?.detail.contains("columns.last_inventory is not mapped") == true)
-
-        let mapped = try config(
-            "thresholds:\n  stale_basis: [inventory]\n"
-                + "columns:\n  last_inventory: Last Inventory Update\n")
-        XCTAssertTrue(ConfigDoctorService.csvInventoryColumnRows(
-            config: mapped, csvHeaders: ["x"], csvFamily: .computers).isEmpty)
-        XCTAssertTrue(ConfigDoctorService.csvInventoryColumnRows(
-            config: withInventory, csvHeaders: nil, csvFamily: nil).isEmpty, "no CSV, no row")
-        XCTAssertTrue(ConfigDoctorService.csvInventoryColumnRows(
-            config: withInventory, csvHeaders: ["x"], csvFamily: .mobile).isEmpty)
-        XCTAssertTrue(ConfigDoctorService.csvInventoryColumnRows(
-            config: try config("thresholds:\n  stale_device_days: 30\n"),
-            csvHeaders: ["x"], csvFamily: .computers).isEmpty, "the default basis needs none")
-    }
-
-    // MARK: - Schema and columns
+    // MARK: - Schema and retired columns
 
     func testTheNewKeysAreKnownToTheSchema() throws {
         let keys = try ConfigSchema.unknownKeys(in: ConfigLoader.rawMapping(fromYAML: """
         thresholds:
           stale_basis: [check_in, inventory]
           contact_gap_days: 14
-        columns:
-          last_inventory: Last Inventory Update
         """))
         XCTAssertEqual(keys, [])
         let typo = try ConfigSchema.unknownKeys(in: ConfigLoader.rawMapping(
@@ -175,12 +151,22 @@ final class StaleBasisConfigTests: XCTestCase {
                                          suggestion: "stale_basis")])
     }
 
-    func testLastInventoryIsAColumnField() throws {
-        let columns = try XCTUnwrap(try config(
-            "columns:\n  last_inventory: Last Inventory Update\n").columns)
-        XCTAssertEqual(columns.columnName(for: .lastInventory), "Last Inventory Update")
-        XCTAssertEqual(ColumnField.lastInventory.configKey, "last_inventory")
-        XCTAssertNil(ColumnConfig().columnName(for: .lastInventory))
+    /// 2.11 retired `columns`, `mobile_columns` and `charts.archive_current_csv`: a file that
+    /// still holds them decodes, and the rest of it reads as before.
+    func testAConfigStillHoldingRetiredColumnKeysDecodes() throws {
+        let decoded = try config("""
+        columns:
+          last_inventory: Last Inventory Update
+        mobile_columns:
+          device_name: Name
+        charts:
+          archive_current_csv: true
+          save_png: false
+        thresholds:
+          stale_device_days: 21
+        """)
+        XCTAssertEqual(decoded.thresholds?.staleDeviceDays, 21)
+        XCTAssertEqual(decoded.charts?.savePng, false)
     }
 
     // MARK: - The Config screen's save
@@ -281,21 +267,8 @@ final class StaleBasisConfigTests: XCTestCase {
         XCTAssertTrue(text.contains("contact_gap_days: 14"), "an explicit default is not dropped")
     }
 
-    func testLastInventoryIsAnOptionalColumnWrittenOnlyWhenSet() throws {
-        XCTAssertTrue(ConfigState.optionalColumnKeys.contains("last_inventory"))
-        XCTAssertEqual(ConfigState.defaultState.columns["last_inventory"], "")
-        let ws = try workspace()
-        try write("columns:\n  computer_name: Computer Name\n", ws)
-        let untouched = try resave(ws) { $0.staleDeviceDays = "31" }
-        XCTAssertEqual(untouched.columns["last_inventory"], "")
-        XCTAssertFalse(try saved(ws).contains("last_inventory"))
-        let mapped = try resave(ws) { $0.columns["last_inventory"] = "Last Inventory Update" }
-        XCTAssertEqual(mapped.columns["last_inventory"], "Last Inventory Update")
-    }
-
     func testTheScreensWrittenKeysIncludeTheNewOnes() {
         XCTAssertTrue(ConfigEditedKeys.paths.contains(["thresholds", "stale_basis"]))
         XCTAssertTrue(ConfigEditedKeys.paths.contains(["thresholds", "contact_gap_days"]))
-        XCTAssertTrue(ConfigEditedKeys.paths.contains(["columns", "last_inventory"]))
     }
 }

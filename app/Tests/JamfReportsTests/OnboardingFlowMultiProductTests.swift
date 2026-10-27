@@ -31,7 +31,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     func test_authenticate_noSecretNoHasText_blocksAdvance() {
         let flow = makeValidOAuth2Flow()
         flow.secretFieldHasText = false
-        flow.clientSecret = ""
+        flow.clientSecret = Data()
         XCTAssertFalse(
             flow.canAdvance,
             "canAdvance must be false when both clientSecret and secretFieldHasText are empty"
@@ -43,7 +43,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     func test_authenticate_finalizedSecret_enablesAdvance() {
         let flow = makeValidOAuth2Flow()
         flow.secretFieldHasText = false
-        flow.clientSecret = "finalized-secret"
+        flow.clientSecret = Data("finalized-secret".utf8)
         XCTAssertTrue(
             flow.canAdvance,
             "canAdvance must be true when clientSecret is non-empty (finalized)"
@@ -64,7 +64,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     func test_platformGateway_noSecretNoHasText_blocksAdvance() {
         let flow = makeValidPlatformGatewayFlow()
         flow.platformSecretFieldHasText = false
-        flow.platformClientSecret = ""
+        flow.platformClientSecret = Data()
         XCTAssertFalse(
             flow.canAdvance,
             "Platform Gateway: canAdvance must be false with no secret and no has-text"
@@ -102,19 +102,16 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         )
     }
 
-    // MARK: - Part 2: Step enum has addProducts between validate and csvMapping
+    // MARK: - Part 2: Step order
 
-    /// addProducts must come AFTER csvMapping so that ScaffoldService.writeConfig
-    /// runs first and writeProtect/writeSchoolConfig can merge into an existing file.
-    /// ScaffoldService.writeConfig deletes any prior config.yaml before writing;
-    /// if addProducts ran first its writes would be silently destroyed.
-    func test_stepOrder_addProductsAfterCSVMappingBeforeFirstReport() {
+    /// addProducts follows validate and precedes firstReport; the workspace step has already
+    /// written config.yaml, so writeProtect/writeSchoolConfig merge into an existing file.
+    func test_stepOrder_addProductsAfterValidateBeforeFirstReport() {
         let steps = OnboardingFlow.Step.allCases
-        let csvMappingIdx = steps.firstIndex(of: .csvMapping)!
+        let workspaceIdx = steps.firstIndex(of: .workspace)!
         let addProductsIdx = steps.firstIndex(of: .addProducts)!
         let firstReportIdx = steps.firstIndex(of: .firstReport)!
-        XCTAssertLessThan(csvMappingIdx, addProductsIdx,
-                          ".csvMapping must precede .addProducts (avoid config.yaml clobber)")
+        XCTAssertLessThan(workspaceIdx, addProductsIdx)
         XCTAssertLessThan(addProductsIdx, firstReportIdx,
                           ".addProducts must precede .firstReport")
     }
@@ -135,40 +132,27 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     }
 
     func test_oAuth2Stdin_format() {
-        let data = OnboardingFlow.proOAuth2Stdin(clientID: "myid", clientSecret: "mysecret")
+        let data = OnboardingFlow.proOAuth2Stdin(
+            clientID: "myid", clientSecret: Data("mysecret".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertEqual(s, "myid\nmysecret\n", "stdin must be clientID\\nclientSecret\\n")
     }
 
-    /// jamf-cli 1.29 verifies a new profile's pair before writing it; the app opts
-    /// out so Save stays a local write and Validate stays the check. The flag is
-    /// unknown on older binaries, so it must be absent unless asked for.
-    func test_addProfileArguments_sendNoVerifyOnlyWhenAsked() {
-        let oauth = OnboardingFlow.proOAuth2Arguments(
-            profile: "p", url: "https://x.jamfcloud.com")
-        XCTAssertFalse(oauth.contains("--no-verify"), "default must fit a pre-1.29 binary")
-        let oauthGated = OnboardingFlow.proOAuth2Arguments(
-            profile: "p", url: "https://x.jamfcloud.com", noVerify: true)
-        XCTAssertTrue(oauthGated.contains("--no-verify"))
-        XCTAssertEqual(oauthGated.filter { $0 != "--no-verify" }, oauth,
-                       "the flag is the only difference")
-
-        let platform = OnboardingFlow.platformGatewayArguments(
+    /// jamf-cli verifies a new profile's pair before writing it; the app opts out so Save
+    /// stays a local write and Validate stays the check.
+    func test_addProfileArguments_alwaysSendNoVerify() {
+        XCTAssertTrue(OnboardingFlow.proOAuth2Arguments(
+            profile: "p", url: "https://x.jamfcloud.com").contains("--no-verify"))
+        XCTAssertTrue(OnboardingFlow.platformGatewayArguments(
             profile: "p", gatewayURL: "https://us.api.jamfcloud.com",
-            scope: .environment, scopeID: "e")
-        XCTAssertFalse(platform.contains("--no-verify"))
-        let platformGated = OnboardingFlow.platformGatewayArguments(
-            profile: "p", gatewayURL: "https://us.api.jamfcloud.com",
-            scope: .environment, scopeID: "e", noVerify: true)
-        XCTAssertTrue(platformGated.contains("--no-verify"))
-        XCTAssertEqual(platformGated.filter { $0 != "--no-verify" }, platform)
+            scope: .environment, scopeID: "e").contains("--no-verify"))
     }
 
     /// jamf-cli reads `add-profile -lead` as flags ("unknown shorthand flag: 'l'", checked
     /// against 1.31.1), so the name goes last, after `--`, where any name is a name.
     func test_addProfileArguments_putTheNameAfterDoubleDash() {
         let oauth = OnboardingFlow.proOAuth2Arguments(
-            profile: "-lead", url: "https://x.jamfcloud.com", noVerify: true)
+            profile: "-lead", url: "https://x.jamfcloud.com")
         XCTAssertEqual(Array(oauth.suffix(2)), ["--", "-lead"])
         XCTAssertEqual(oauth.filter { $0 == "-lead" }.count, 1)
         let platform = OnboardingFlow.platformGatewayArguments(
@@ -219,16 +203,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         }
     }
 
-    func test_platformScope_defaultFollowsJamfCLIVersion() {
-        typealias Scope = OnboardingFlow.PlatformScope
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "1.24.0"), .tenant)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "1.27.9"), .tenant)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "1.28.0"), .environment)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "1.30.1"), .environment)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: nil), .environment)
-        XCTAssertEqual(Scope.defaultScope(forCLIVersion: "garbage"), .environment)
-    }
-
     /// Organization level reaches no data the app collects (every scoped call answers 400
     /// REQUEST_CONTEXT_NOT_PROVIDED), so setup offers only environment and tenant.
     func test_platformScope_offersOnlyEnvironmentAndTenant() {
@@ -252,7 +226,8 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     }
 
     func test_platformGatewayStdin_format() {
-        let data = OnboardingFlow.platformGatewayStdin(clientID: "cid", clientSecret: "csec")
+        let data = OnboardingFlow.platformGatewayStdin(
+            clientID: "cid", clientSecret: Data("csec".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertEqual(s, "cid\ncsec\n", "Platform stdin must be clientID\\nclientSecret\\n")
     }
@@ -270,7 +245,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     }
 
     func test_protectStdin_format() {
-        let data = OnboardingFlow.protectStdin(clientID: "pid", clientSecret: "psec")
+        let data = OnboardingFlow.protectStdin(clientID: "pid", clientSecret: Data("psec".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertEqual(s, "pid\npsec\n", "Protect stdin must be clientID\\nclientSecret\\n")
     }
@@ -287,7 +262,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     }
 
     func test_schoolStdin_includesDefensiveTrailingN() {
-        let data = OnboardingFlow.schoolStdin(networkID: "net123", apiKey: "apikey456")
+        let data = OnboardingFlow.schoolStdin(networkID: "net123", apiKey: Data("apikey456".utf8))
         let s = String(data: data, encoding: .utf8) ?? ""
         XCTAssertEqual(
             s, "net123\napikey456\nn\n",
@@ -299,7 +274,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
 
     func test_secretNotLeakedInPlatformError() {
         let flow = OnboardingFlow()
-        flow.platformClientSecret = "super-secret-123"
+        flow.platformClientSecret = Data("super-secret-123".utf8)
         flow.platformClientID = "client-id-very-long"
         // clearPlatformSecrets is private; simulate that the secret is in a
         // PTY result. We test via the fact that argument builders do NOT embed
@@ -337,10 +312,8 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     // MARK: - Part 2: Config wiring (protect + school written into config.yaml)
     //
     // Tests call writeProtectConfig/writeSchoolConfig directly (internal access).
-    // The sequence mirrors the real wizard flow: createWorkspace → skipCSVMapping
-    // (writes config.yaml) → writeProtectConfig → assert. This proves that the
-    // config survives scaffoldCSV's removeItem because addProducts comes AFTER
-    // csvMapping in the step order.
+    // The sequence mirrors the real wizard flow: createWorkspace (writes config.yaml) →
+    // writeProtectConfig → assert.
 
     func test_writeProtectConfig_setsEnabledAndProfile() async throws {
         let root = FileManager.default.temporaryDirectory
@@ -356,9 +329,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.profileName = profile
         try flow.createWorkspace()
-        // csvMapping step writes config.yaml — must come BEFORE addProducts.
-        await flow.skipCSVMapping()
-        XCTAssertNil(flow.lastError, "skipCSVMapping should succeed: \(flow.lastError ?? "")")
 
         // Now call the real writer (internal).
         try flow.writeProtectConfig(profileSlug: profile, protectProfileName: "my-protect")
@@ -385,7 +355,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.profileName = profile
         try flow.createWorkspace()
-        await flow.skipCSVMapping()
 
         // Pre-check: scaffolded config should have a branding or jamf_cli block.
         let beforeLoad = try ConfigService.load(profile: profile)
@@ -482,9 +451,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.profileName = profile
         try flow.createWorkspace()
-        // csvMapping step must precede addProducts.
-        await flow.skipCSVMapping()
-        XCTAssertNil(flow.lastError)
 
         try flow.writeSchoolConfig(profileSlug: profile, schoolProfileName: "my-school")
 
@@ -499,17 +465,16 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
     // MARK: - Jamf School product path: step sequence
 
     /// The School path skips the Pro-only Authenticate / Validate / Add-products
-    /// steps and inserts .schoolConnect AFTER .csvMapping (so csvMapping's
-    /// config.yaml rewrite can't clobber the school_cli keys).
+    /// steps and inserts .schoolConnect after the workspace step that writes config.yaml.
     func test_schoolPath_stepSequence_skipsProSteps() {
         let flow = OnboardingFlow()
         flow.productPath = .school
         XCTAssertEqual(
             flow.stepSequence,
-            [.welcome, .installCLI, .workspace, .csvMapping, .schoolConnect, .firstReport],
-            "School path sequence must skip authenticate/validate/addProducts and place schoolConnect after csvMapping"
+            [.welcome, .installCLI, .workspace, .schoolConnect, .firstReport],
+            "School path sequence must skip authenticate/validate/addProducts"
         )
-        XCTAssertEqual(flow.stepCount, 6, "School path has 6 steps")
+        XCTAssertEqual(flow.stepCount, 5, "School path has 5 steps")
     }
 
     /// nextStep from each School step lands on the expected next step.
@@ -519,7 +484,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         flow.currentStep = .welcome
 
         let expected: [OnboardingFlow.Step] =
-            [.installCLI, .workspace, .csvMapping, .schoolConnect, .firstReport]
+            [.installCLI, .workspace, .schoolConnect, .firstReport]
         for step in expected {
             flow.nextStep()
             XCTAssertEqual(flow.currentStep, step, "School nextStep should reach \(step)")
@@ -537,10 +502,9 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         XCTAssertEqual(flow.currentStep, .firstReport, "nextStep at the last School step must be a no-op")
     }
 
-    /// Backing out of schoolConnect resets the connection state: csvMapping's
-    /// scaffold/skip rewrites config.yaml (clobbering the school_cli block), so
-    /// a stale schoolConnected == true would let the flow advance past a step
-    /// whose on-disk result no longer exists.
+    /// Backing out of schoolConnect resets the connection state: the workspace step can
+    /// change the profile, so a stale schoolConnected == true would let the flow advance past
+    /// a step whose result belongs to the old profile.
     func test_schoolPath_previousStep_resetsSchoolConnection() {
         let flow = OnboardingFlow()
         flow.productPath = .school
@@ -550,9 +514,9 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
 
         flow.previousStep()
 
-        XCTAssertEqual(flow.currentStep, .csvMapping)
+        XCTAssertEqual(flow.currentStep, .workspace)
         XCTAssertFalse(flow.schoolConnected,
-                       "Backing into csvMapping must force the connect step to be redone")
+                       "Backing into the workspace step must force the connect step to be redone")
         XCTAssertNil(flow.schoolConnectionError)
     }
 
@@ -563,7 +527,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         flow.currentStep = .firstReport
 
         let expected: [OnboardingFlow.Step] =
-            [.schoolConnect, .csvMapping, .workspace, .installCLI, .welcome]
+            [.schoolConnect, .workspace, .installCLI, .welcome]
         for step in expected {
             flow.previousStep()
             XCTAssertEqual(flow.currentStep, step, "School previousStep should reach \(step)")
@@ -577,7 +541,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.productPath = .school
         flow.currentStep = .schoolConnect
-        XCTAssertEqual(flow.stepPosition, 5, "schoolConnect is the 5th step in the School sequence")
+        XCTAssertEqual(flow.stepPosition, 4, "schoolConnect is the 4th step in the School sequence")
     }
 
     // MARK: - Jamf School product path: canAdvance gates
@@ -626,7 +590,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.schoolURL = "https://org.jamfcloud.com"
         flow.schoolNetworkID = ""
-        flow.schoolAPIKey = "apikey"
+        flow.schoolAPIKey = Data("apikey".utf8)
         XCTAssertFalse(flow.canAttemptSchoolConnect, "missing Network ID must block the connect attempt")
     }
 
@@ -634,7 +598,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.schoolURL = "https://org.jamfcloud.com"
         flow.schoolNetworkID = "net123"
-        flow.schoolAPIKey = ""
+        flow.schoolAPIKey = Data()
         flow.schoolAPIKeyFieldHasText = false
         XCTAssertFalse(flow.canAttemptSchoolConnect, "missing API key must block the connect attempt")
     }
@@ -663,10 +627,10 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         XCTAssertEqual(
             flow.stepSequence,
             [.welcome, .installCLI, .workspace, .authenticate, .validate,
-             .csvMapping, .addProducts, .firstReport],
-            "Pro path step sequence must remain the original 8-step order"
+             .addProducts, .firstReport],
+            "Pro path step sequence has no CSV step"
         )
-        XCTAssertEqual(flow.stepCount, 8)
+        XCTAssertEqual(flow.stepCount, 7)
     }
 
     /// Walking the Pro sequence must reach firstReport and stop — it must NOT
@@ -675,7 +639,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.currentStep = .welcome
         let expected: [OnboardingFlow.Step] =
-            [.installCLI, .workspace, .authenticate, .validate, .csvMapping, .addProducts, .firstReport]
+            [.installCLI, .workspace, .authenticate, .validate, .addProducts, .firstReport]
         for step in expected {
             flow.nextStep()
             XCTAssertEqual(flow.currentStep, step)
@@ -705,10 +669,6 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let flow = OnboardingFlow()
         flow.profileName = profile
         try flow.createWorkspace()
-        // csvMapping runs before schoolConnect on the School path — seed the
-        // minimal config first, exactly as the wizard does.
-        await flow.skipCSVMapping()
-        XCTAssertNil(flow.lastError, "skipCSVMapping should succeed: \(flow.lastError ?? "")")
 
         // The workspace profile IS the School profile on the School-only path.
         try flow.writeSchoolConfig(profileSlug: profile, schoolProfileName: profile)
@@ -718,9 +678,17 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         let detected = ProfileProductType.detect(from: config, profile: profile)
         XCTAssertEqual(detected.type, .jamfSchool,
                        "school_cli.enabled written by writeSchoolConfig must route detection to Jamf School")
-        XCTAssertFalse(detected.runsProtect, "a School profile never runs Protect")
+        XCTAssertFalse(detected.runsProtect, "no protect block, no Protect")
         XCTAssertEqual(config.schoolCli?.resolvedProfile, profile,
                        "school_cli.profile must be the workspace profile on the School-only path")
+
+        // Data Sources' Connect Jamf Protect writes into the School workspace (2.11).
+        try flow.writeProtectConfig(profileSlug: profile, protectProfileName: "campus-protect")
+        let withProtect = try ConfigLoader.load(from: configURL)
+        let both = ProfileProductType.detect(from: withProtect, profile: profile)
+        XCTAssertEqual(both.type, .jamfSchool)
+        XCTAssertTrue(both.runsProtect)
+        XCTAssertEqual(ConnectedProducts.read(profile: profile).protectProfile, "campus-protect")
     }
 
     // MARK: - Part 1: SecureSecretField onTextChange callback
@@ -780,7 +748,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         flow.profileName = "testprofile"
         flow.jamfURL = "https://example.jamfcloud.com"
         flow.clientID = "some-client-id"
-        flow.clientSecret = ""
+        flow.clientSecret = Data()
         flow.secretFieldHasText = false
         flow.isRegisteringProfile = false
         return flow
@@ -843,7 +811,7 @@ final class OnboardingFlowMultiProductTests: XCTestCase {
         flow.platformScope = .environment
         flow.platformScopeID = "my-env"
         flow.platformClientID = "platform-client-id"
-        flow.platformClientSecret = ""
+        flow.platformClientSecret = Data()
         flow.platformSecretFieldHasText = false
         flow.isRegisteringProfile = false
         return flow

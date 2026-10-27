@@ -72,6 +72,19 @@ final class TickSchedulerTests: XCTestCase {
             runNowLabels: [], now: date(2026, 9, 7, 6, 25)).isEmpty)
     }
 
+    func testStartStampFarInTheFutureDoesNotStallTheSchedule() {
+        let s = schedule("collect", cadence: "Daily 06:20", mode: .snapshotOnly)
+        let label = s.launchAgentLabel!
+        let now = date(2026, 9, 7, 6, 21)
+        let ahead = tickState(started: [label: now.addingTimeInterval(30 * 86_400)])
+        XCTAssertEqual(TickScheduler.due(
+            schedules: [s], state: ahead, runNowLabels: [], now: now).map(\.reason), [.fire])
+        // Within clock skew it still counts as a start, so a run is not repeated.
+        let skewed = tickState(started: [label: now.addingTimeInterval(60)])
+        XCTAssertTrue(TickScheduler.due(
+            schedules: [s], state: skewed, runNowLabels: [], now: now).isEmpty)
+    }
+
     func testMissedFireFiresOnceNotPerMissedDay() {
         let s = schedule("collect", cadence: "Daily 06:20", mode: .snapshotOnly)
         let label = s.launchAgentLabel!
@@ -126,6 +139,24 @@ final class TickSchedulerTests: XCTestCase {
         XCTAssertEqual(runNow.map(\.reason), [.runNow])
     }
 
+    /// A Run now on a label that is due anyway runs the due reason, which pays the day.
+    func testARunNowOnADueScheduleRunsItsDueReason() {
+        let s = schedule("collect", cadence: "Daily 06:20", mode: .snapshotOnly)
+        let label = s.launchAgentLabel!
+        let failed = tickState(started: [label: date(2026, 9, 7, 6, 20)])
+        XCTAssertEqual(TickScheduler.due(
+            schedules: [s], state: TickState(), runNowLabels: [label],
+            now: date(2026, 9, 7, 6, 21)).map(\.reason), [.fire])
+        XCTAssertEqual(TickScheduler.due(
+            schedules: [s], state: failed, runNowLabels: [label],
+            now: date(2026, 9, 7, 7, 25)).map(\.reason), [.retry])
+        // A run from cache past its window still runs as asked.
+        let gen = schedule("gen", cadence: "Daily 06:20", mode: .jamfCLIOnly)
+        XCTAssertEqual(TickScheduler.due(
+            schedules: [gen], state: TickState(), runNowLabels: [gen.launchAgentLabel!],
+            now: date(2026, 9, 7, 9, 0)).map(\.reason), [.runNow])
+    }
+
     func testUnparseableCadenceIsSkippedNotFatal() {
         let bad = schedule("bad", cadence: "whenever", mode: .snapshotOnly)
         let good = schedule("good", cadence: "Daily 06:20", mode: .snapshotOnly)
@@ -143,6 +174,20 @@ final class TickSchedulerTests: XCTestCase {
     }
 
     // MARK: - Same-day retry
+
+    func testSuccessStampFarInTheFutureDoesNotBlockTheRetry() {
+        let s = schedule("collect", cadence: "Daily 06:00", mode: .snapshotOnly)
+        let label = s.launchAgentLabel!
+        let now = date(2026, 9, 7, 7, 5)
+        let started = [label: date(2026, 9, 7, 6, 0)]
+        let ahead = tickState(started: started, succeeded: [label: now.addingTimeInterval(30 * 86_400)])
+        XCTAssertEqual(TickScheduler.due(
+            schedules: [s], state: ahead, runNowLabels: [], now: now).map(\.reason), [.retry])
+        // A real success since the fire still ends the retries.
+        let done = tickState(started: started, succeeded: [label: date(2026, 9, 7, 6, 30)])
+        XCTAssertTrue(TickScheduler.due(
+            schedules: [s], state: done, runNowLabels: [], now: now).isEmpty)
+    }
 
     /// A collect that failed at its 06:00 fire is retried an hour later — not
     /// on the next wake, and not the next day.
@@ -256,13 +301,17 @@ final class TickSchedulerTests: XCTestCase {
         state.noteStarted("x", at: date(2026, 9, 7, 9, 6), reason: .retry)
         XCTAssertEqual(state.retryCount["x"], 2)
         XCTAssertEqual(state.lastStarted["x"], date(2026, 9, 7, 9, 6))
-        // Run now belongs to no fire: it neither resets nor advances the count.
-        let runNow = date(2026, 9, 7, 9, 30)
-        state.noteStarted("x", at: runNow, reason: .runNow)
+        // Run now writes nothing: it pays no day and touches no retry.
+        state.noteStarted("x", at: date(2026, 9, 7, 9, 30), reason: .runNow)
         XCTAssertEqual(state.retryCount["x"], 2)
+        XCTAssertEqual(state.lastStarted["x"], date(2026, 9, 7, 9, 6))
         XCTAssertNil(state.lastSucceeded["x"])
-        state.noteSucceeded("x", startedAt: runNow)
-        XCTAssertEqual(state.lastSucceeded["x"], runNow)
+        // A catch-up is stamped as a fire.
+        state.noteStarted("x", at: date(2026, 9, 7, 9, 40), reason: .catchUp)
+        XCTAssertEqual(state.retryCount["x"], 0)
+        XCTAssertEqual(state.lastStarted["x"], date(2026, 9, 7, 9, 40))
+        state.noteSucceeded("x", startedAt: date(2026, 9, 7, 9, 40))
+        XCTAssertEqual(state.lastSucceeded["x"], date(2026, 9, 7, 9, 40))
         XCTAssertEqual(state.retryCount["x"], 0)
     }
 

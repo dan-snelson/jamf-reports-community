@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>PayloadContent</key>
+			<dict>
+				<key>com.tonyyo.jamfreports</key>
+				<dict>
+					<key>Forced</key>
+					<array>
+						<dict>
+							<key>mcx_preference_settings</key>
+							<dict>
+								<!--
+									Every key Jamf Reports reads that is worth managing. Remove the
+									keys you do not want to set. See README.md in this folder.
+								-->
+
+								<!--
+									key:     AIPolicy
+									value:   string, "off" or "onDevice"; absent leaves AI to each workspace
+									"off" turns every AI feature off whatever config.yaml says.
+									"onDevice" allows AI, on-device Apple models only. Any other value
+									reads as "off". Settings shows the AI controls as set by your
+									organization.
+								-->
+								<key>AIPolicy</key>
+								<string>onDevice</string>
+
+								<!--
+									key:     checkForAppUpdates
+									value:   boolean, default true
+									Once a day, ask GitHub for a newer stable release and show a
+									notice. Nothing is downloaded or installed. Settings shows the
+									switch as set by your organization.
+								-->
+								<key>checkForAppUpdates</key>
+								<false/>
+
+								<!--
+									key:     autoUpdateJamfCLI
+									value:   boolean, default false
+									At launch, check for a jamf-cli update and install it.
+								-->
+								<key>autoUpdateJamfCLI</key>
+								<false/>
+
+								<!--
+									key:     skipExpensiveCollections
+									value:   boolean, default false
+									Leave the per-device commands out of collects started in the
+									app. Scheduled runs are not affected.
+								-->
+								<key>skipExpensiveCollections</key>
+								<false/>
+
+								<!--
+									key:     workspacesRootPath
+									value:   string, absolute path, default ~/Jamf-Reports
+									The folder that holds every workspace. No ~ expansion. The
+									folder must exist, belong to the user, and not be writable by
+									other accounts. Replace the placeholder or remove this key.
+								-->
+								<key>workspacesRootPath</key>
+								<string>/Volumes/Reports/Jamf-Reports</string>
+
+								<!--
+									key:     defaultTrendRange
+									value:   string W4, W12, W26, W52 or All, default W4
+									The range Overview and Trends open on.
+								-->
+								<key>defaultTrendRange</key>
+								<string>W12</string>
+
+								<!--
+									key:     hiddenTabs
+									value:   string, comma-separated tab names, default empty
+									Sidebar tabs to hide. Overview, Computers, Data Sources and
+									Settings cannot be hidden.
+								-->
+								<key>hiddenTabs</key>
+								<string>complianceBenchmarks,ddmBlueprints</string>
+							</dict>
+						</dict>
+					</array>
+				</dict>
+			</dict>
+			<key>PayloadDisplayName</key>
+			<string>Jamf Reports settings</string>
+			<key>PayloadEnabled</key>
+			<true/>
+			<key>PayloadIdentifier</key>
+			<string>com.apple.ManagedClient.preferences.A5734DE7-217D-4392-B848-E7FF4B30BE18</string>
+			<key>PayloadOrganization</key>
+			<string>Your Organization</string>
+			<key>PayloadType</key>
+			<string>com.apple.ManagedClient.preferences</string>
+			<key>PayloadUUID</key>
+			<string>A5734DE7-217D-4392-B848-E7FF4B30BE18</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>PayloadDescription</key>
+	<string>Configures the Jamf Reports app.</string>
+	<key>PayloadDisplayName</key>
+	<string>Jamf Reports settings</string>
+	<key>PayloadEnabled</key>
+	<true/>
+	<key>PayloadIdentifier</key>
+	<string>B2DAFD40-DFDD-49EA-BE1C-3533AA53CFB7</string>
+	<key>PayloadOrganization</key>
+	<string>Your Organization</string>
+	<key>PayloadRemovalDisallowed</key>
+	<false/>
+	<!--
+		User scope, so the settings reach the account that signs in and not every account on the
+		Mac. A System scope profile gives every account the same workspacesRootPath, and the app
+		does not check who owns or can write a folder on a /Volumes or CloudStorage path.
+	-->
+	<key>PayloadScope</key>
+	<string>User</string>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>B2DAFD40-DFDD-49EA-BE1C-3533AA53CFB7</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>

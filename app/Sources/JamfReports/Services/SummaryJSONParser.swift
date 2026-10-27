@@ -65,7 +65,9 @@ struct DailySummary: Codable, Identifiable, Sendable {
              securityScoreBasis,
              // Every configured agent's coverage, by name (`crowdstrikePct` is the agent the
              // score counts as EDR).
-             securityAgentCoverage
+             securityAgentCoverage,
+             // The mobile devices' own figures, apart from the Mac fields (mobile spec 4.2).
+             mobile
     }
 
     var id: String { date }
@@ -151,6 +153,9 @@ struct DailySummary: Codable, Identifiable, Sendable {
     /// `crowdstrikePct` (which is the entry the score counts as EDR, and stays for older
     /// readers). An agent no Mac reports is absent, not 0. Nil on a summary written before 2.9.
     private(set) var securityAgentCoverage: [String: Double]?
+    /// Every device that is not a Mac (`MobileSummary`). Nil when the environment has no mobile
+    /// devices or on a summary written before 2.11; `TrendStore` backfills recent days.
+    private(set) var mobile: MobileSummary?
 
     /// Value of `patchPctBasis` for the device-weighted definition.
     static let deviceWeightedPatchBasis = "device"
@@ -186,6 +191,14 @@ struct DailySummary: Codable, Identifiable, Sendable {
         resolved.securityAgentCoverage = coverage.merging(
             securityAgentCoverage ?? [:]) { _, own in own }
         if crowdstrikePct == nil, let edrAgent { resolved.crowdstrikePct = coverage[edrAgent] }
+        return resolved
+    }
+
+    /// This day with `mobile` taken from its dated `mobile-devices-list` snapshot
+    /// (`TrendStore.resolvingMobile`), for a summary written without it.
+    func withBackfilledMobile(_ figures: MobileSummary) -> DailySummary {
+        var resolved = self
+        resolved.mobile = mobile ?? figures
         return resolved
     }
 
@@ -236,7 +249,8 @@ struct DailySummary: Codable, Identifiable, Sendable {
             collectedByHost: collectedByHost ?? older.collectedByHost,
             patchPctBasis: patchFromOlder ? older.patchPctBasis : patchPctBasis,
             securityScoreBasis: scoreFromOlder ? older.securityScoreBasis : securityScoreBasis,
-            securityAgentCoverage: mergedAgentCoverage(older.securityAgentCoverage)
+            securityAgentCoverage: mergedAgentCoverage(older.securityAgentCoverage),
+            mobile: mobile.map { $0.filling(from: older.mobile) } ?? older.mobile
         )
     }
 
@@ -272,7 +286,8 @@ struct DailySummary: Codable, Identifiable, Sendable {
         collectedByHost: String? = nil,
         patchPctBasis: String? = nil,
         securityScoreBasis: String? = nil,
-        securityAgentCoverage: [String: Double]? = nil
+        securityAgentCoverage: [String: Double]? = nil,
+        mobile: MobileSummary? = nil
     ) {
         self.date = date
         self.totalDevices = totalDevices
@@ -306,6 +321,7 @@ struct DailySummary: Codable, Identifiable, Sendable {
         self.patchPctBasis = patchPctBasis
         self.securityScoreBasis = securityScoreBasis
         self.securityAgentCoverage = securityAgentCoverage
+        self.mobile = mobile
     }
 
     init(from decoder: Decoder) throws {
@@ -347,6 +363,7 @@ struct DailySummary: Codable, Identifiable, Sendable {
             String.self, forKey: .securityScoreBasis)
         securityAgentCoverage = try container.decodeIfPresent(
             [String: Double].self, forKey: .securityAgentCoverage)
+        mobile = try container.decodeIfPresent(MobileSummary.self, forKey: .mobile)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -383,11 +400,13 @@ struct DailySummary: Codable, Identifiable, Sendable {
         try container.encodeIfPresent(patchPctBasis, forKey: .patchPctBasis)
         try container.encodeIfPresent(securityScoreBasis, forKey: .securityScoreBasis)
         try container.encodeIfPresent(securityAgentCoverage, forKey: .securityAgentCoverage)
+        try container.encodeIfPresent(mobile, forKey: .mobile)
     }
 }
 
 extension DailySummary {
-    /// False when any number is non-finite or past `SummaryJSONParser.maxSummaryNumber`.
+    /// False when any number is non-finite or past `SummaryJSONParser.maxSummaryNumber`, or a
+    /// mobile share counts more devices than report the field.
     var numbersAreInRange: Bool {
         let limit = SummaryJSONParser.maxSummaryNumber
         let percents = [
@@ -401,9 +420,10 @@ extension DailySummary {
         let counts = [totalDevices] + bands + [
             staleCount, actionItemsP0, actionItemsP1, actionItemsP2, noBaselineActive,
             mobileDeviceCount,
-        ].compactMap { $0 }
+        ].compactMap { $0 } + (mobile?.counts ?? [])
         return percents.allSatisfy { $0.isFinite && abs($0) <= Double(limit) }
             && counts.allSatisfy { (-limit...limit).contains($0) }
+            && mobile?.sharesAreConsistent != false
     }
 }
 
@@ -415,6 +435,22 @@ struct SummaryJSONParser {
         // Use system timezone to match Calendar.current in TrendStore
         return f
     }()
+
+    /// Whether `profile` has a summary file for `day` (local time).
+    static func hasSummary(profile: String, on day: Date) -> Bool {
+        guard let dir = try? WorkspacePaths.summariesDir(for: profile) else { return false }
+        let name = "summary_\(dateFormatter.string(from: day)).json"
+        return FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path)
+    }
+
+    /// The `yyyy-MM-dd` of the newest canonical `summary_*.json` for `profile`, nil when none.
+    static func newestSummaryDay(profile: String) -> String? {
+        guard let dir = try? WorkspacePaths.summariesDir(for: profile),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path)
+        else { return nil }
+        return names.filter(CloudStorage.isCanonicalSummaryFilename).max()
+            .map { String($0.dropFirst("summary_".count).prefix(10)) }
+    }
 
     /// Real summaries are a few KB; anything near this is corrupt or hostile.
     /// Bounds the whole-file read (T-26 — the workspace sits on synced storage
@@ -433,11 +469,12 @@ struct SummaryJSONParser {
     }
 
     static func parse(_ url: URL) throws -> DailySummary {
-        if let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-           size > maxSummaryFileBytes {
+        do {
+            return try decode(try BoundedFile.read(
+                url, limit: maxSummaryFileBytes, followSymlinks: false))
+        } catch BoundedFile.Failure.tooLarge {
             throw CocoaError(.fileReadTooLarge, userInfo: [NSFilePathErrorKey: url.path])
         }
-        return try decode(try Data(contentsOf: url))
     }
 
     /// The summary in `data`; throws when it does not decode or holds a number past

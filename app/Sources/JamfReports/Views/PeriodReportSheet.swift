@@ -227,7 +227,7 @@ struct PeriodReportSheet: View {
         let kind = rangeChoice.kind(start: customStart, end: customEnd)
         let period = PeriodReportService.resolvedPeriod(profile: profile, kind: kind)
         let outputDir = try? WorkspacePaths.outputDir(for: profile)
-        syncedProvider = outputDir.flatMap { CloudStorage.provider(for: $0) }
+        syncedProvider = outputDir.flatMap { CloudStorage.syncProvider(for: $0) }
 
         let metrics = eaMetrics
         let names = metrics.compactMap { unconfiguredEAName(of: $0) }

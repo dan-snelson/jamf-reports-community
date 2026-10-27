@@ -1,9 +1,8 @@
 import SwiftUI
 
 /// Group inventory dashboard for Classic API computer groups, mobile device groups,
-/// and advanced mobile device searches. Surfaces group counts, type distribution,
-/// and detailed inventories from `classic-computer-groups list`, `classic-mobile-device-groups list`,
-/// and `advanced-mobile-device-searches list` snapshots.
+/// and advanced mobile device searches. Surfaces group counts, member counts, empty and
+/// unused groups, and each search's criteria from snapshots the app already collects.
 struct GroupsView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast
@@ -30,8 +29,15 @@ struct GroupsView: View {
             if !snapshot.isDetected {
                 emptyState
             } else {
-                computerGroupsCard
-                mobileGroupsCard
+                summaryTiles
+                GroupTableCard(
+                    title: "Computer Groups", emptyText: "No computer groups found.",
+                    groups: snapshot.classicComputerGroups, platform: .computer,
+                    snapshot: snapshot)
+                GroupTableCard(
+                    title: "Mobile Device Groups", emptyText: "No mobile device groups found.",
+                    groups: snapshot.classicMobileGroups, platform: .mobile,
+                    snapshot: snapshot)
                 if !snapshot.advancedMobileSearches.isEmpty {
                     advancedSearchesCard
                 }
@@ -92,111 +98,82 @@ struct GroupsView: View {
             EmptyStateView(
                 systemImage: "rectangle.3.group",
                 title: "No group data detected",
-                message: "Run `jamf-cli pro classic-computer-groups list`, `classic-mobile-device-groups list`, and `advanced-mobile-device-searches list` to populate this dashboard."
+                message: "Collect data for this screen with the Collect now banner when it shows, "
+                    + "or run this command.",
+                commands: [EmptyStateView.collectCommand(
+                    profile: workspace.profile, kinds: [
+                        "classic-computer-groups", "classic-mobile-device-groups",
+                        "advanced-mobile-device-searches",
+                    ])]
             )
         }
     }
 
-    private var computerGroupsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(
-                    title: "Computer Groups",
-                    trailing: snapshot.classicComputerGroupCount > 0
-                        ? "\(snapshot.classicComputerSmartGroupCount) smart, \(snapshot.classicComputerStaticGroupCount) static"
-                        : nil
-                )
+    private var summaryTiles: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            EqualHeightTileGrid(minTileWidth: 200) {
+                StatTile(
+                    label: "Computer Groups",
+                    value: "\(snapshot.classicComputerGroupCount)",
+                    sub: "\(snapshot.classicComputerSmartGroupCount) smart, "
+                        + "\(snapshot.classicComputerStaticGroupCount) static",
+                    fillsHeight: true)
+                StatTile(
+                    label: "Mobile Device Groups",
+                    value: "\(snapshot.classicMobileGroupCount)",
+                    sub: "\(snapshot.classicMobileSmartGroupCount) smart, "
+                        + "\(snapshot.classicMobileStaticGroupCount) static",
+                    fillsHeight: true)
+                StatTile(
+                    label: "Empty Groups",
+                    value: snapshot.emptyGroupCount.map(String.init) ?? "—",
+                    sub: snapshot.emptyGroupCount == nil
+                        ? "Member counts not collected yet" : "No members",
+                    fillsHeight: true)
+                StatTile(
+                    label: "Unused Groups",
+                    value: snapshot.unusedGroupCount.map(String.init) ?? "—",
+                    sub: unusedCaption,
+                    fillsHeight: true)
+                StatTile(
+                    label: "Policies With No Scope",
+                    value: snapshot.unscopedPolicyCount.map(String.init) ?? "—",
+                    sub: snapshot.unscopedPolicyCount == nil
+                        ? "Policy status not collected yet" : "Target no computers",
+                    fillsHeight: true)
+            }
+            tileActions
+        }
+    }
 
-                if snapshot.classicComputerGroups.isEmpty {
-                    Text("No computer groups found.")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .padding(.bottom, 8)
-                } else {
-                    Table(snapshot.classicComputerGroups.enumerated().map { GroupRowWrapper(group: $0.element, index: $0.offset) }) {
-                        TableColumn("Name") { wrapper in
-                            Text(wrapper.group.name ?? "Untitled Group")
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(Theme.Colors.fg)
-                        }
-                        .width(min: 180, ideal: 250)
+    private var unusedCaption: String {
+        guard let date = snapshot.analysisDate else {
+            return "Run Analyze Groups in Health Audit"
+        }
+        return "Computer groups no policy or profile uses, from Health Audit, "
+            + date.formatted(date: .abbreviated, time: .omitted)
+    }
 
-                        TableColumn("Type") { wrapper in
-                            Pill(
-                                text: wrapper.group.isSmart ? "Smart" : "Static",
-                                tone: wrapper.group.isSmart ? .teal : .muted
-                            )
-                            .accessibilityLabel("\(wrapper.group.isSmart ? "Smart" : "Static") group")
-                        }
-                        .width(min: 80, ideal: 100)
-
-                        TableColumn("ID") { wrapper in
-                            if let id = wrapper.group.id {
-                                Text(String(id))
-                                    .font(Theme.Fonts.mono(11))
-                                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                            } else {
-                                Text("—")
-                                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                            }
-                        }
-                        .width(min: 60, ideal: 80)
-                    }
-                    .font(.callout)
+    @ViewBuilder
+    private var tileActions: some View {
+        HStack(spacing: 8) {
+            if snapshot.analysisDate == nil {
+                PNPButton(title: "Open Health Audit", icon: "arrow.right", size: .sm) {
+                    open(.audit)
+                }
+                .help("Analyze Groups on the Health Audit screen finds unused groups.")
+            }
+            if (snapshot.unscopedPolicyCount ?? 0) > 0 {
+                PNPButton(title: "Review policies with no scope", icon: "arrow.right", size: .sm) {
+                    open(.policyProfile)
                 }
             }
         }
     }
 
-    private var mobileGroupsCard: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(
-                    title: "Mobile Device Groups",
-                    trailing: snapshot.classicMobileGroupCount > 0
-                        ? "\(snapshot.classicMobileSmartGroupCount) smart, \(snapshot.classicMobileStaticGroupCount) static"
-                        : nil
-                )
-
-                if snapshot.classicMobileGroups.isEmpty {
-                    Text("No mobile device groups found.")
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .padding(.bottom, 8)
-                } else {
-                    Table(snapshot.classicMobileGroups.enumerated().map { GroupRowWrapper(group: $0.element, index: $0.offset) }) {
-                        TableColumn("Name") { wrapper in
-                            Text(wrapper.group.name ?? "Untitled Group")
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(Theme.Colors.fg)
-                        }
-                        .width(min: 180, ideal: 250)
-
-                        TableColumn("Type") { wrapper in
-                            Pill(
-                                text: wrapper.group.isSmart ? "Smart" : "Static",
-                                tone: wrapper.group.isSmart ? .teal : .muted
-                            )
-                            .accessibilityLabel("\(wrapper.group.isSmart ? "Smart" : "Static") group")
-                        }
-                        .width(min: 80, ideal: 100)
-
-                        TableColumn("ID") { wrapper in
-                            if let id = wrapper.group.id {
-                                Text(String(id))
-                                    .font(Theme.Fonts.mono(11))
-                                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                            } else {
-                                Text("—")
-                                    .foregroundStyle(Theme.Text.tertiary(contrast))
-                            }
-                        }
-                        .width(min: 60, ideal: 80)
-                    }
-                    .font(.callout)
-                }
-            }
-        }
+    private func open(_ tab: Tab) {
+        NotificationCenter.default.post(
+            name: .navigateToTab, object: nil, userInfo: ["tab": tab.rawValue])
     }
 
     private var advancedSearchesCard: some View {
@@ -207,21 +184,26 @@ struct GroupsView: View {
                     trailing: "\(snapshot.advancedSearchCount) search\(snapshot.advancedSearchCount == 1 ? "" : "es")"
                 )
 
-                Table(Array(snapshot.advancedMobileSearches.prefix(30).enumerated()).map { SearchRowWrapper(search: $0.element, index: $0.offset) }) {
+                Table(snapshot.advancedMobileSearches.enumerated().map {
+                    SearchRowWrapper(search: $0.element, index: $0.offset)
+                }) {
                     TableColumn("Name") { wrapper in
                         Text(wrapper.search.name ?? "Untitled Search")
                             .font(.callout.weight(.medium))
                             .foregroundStyle(Theme.Colors.fg)
                     }
-                    .width(min: 180, ideal: 220)
+                    .width(min: 160, ideal: 200)
 
-                    TableColumn("Criteria Count") { wrapper in
-                        let count = wrapper.search.criteria?.count ?? 0
-                        Text(String(count))
-                            .font(.caption)
-                            .foregroundStyle(Theme.Text.tertiary(contrast))
+                    TableColumn("Criteria") { wrapper in
+                        let text = wrapper.search.criteriaSummary
+                        Text(text)
+                            .font(.callout)
+                            .foregroundStyle(Theme.Text.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .help(text)
                     }
-                    .width(min: 80, ideal: 100)
+                    .width(min: 260, ideal: 420)
 
                     TableColumn("Display Fields") { wrapper in
                         let count = wrapper.search.displayFields?.count ?? 0
@@ -238,9 +220,103 @@ struct GroupsView: View {
                     }
                     .width(min: 60, ideal: 80)
                 }
+                .pageTableHeight(rows: snapshot.advancedSearchCount)
                 .font(.callout)
             }
         }
+    }
+}
+
+// MARK: - Group table
+
+/// One platform's group table, with member counts and Empty / Unused flags.
+private struct GroupTableCard: View {
+    @Environment(\.colorSchemeContrast) private var contrast
+    let title: String
+    let emptyText: String
+    let groups: [ClassicGroupRow]
+    let platform: GroupInventoryService.Platform
+    let snapshot: GroupInventoryService.Snapshot
+
+    private var rows: [GroupRowWrapper] {
+        groups.enumerated().map { offset, group in
+            GroupRowWrapper(
+                group: group, detail: snapshot.detail(for: group, platform), index: offset)
+        }
+    }
+
+    var body: some View {
+        let visible = rows
+        Card {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader(
+                    title: title, trailing: groups.isEmpty ? nil : "\(groups.count) total")
+                if groups.isEmpty {
+                    Text(emptyText)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .padding(.bottom, 8)
+                } else {
+                    table(visible)
+                }
+            }
+        }
+    }
+
+    private func table(_ visible: [GroupRowWrapper]) -> some View {
+        Table(visible) {
+            TableColumn("Name") { wrapper in
+                Text(wrapper.group.name ?? "Untitled Group")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(Theme.Colors.fg)
+            }
+            .width(min: 160, ideal: 240)
+
+            TableColumn("Type") { wrapper in
+                Pill(
+                    text: wrapper.group.isSmart ? "Smart" : "Static",
+                    tone: wrapper.group.isSmart ? .teal : .muted
+                )
+                .accessibilityLabel("\(wrapper.group.isSmart ? "Smart" : "Static") group")
+            }
+            .width(min: 70, ideal: 90)
+
+            TableColumn("Status") { wrapper in
+                HStack(spacing: 4) {
+                    if wrapper.detail.isEmpty { Pill(text: "Empty", tone: .warn) }
+                    if wrapper.detail.unused == true { Pill(text: "Unused", tone: .gold) }
+                }
+            }
+            .width(min: 90, ideal: 130)
+
+            TableColumn("Members") { wrapper in
+                Text(wrapper.detail.memberCount.map(String.init) ?? "—")
+                    .font(.callout)
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.Text.secondary)
+            }
+            .width(min: 60, ideal: 70)
+
+            TableColumn("Description") { wrapper in
+                let text = wrapper.detail.description ?? ""
+                Text(text.isEmpty ? "—" : text)
+                    .font(.callout)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(text)
+            }
+            .width(min: 120, ideal: 240)
+
+            TableColumn("ID") { wrapper in
+                Text(wrapper.group.id.map(String.init) ?? "—")
+                    .font(Theme.Fonts.mono(11))
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+            }
+            .width(min: 50, ideal: 60)
+        }
+        .font(.callout)
+        .pageTableHeight(rows: visible.count, rowHeight: PageTableMetrics.richRowHeight)
     }
 }
 
@@ -249,6 +325,7 @@ struct GroupsView: View {
 /// Wrapper to make ClassicGroupRow identifiable for Table
 private struct GroupRowWrapper: Identifiable {
     let group: ClassicGroupRow
+    let detail: GroupInventoryService.GroupDetail
     let index: Int
 
     var id: String {

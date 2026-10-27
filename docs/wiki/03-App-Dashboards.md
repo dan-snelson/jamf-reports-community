@@ -2,7 +2,7 @@
 
 The app organizes its screens into sidebar groups. This page is a tour of each group.
 Every non-core screen can be hidden from **Settings → Sidebar Visibility**; the core
-screens (Overview, Devices, Data Sources, Settings) cannot be hidden.
+screens (Overview, Computers, Data Sources, Settings) cannot be hidden.
 
 Most dashboards read cached `jamf-cli` snapshots already on disk — opening a dashboard
 does not issue new API calls. Data is refreshed by collection (see
@@ -11,15 +11,19 @@ does not issue new API calls. Data is refreshed by collection (see
 A **health strip** sits above whichever screen you are on. It reports data sources that
 have stopped collecting or fallen far behind their schedule, and any overdue or failing
 schedule, with a **Collect now** action that re-collects just what is behind — so you do
-not have to be on Security Posture to learn that security data stopped landing. See
+not have to be on Security Posture to learn that security data stopped landing. It also
+lists **Needs attention** items: a warning a run logged that you have to act on, such as a
+webhook that rejected a card (button: Open Automation), a Jamf Protect backup that was skipped
+or incomplete (Open Backups), a Jamf School collect that returned no devices, an unreadable
+Extension Attribute snapshot, a large Fleet Drift change or a mobile device list that could
+not be saved (each Open Run History). An item clears itself when the next run's check passes;
+**Dismiss** hides it on this Mac until it clears and happens again. See
 [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).
 
-With no jamf-cli connection at all — a CSV-only workspace — most of these screens have
-nothing to show: Devices and Offline Outreach render from CSV columns (plus
-`custom_eas` / `security_agents`) and stay populated; everything else on this page needs
-jamf-cli data. See [App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding) for how a
-CSV-only or Jamf School-only setup gets through onboarding. Jamf School data doesn't feed
-these interactive dashboards either — it produces a separate generated workbook; see
+Every screen on this page reads jamf-cli data. With no jamf-cli connection, or no collect
+yet, most of them have nothing to show. See [App Onboarding → Running without jamf-cli credentials](https://github.com/tonyyo11/jamf-reports-community/wiki/02-App-Onboarding#running-without-jamf-cli-credentials) for how a
+Jamf School-only setup gets through onboarding. A Jamf School workspace has its own
+Overview, Devices and Trends screens and a workbook of its own; see
 [Jamf School](https://github.com/tonyyo11/jamf-reports-community/wiki/08-Jamf-School).
 
 ## Reports
@@ -36,10 +40,12 @@ these interactive dashboards either — it produces a separate generated workboo
   also surfaces when a scheduled run should have fired but didn't — see
   [Automation Trust](https://github.com/tonyyo11/jamf-reports-community/wiki/05b-Automation-Trust).
   Data source: daily summary digest (tier 3) — see [Data Provenance](https://github.com/tonyyo11/jamf-reports-community/wiki/11-Data-Provenance).
-- **Fleet Overview** — a multi-profile roll-up: one card per workspace with per-profile
-  health signals, so MSPs and teams can scan every tenant at once.
-  Data source: daily summary digest (tier 3) aggregated across profiles.
-- **Devices** — the device inventory table with search, sort, and a Priority Action
+- **Fleet Overview** — the workspace selected in the sidebar: its latest summary, issues and
+  stability trend. Two workspaces can be different Jamf Pro servers, so their figures are
+  never averaged or listed together; switch the workspace in the sidebar to see another.
+  Figures across workspaces are in the report-group fleet CSV and workbook.
+  Data source: daily summary digest (tier 3).
+- **Computers** — the computer inventory table with search, sort, and a Priority Action
   filter. The detail panel shows a per-device risk breakdown. Freshness chips show the
   age of each underlying data source (a red "never" chip flags a kind that's never been
   collected), and a "Collect now" banner appears when the cache is stale.
@@ -47,6 +53,7 @@ these interactive dashboards either — it produces a separate generated workboo
   policy that lowers it, adds no risk points. A value Jamf did not collect shows neutral,
   not red.
   Data source: per-device snapshots of computers and mobile-device inventory (tier 1).
+  The table shows what jamf-cli collected; a CSV export is no longer merged in.
 - **Device Lookup** — find one device by serial, hostname, asset tag, or ID.
   Data source: per-device snapshot of computer detail from `pro device <id>` (tier 1).
 - **Trends** — historical charts over archived snapshots, including SIP, firewall and
@@ -71,7 +78,7 @@ these interactive dashboards either — it produces a separate generated workboo
   [Period Reports](https://github.com/tonyyo11/jamf-reports-community/wiki/06c-Period-Reports).
   Data source: generated report catalog (no single tier; see [Data Provenance](https://github.com/tonyyo11/jamf-reports-community/wiki/11-Data-Provenance) for report composition).
 
-![Devices](images/devices.png)
+![Computers](images/devices.png)
 
 ## Posture
 
@@ -129,7 +136,7 @@ these interactive dashboards either — it produces a separate generated workboo
   identifier with the Macs where each is inactive or invalid, and pending or
   failed DDM software updates — all from the weekly per-device scan. On a
   Platform API profile the blueprint deployment sections appear as well. Per-Mac
-  detail is in Devices; failed and stuck MDM commands are in Health Audit →
+  detail is in Computers; failed and stuck MDM commands are in Health Audit →
   Command health.
   Data source: per-device `pro declarative-device-management status-items` (`pro ddm-status`
   before jamf-cli 1.29) (tier 1); Jamf Platform API
@@ -142,24 +149,33 @@ these interactive dashboards either — it produces a separate generated workboo
   (not a coverage percentage — EAs are custom and often legitimately sparse, so the
   screen never grades them against 100%) and top-value distributions. A drift callout
   flags EAs whose device count dropped sharply since the previous collect, comparing an
-  EA against its own prior value rather than an absolute target.
+  EA against its own prior value rather than an absolute target. **Adopt EAs…** lists the
+  EAs jamf-cli collected, with a guessed type for each, and adds the ones you pick to
+  `config.yaml` as tracked EAs or security agents; it can also import a CSV export once.
   Data source: per-device EA results (tier 1) and device inventory (tier 1).
 
 ## Fleet
 
-![Mobile Fleet](images/mobile-fleet.png)
+![Mobile Devices](images/mobile-fleet.png)
 
-- **Mobile Fleet** — iOS/iPadOS device counts, compliance signals, OS-version
+- **Mobile Devices** — iOS/iPadOS device counts, compliance signals, OS-version
   distribution, and a device/profile inventory.
   Data source: `mobile-devices-list` (one fetch with the General, Hardware, Security and
   User and Location sections, tier 1) and profiles (tier 2).
-- **Jamf Protect** — Protect alerts, agent health, and insights. Shows an explicit
+- **Jamf Protect** — Protect alerts, agent health, and insights. A **Jamf Pro match** card
+  shows which Protect computers match a Jamf Pro computer (by hardware UUID or serial
+  number, never by name), which have no Jamf Pro record, and which Jamf Pro Macs have no
+  Protect record. Shows an explicit
   "Protect not detected" state for tenants that do not run Jamf Protect.
   Data source: Jamf Protect GraphQL API (separate OAuth2 credentials, tier 2).
-- **Groups & Searches** — computer and mobile-device group inventory (smart vs. static),
-  plus advanced mobile-device searches.
+- **Groups & Searches** — computer and mobile-device group inventory (smart vs. static)
+  with each group's member count and description. Empty groups are flagged, and so are
+  computer groups no policy or profile uses (from the Health Audit's **Analyze Groups**; mobile
+  groups are not analysed), and a summary row also counts policies with no scope. Saved advanced mobile-device searches spell out their
+  criteria, and the list is not cut off.
   Data source: Classic API computer/mobile-device group lists (tier 1, same as the group
-  lists in Health Audit above) and advanced mobile-device searches.
+  lists in Health Audit above), advanced mobile-device searches, and the latest Analyze
+  Groups result.
 
 ## Automation
 
@@ -192,7 +208,7 @@ these interactive dashboards either — it produces a separate generated workboo
   the others. Overview score cards
   and sections are chosen on the Overview itself.
   Data source: no tier (user preferences).
-- **Data Sources** — the inputs surface: cached `jamf-cli` data, the CSV inbox, and
+- **Data Sources** — the inputs surface: cached `jamf-cli` data, **Adopt EAs**, and
   snapshot status.
   Data source: no tier (local workspace cache status).
 - **Backups** — snapshot and compare Jamf Pro configuration backups. **Diff Selected**
@@ -201,8 +217,15 @@ these interactive dashboards either — it produces a separate generated workboo
   a line each, instead of printing every changed object in full. **Raw** is the whole
   jamf-cli payload, one click away, and **Copy** takes the diff to the clipboard. Summary
   and Copy redact credential-shaped values (password hashes, recovery keys, pre-shared
-  keys); Raw is deliberately unredacted, for scripting against.
-  Data source: `jamf-cli pro backup` exports (tier 2).
+  keys); Raw is deliberately unredacted, for scripting against. A workspace with Jamf
+  Protect connected backs Protect up in the same backup folder (under `protect/`); a banner
+  above the table says what the latest backup holds for Protect: object counts per
+  resource, or that the Protect part is incomplete, failed or skipped, and why. On shared
+  storage, where Protect is skipped by default, the banner explains what a Protect backup
+  holds and offers **Back up Jamf Protect in this folder** for organizations whose storage
+  policy allows it (`protect.backup_on_synced_storage`). Diff
+  compares Jamf Pro objects only, and its sheet says Protect is not compared.
+  Data source: `jamf-cli pro backup` and `jamf-cli protect backup` exports (tier 2).
 
 ## System
 

@@ -17,12 +17,15 @@ struct BackupsView: View {
     @State private var diffMode: DiffMode = .summary
     @State private var backupExitCode: Int32?
     @State private var diffExitCode: Int32?
+    @State private var diffIncludesProtect = false
     @State private var isRunningBackup = false
     @State private var isRunningDiff = false
     @State private var showingDiff = false
     @State private var errorMessage: String?
     @State private var pendingDelete: BackupRecord?
     @State private var showDeleteConfirm = false
+    /// Set when Protect is connected and the backups folder is on storage other Macs reach.
+    @State private var syncedChoice: ProtectBackup.SyncedStorageChoice?
 
     private var backupsDirectory: URL {
         let root = ProfileService.workspaceURL(for: workspace.profile)
@@ -95,6 +98,7 @@ struct BackupsView: View {
             header
             summary
             errorBanner
+            protectBanner
             backupsTable
             logCard
         }
@@ -128,7 +132,8 @@ struct BackupsView: View {
                     )
                 }
             }
-            reload()
+            await reload()
+            await refreshSyncedChoice()
         }
     }
 
@@ -210,6 +215,92 @@ struct BackupsView: View {
         }
     }
 
+    /// What the latest backup did about Jamf Protect; absent for a workspace without it. On
+    /// synced storage the storage banner says why Protect was skipped, so the summary does not.
+    @ViewBuilder
+    private var protectBanner: some View {
+        if let syncedChoice { syncedStorageBanner(syncedChoice) }
+        if latestBackup?.proFailed == true {
+            InlineBanner(icon: "exclamationmark.triangle.fill", tone: .warn) {
+                Text("The latest backup's Jamf Pro part failed, so it holds only what Jamf "
+                     + "Protect exported. Run History has the error; Diff compares Jamf Pro "
+                     + "backups and skips this one.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.secondary)
+            }
+        }
+        if let protect = latestBackup?.protect, !isSyncedStorageSkip(protect) {
+            InlineBanner(
+                icon: protect.isIncomplete ? "exclamationmark.triangle.fill" : "shield",
+                tone: protect.isIncomplete ? .warn : .info
+            ) {
+                Text(protect.protectSummary)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.secondary)
+            }
+        }
+    }
+
+    private func isSyncedStorageSkip(_ protect: BackupProductResult) -> Bool {
+        guard let syncedChoice, let reason = protect.reason else { return false }
+        return reason == ProtectBackup.syncedStorageReason(place: syncedChoice.place)
+    }
+
+    private func syncedStorageBanner(_ choice: ProtectBackup.SyncedStorageChoice) -> some View {
+        InlineBanner(icon: "lock.shield", tone: choice.allowed ? .info : .warn) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(choice.allowed
+                     ? "Jamf Protect is backed up in this folder, which is \(choice.place). "
+                        + "Its backups contain action configurations with request headers and "
+                        + "data-forwarding settings."
+                     : "Jamf Protect is not backed up: this workspace is \(choice.place), and a "
+                        + "Protect backup contains action configurations with request headers "
+                        + "and data-forwarding settings. Jamf Pro backups are not affected.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Text.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Toggle("Back up Jamf Protect in this folder", isOn: Binding(
+                    get: { choice.allowed },
+                    set: { setProtectOnSyncedStorage($0) }))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .font(.footnote)
+                    .disabled(workspace.demoMode)
+                    .help(workspace.demoMode ? DemoData.liveOnlyHelp
+                          : SharedConfigPin.Key.protectBackupOnSyncedStorage.rawValue)
+                Text("Your organization's storage and access policy decides whether this "
+                     + "folder may hold them.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+            }
+        }
+    }
+
+    private func setProtectOnSyncedStorage(_ on: Bool) {
+        guard !workspace.demoMode else { return }
+        do {
+            try ProtectBackupConfigWriter.save(onSyncedStorage: on, profile: workspace.profile)
+        } catch {
+            errorMessage = "Couldn't save the Jamf Protect backup setting: "
+                + error.localizedDescription
+        }
+        Task { await refreshSyncedChoice() }
+    }
+
+    /// Off the main actor: it decodes config.yaml and probes the volume.
+    private func refreshSyncedChoice() async {
+        guard !workspace.demoMode else { syncedChoice = nil; return }
+        let profile = workspace.profile
+        let choice = await Task.detached(priority: .utility) {
+            let config = ProfileService.workspaceURL(for: profile).flatMap {
+                try? ConfigLoader.load(from: $0.appendingPathComponent("config.yaml"))
+            }
+            return ProtectBackup.syncedStorageChoice(profile: profile, config: config)
+        }.value
+        guard profile == workspace.profile else { return }
+        syncedChoice = choice
+    }
+
     private var backupsTable: some View {
         Card(padding: 0) {
             if backups.isEmpty {
@@ -221,7 +312,11 @@ struct BackupsView: View {
                             Text(backup.label.isEmpty ? backup.name : backup.label)
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(Theme.Text.primary)
-                            if backup.label.isEmpty {
+                            if backup.proFailed {
+                                Text("Jamf Pro part failed: Jamf Protect only")
+                                    .font(Theme.Fonts.mono(10.5))
+                                    .foregroundStyle(Theme.Colors.warn)
+                            } else if backup.label.isEmpty {
                                 Text("No label set")
                                     .font(Theme.Fonts.mono(10.5))
                                     .foregroundStyle(Theme.Text.tertiary(contrast).opacity(0.65))
@@ -370,6 +465,11 @@ struct BackupsView: View {
                 }
                 .keyboardShortcut(.cancelAction)
             }
+            if diffIncludesProtect {
+                Text("Jamf Protect is not compared: this diff covers Jamf Pro objects only.")
+                    .font(Theme.Fonts.mono(10.5))
+                    .foregroundStyle(Theme.Text.tertiary(contrast))
+            }
             if !diffParseFailed && !diffGroups.isEmpty {
                 HStack(spacing: 10) {
                     Text(diffHeadline)
@@ -506,7 +606,7 @@ struct BackupsView: View {
             isRunningBackup = false
             if exit == 0 {
                 backupLabel = ""
-                reload()
+                await reload()
             } else {
                 errorMessage = CLIBridge.explainExit(exit, operation: "Backup for \(profile)")
             }
@@ -530,6 +630,7 @@ struct BackupsView: View {
         diffParseFailed = false
         diffMode = .summary
         diffExitCode = nil
+        diffIncludesProtect = backup.includesProtectFiles || latest.includesProtectFiles
         errorMessage = nil
         showingDiff = true
         isRunningDiff = true
@@ -558,10 +659,16 @@ struct BackupsView: View {
         }
     }
 
-    private func reload() {
-        backups = workspace.demoMode
+    private func reload() async {
+        let profile = workspace.profile
+        // Walks every backup folder and reads its manifest, which can be slow on a synced share.
+        let listed = workspace.demoMode
             ? DemoData.backups
-            : BackupLibrary().list(profile: workspace.profile)
+            : await Task.detached(priority: .userInitiated) {
+                BackupLibrary().list(profile: profile)
+            }.value
+        guard profile == workspace.profile else { return }
+        backups = listed
         selectedBackups = selectedBackups.intersection(Set(backups.map(\.id)))
     }
 
@@ -573,7 +680,7 @@ struct BackupsView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
-        reload()
+        await reload()
     }
 
     private func color(for level: CLIBridge.LogLevel) -> Color {
@@ -667,13 +774,16 @@ struct BackupLibrary {
             created: created,
             sizeBytes: manifest.sizeBytes ?? stats.sizeBytes,
             fileCount: manifest.fileCount ?? stats.fileCount,
-            url: dir
+            url: dir,
+            protect: manifest.protect,
+            proFailed: manifest.pro?.state == .failed
         )
     }
 
     private func readManifest(_ url: URL, root: URL) -> BackupManifest {
         guard let file = WorkspacePathGuard.validate(url, under: root),
-              let data = try? Data(contentsOf: file),
+              let data = try? BoundedFile.read(
+                file, limit: BoundedFile.documentLimit, followSymlinks: false),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return BackupManifest()
         }
@@ -681,7 +791,9 @@ struct BackupLibrary {
             label: object["label"] as? String ?? "",
             created: parseDate(object["created_at"] as? String),
             fileCount: object["file_count"] as? Int,
-            sizeBytes: object["size_bytes"] as? Int64
+            sizeBytes: object["size_bytes"] as? Int64,
+            protect: BackupProductResult.protect(inManifest: object),
+            pro: BackupProductResult.pro(inManifest: object)
         )
     }
 
@@ -717,6 +829,8 @@ struct BackupLibrary {
         var created: Date?
         var fileCount: Int?
         var sizeBytes: Int64?
+        var protect: BackupProductResult?
+        var pro: BackupProductResult?
     }
 }
 

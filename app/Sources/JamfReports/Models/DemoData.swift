@@ -131,14 +131,10 @@ enum DemoData {
     static let securityControls = SecurityControls(
         total: 524, fileVault: 513, sip: 524, firewall: 482, gatekeeper: 512)
 
-    /// iPads and iPhones in the demo fleet — Mobile Fleet's demo inventory has 25.
+    /// iPads and iPhones in the demo fleet — Mobile Devices' demo inventory has 25.
     static let mobileDeviceCount = 25
-    /// The Managed Devices chart's mobile line, ending on `mobileDeviceCount`.
-    static let mobileDevicesTrend = trend(
-        start: 18, end: 25, jitter: 1, pinnedLast: Double(mobileDeviceCount))
 
     static let trends: [TrendSeries.Metric: [Double]] = [
-        // Headline value is the computer count, as it is live.
         .managedDevices:  totalDevicesTrend,
         .activeDevices:   activeDevicesTrend,
         .stability:       stabilityTrend,
@@ -174,13 +170,22 @@ enum DemoData {
         .init(name: "Tailscale",           installed: 389, pct: 74.2, column: "Tailscale - Connected", trend: .up),
     ]
 
-    static let complianceBands: [ComplianceBand] = [
-        .init(label: "Pass",            range: "0",     count: 213, pct: 42.4, colorHex: 0x2A6B6B),
-        .init(label: "Low (1–10)",      range: "1–10",  count: 167, pct: 33.3, colorHex: 0x3A8A8A),
-        .init(label: "Med-Low (11–30)", range: "11–30", count:  74, pct: 14.7, colorHex: 0xC9970A),
-        .init(label: "Medium (31–50)",  range: "31–50", count:  31, pct:  6.2, colorHex: 0xFF9F0A),
-        .init(label: "High (>50)",      range: "51+",   count:  17, pct:  3.4, colorHex: 0xFF453A),
-    ]
+    /// Band colors come from `ComplianceBandingService.Band`, the one source the app and
+    /// the workbook share.
+    static let complianceBands: [ComplianceBand] = {
+        typealias Band = ComplianceBandingService.Band
+        return [
+            .init(label: "Pass", range: "0", count: 213, pct: 42.4, colorHex: Band.pass.colorHex),
+            .init(label: "Low (1–10)", range: "1–10", count: 167, pct: 33.3,
+                  colorHex: Band.low.colorHex),
+            .init(label: "Med-Low (11–30)", range: "11–30", count: 74, pct: 14.7,
+                  colorHex: Band.medLow.colorHex),
+            .init(label: "Medium (31–50)", range: "31–50", count: 31, pct: 6.2,
+                  colorHex: Band.medium.colorHex),
+            .init(label: "High (>50)", range: "51+", count: 17, pct: 3.4,
+                  colorHex: Band.high.colorHex),
+        ]
+    }()
 
     static let topFailingRules: [FailingRule] = [
         .init(ruleID: "os_sudo_log_enforce",                  fails: 134, baseline: "NIST 800-53r5 Mod"),
@@ -194,7 +199,7 @@ enum DemoData {
 
     static let scheduledRuns: [Schedule] = [
         .init(name: "Weekly Executive Report", profile: "meridian-prod", schedule: "Monday · 07:00",
-              cadence: "weekly", mode: .csvAssisted, next: "Apr 27, 07:00", last: "Apr 20, 07:02",
+              cadence: "weekly", mode: .jamfCLIFull, next: "Apr 27, 07:00", last: "Apr 20, 07:02",
               lastStatus: .ok, artifacts: ["xlsx", "html"], enabled: true),
         .init(name: "Daily Snapshot Collection", profile: "meridian-prod", schedule: "Daily · 06:00",
               cadence: "daily", mode: .snapshotOnly, next: "Apr 26, 06:00", last: "Apr 25, 06:01",
@@ -248,23 +253,6 @@ enum DemoData {
         max(totalDevices - index * 37, 0)
     }
 
-    static let columnMappings: [ColumnMapping] = [
-        .init(key: "computer_name",     label: "Computer Name",      value: "Computer Name", required: true, status: .ok),
-        .init(key: "serial_number",     label: "Serial Number",      value: "Serial Number", required: true, status: .ok),
-        .init(key: "operating_system",  label: "macOS Version",      value: "Operating System Version", required: false, status: .ok),
-        .init(key: "last_checkin",      label: "Last Check-in",      value: "Last Inventory Update",    required: false, status: .ok),
-        .init(key: "department",        label: "Department",         value: "Department",               required: false, status: .ok),
-        .init(key: "email",             label: "Primary Email",      value: "Email Address",            required: false, status: .ok),
-        .init(key: "filevault",         label: "FileVault Status",   value: "FileVault 2 Status",     required: false, status: .ok),
-        .init(key: "sip",               label: "SIP",                value: "System Integrity Protection", required: false, status: .ok),
-        .init(key: "firewall",          label: "Firewall",           value: "Firewall Enabled",          required: false, status: .ok),
-        .init(key: "gatekeeper",        label: "Gatekeeper",         value: "Gatekeeper",                required: false, status: .ok),
-        .init(key: "secure_boot",       label: "Secure Boot Level",  value: "Secure Boot Level",         required: false, status: .ok),
-        .init(key: "bootstrap_token",   label: "Bootstrap Token",    value: "Bootstrap Token Escrowed",  required: false, status: .warn),
-        .init(key: "disk_percent_full", label: "Disk Usage %",       value: "Boot Drive Percentage Full", required: false, status: .ok),
-        .init(key: "manager",           label: "Manager (EA)",       value: "",                          required: false, status: .skip),
-    ]
-
     static let customEAs: [CustomEA] = [
         .init(name: "Disk Usage", column: "Boot Drive Percentage Full", type: .percentage, warn: 80, crit: 90),
         .init(name: "macOS Version", column: "Operating System Version", type: .version, currentVersions: ["15.4", "15.3.2"]),
@@ -296,13 +284,13 @@ enum DemoData {
             id: "C02XK9PHJG5J", name: "MERIDIAN-JS-MBP", serial: "C02XK9PHJG5J",
             os: "15.4", model: "MacBook Pro 14\"", user: "j.silva",
             email: "j.silva@meridian.health", dept: "Engineering", days: 0,
-            fileVault: "Encrypted", failedRules: 0, patchFailures: []
+            fileVault: "Encrypted", patchFailures: []
         ),
         inventoryDevice(
             id: "FVFXK7H8Q6L4", name: "MERIDIAN-RC-MBA", serial: "FVFXK7H8Q6L4",
             os: "15.3.2", model: "MacBook Air 13\"", user: "r.chen",
             email: "r.chen@meridian.health", dept: "Design", days: 0,
-            fileVault: "Encrypted", failedRules: 3,
+            fileVault: "Encrypted",
             patchFailures: [
                 .init(title: "Mozilla Firefox", status: "Retrying", date: "2026-04-25", latestVersion: "125.0.2"),
             ]
@@ -311,13 +299,13 @@ enum DemoData {
             id: "C02ZL3M9KM7H", name: "MERIDIAN-AT-MBP", serial: "C02ZL3M9KM7H",
             os: "15.4", model: "MacBook Pro 16\"", user: "a.thompson",
             email: "a.thompson@meridian.health", dept: "Clinical", days: 0,
-            fileVault: "Encrypted", failedRules: 0, patchFailures: []
+            fileVault: "Encrypted", patchFailures: []
         ),
         inventoryDevice(
             id: "FVFYK2N5P8R3", name: "MERIDIAN-DK-MBA", serial: "FVFYK2N5P8R3",
             os: "14.7.4", model: "MacBook Air 15\"", user: "d.kim",
             email: "d.kim@meridian.health", dept: "Finance", days: 0,
-            fileVault: "Encrypted", failedRules: 12,
+            fileVault: "Encrypted",
             patchFailures: [
                 .init(title: "Google Chrome", status: "Failed", date: "2026-04-25", latestVersion: "124.0.6367.119"),
                 .init(title: "Zoom Workplace", status: "Pending", date: "2026-04-24", latestVersion: "6.0.2"),
@@ -327,13 +315,13 @@ enum DemoData {
             id: "C02ZM4P7QN9K", name: "MERIDIAN-MR-MBP", serial: "C02ZM4P7QN9K",
             os: "15.4", model: "MacBook Pro 14\"", user: "m.rodriguez",
             email: "m.rodriguez@meridian.health", dept: "IT", days: 0,
-            fileVault: "Encrypted", failedRules: 0, patchFailures: []
+            fileVault: "Encrypted", patchFailures: []
         ),
         inventoryDevice(
             id: "FVFXJ8L2R4M7", name: "MERIDIAN-LV-MBA", serial: "FVFXJ8L2R4M7",
             os: "13.7.6", model: "MacBook Air 13\"", user: "l.vasquez",
             email: "l.vasquez@meridian.health", dept: "Operations", days: 0,
-            fileVault: "Not Enabled", failedRules: 47,
+            fileVault: "Not Enabled",
             patchFailures: [
                 .init(title: "Google Chrome", status: "Retrying", date: "2026-04-25", latestVersion: "124.0.6367.119"),
                 .init(title: "Mozilla Firefox", status: "Failed", date: "2026-04-25", latestVersion: "125.0.2"),
@@ -344,7 +332,7 @@ enum DemoData {
             id: "C02YK1N6P3Q8", name: "MERIDIAN-PT-MBP", serial: "C02YK1N6P3Q8",
             os: "15.3.2", model: "MacBook Pro 14\"", user: "p.tanaka",
             email: "p.tanaka@meridian.health", dept: "Research", days: 16,
-            fileVault: "Encrypted", failedRules: 18,
+            fileVault: "Encrypted",
             patchFailures: [
                 .init(title: "Mozilla Firefox", status: "Retrying", date: "2026-04-21", latestVersion: "125.0.2"),
             ]
@@ -353,7 +341,7 @@ enum DemoData {
             id: "FVFZL5M8N2K6", name: "MERIDIAN-BS-MM", serial: "FVFZL5M8N2K6",
             os: "15.4", model: "Mac mini M4", user: "b.singh",
             email: "b.singh@meridian.health", dept: "Engineering", days: 0,
-            fileVault: "Encrypted", failedRules: 0, patchFailures: []
+            fileVault: "Encrypted", patchFailures: []
         ),
     ]
 
@@ -381,10 +369,10 @@ enum DemoData {
         dept: String,
         days: Int,
         fileVault: String,
-        failedRules: Int,
         patchFailures: [DevicePatchFailure]
     ) -> DeviceInventoryRecord {
-        DeviceInventoryRecord(
+        let host = 20 + serial.utf8.reduce(0) { ($0 &* 31 &+ Int($1)) % 200 }
+        return DeviceInventoryRecord(
             id: id,
             name: name,
             serial: serial,
@@ -395,7 +383,7 @@ enum DemoData {
             department: dept,
             building: "HQ",
             site: "Meridian East",
-            ipAddress: "10.42.\(days + 10).\(failedRules + 20)",
+            ipAddress: "10.42.\(days + 10).\(host)",
             assetTag: "MH-\(String(serial.suffix(4)))",
             managedState: "Managed",
             // Taken from `referenceDate`, a local time: the fixed UTC strings these
@@ -409,8 +397,6 @@ enum DemoData {
             firewall: "Enabled",
             gatekeeper: "Enabled",
             bootstrapToken: "Escrowed",
-            diskUsage: failedRules > 30 ? "91%" : "68%",
-            failedRules: failedRules,
             patchFailures: patchFailures,
             source: "demo"
         )

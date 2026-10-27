@@ -29,6 +29,11 @@ struct ContentView: View {
     @State private var isNarrowWindow: Bool?
     /// A sidebar cycle while narrow; cleared when the window widens past the threshold.
     @State private var sidebarOverriddenWhileNarrow = false
+    /// The open Add sheet (`.showAddSheet`).
+    @State private var addRequest: AddSheetRequest?
+    /// Bumped when the Add sheet starts onboarding, so the tab builds a new flow that takes
+    /// the queued product even when setup was already showing.
+    @State private var onboardingRun = 0
 
     /// What the shell shows. `sidebarModeRaw` stays the user's choice; the width rule never
     /// writes it.
@@ -62,6 +67,14 @@ struct ContentView: View {
         } else {
             shell
         }
+    }
+
+    /// The Add sheet's New workspace: the product's onboarding path, on a fresh flow.
+    private func startOnboarding(_ product: AddSheetPlan.NewProduct) {
+        let (path, connection) = product.onboarding
+        FirstLaunchChooserView.queueOnboarding(path, connection: connection)
+        onboardingRun += 1
+        tab = .onboarding
     }
 
     private var showExistingCLISetup: Bool {
@@ -104,7 +117,14 @@ struct ContentView: View {
                             onOpenConfigDoctor: {
                                 AutomationHealthModel.shared.openConfigDoctorRequested = true
                                 tab = .audit
-                            }
+                            },
+                            attentionItems: AutomationHealthModel.shared.attentionItems,
+                            onOpenBackups: { tab = .backups },
+                            onOpenRunHistory: { log in
+                                AutomationHealthModel.shared.openRunLogRequested = log
+                                tab = .runs
+                            },
+                            onDismissAttention: { workspace.dismissAttention() }
                         )
                     }
                     // Reports a newer stable release; also in demo mode, since it is
@@ -140,6 +160,19 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .cycleSidebar)) { _ in
             cycleSidebar()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showAddSheet)) { note in
+            if let refusal = AddSheetPlan.addRefusal(
+                onboardingRunHasWork: workspace.onboardingRunHasWork) {
+                workspace.toast = Toast(message: refusal, style: .info)
+                AccessibilityNotification.Announcement(refusal).post()
+                return
+            }
+            addRequest = AddSheetRequest(product: (note.userInfo?["product"] as? String)
+                .flatMap(AddSheetPlan.NewProduct.init(rawValue:)))
+        }
+        .sheet(item: $addRequest) { request in
+            AddSheet(requested: request.product, onStartOnboarding: startOnboarding)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToTab)) { note in
             if let raw = note.userInfo?["tab"] as? String, let newTab = Tab(rawValue: raw) {
                 workspace.pendingDevicesFilter = DevicesView.DeviceFilter.pending(
@@ -147,9 +180,12 @@ struct ContentView: View {
                 tab = newTab
             }
         }
-        // Switching to a Jamf School workspace removes the Jamf Pro tabs; do not leave the
-        // detail pane on one.
+        // Switching to a Jamf School workspace removes the Jamf Pro tabs, and disconnecting
+        // Protect there removes the Protect tab; do not leave the detail pane on one.
         .onChange(of: workspace.isSchoolWorkspace) { _, _ in
+            if !workspace.tabVisibility(hiddenRaw: hiddenTabsRaw).isVisible(tab) { tab = .overview }
+        }
+        .onChange(of: workspace.protectConnected) { _, _ in
             if !workspace.tabVisibility(hiddenRaw: hiddenTabsRaw).isVisible(tab) { tab = .overview }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToPreviousTab)) { _ in
@@ -236,7 +272,8 @@ struct ContentView: View {
     @ViewBuilder
     private var detailView: some View {
         switch tab {
-        case .overview:          OverviewView()
+        case .overview:
+            if workspace.isSchoolWorkspace { SchoolOverviewView() } else { OverviewView() }
         case .fleet:             FleetOverviewView()
         case .devices:           DevicesView()
         case .deviceLookup:      DeviceLookupView()
@@ -250,7 +287,7 @@ struct ContentView: View {
         case .sources:           SourcesView()
         case .backups:           BackupsView()
         case .settings:          SettingsView()
-        case .onboarding:        OnboardingView()
+        case .onboarding:        OnboardingView().id(onboardingRun)
         case .securityPosture:   SecurityPostureView()
         case .compliancePosture: CompliancePostureView()
         case .complianceBenchmarks: ComplianceBenchmarksView()
@@ -263,13 +300,14 @@ struct ContentView: View {
         case .protectDashboard:  ProtectView()
         case .mobileFleet:       MobileFleetView()
         case .groupInventory:    GroupsView()
+        case .schoolDevices:     SchoolDevicesView()
         }
     }
 
     private func subtitle(for tab: Tab) -> String? {
         switch tab {
         case .overview:          "FLEET"
-        case .fleet:             "MULTI-PROFILE"
+        case .fleet:             "WORKSPACE SUMMARY"
         case .devices:           "INVENTORY"
         case .deviceLookup:      "LOOKUP"
         case .trends:            TrendRange(rawValue: defaultTrendRangeRaw)?.rawValue ?? TrendRange.w4.rawValue
@@ -288,7 +326,7 @@ struct ContentView: View {
         case .reports:           nil
         case .securityPosture:   "SCORE & CONTROLS"
         case .compliancePosture: "BANDS & GAPS"
-        case .complianceBenchmarks: "EXPERIMENTAL · PLATFORM API"
+        case .complianceBenchmarks: "BENCHMARKS & RULES"
         case .patch:             "TITLES & FAILURES"
         case .updates:           "PLANS & FAILURES"
         case .ddmBlueprints:     "DEVICE STATUS · BLUEPRINTS"
@@ -298,6 +336,7 @@ struct ContentView: View {
         case .protectDashboard:  "ALERTS & AGENTS"
         case .mobileFleet:       "IOS · IPADOS"
         case .groupInventory:    "CLASSIC API"
+        case .schoolDevices:     "JAMF SCHOOL"
         }
     }
 

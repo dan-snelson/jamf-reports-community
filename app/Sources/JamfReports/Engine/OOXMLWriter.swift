@@ -95,54 +95,6 @@ enum CellFormat: String, Sendable, CaseIterable {
     case pctRed
     case date
     case int
-
-    /// Return the numeric-format string for this format, if any.
-    var numFmt: String? {
-        switch self {
-        case .pct, .pctGreen, .pctYellow, .pctRed: return "0.0%"
-        case .date: return "yyyy-mm-dd"
-        case .int: return "0"
-        default: return nil
-        }
-    }
-
-    var isBold: Bool { self == .title || self == .header }
-    var isItalic: Bool { self == .subtitle }
-
-    var bgColorHex: String? {
-        switch self {
-        case .green, .pctGreen:  return "C6EFCE"
-        case .yellow, .pctYellow: return "FFEB9C"
-        case .red, .pctRed:      return "FFC7CE"
-        default:                  return nil
-        }
-    }
-
-    var fontColorHex: String? {
-        switch self {
-        case .header:   return "FFFFFF"
-        case .subtitle: return "595959"
-        default:        return nil
-        }
-    }
-
-    var hasBorder: Bool {
-        switch self {
-        case .title, .subtitle: return false
-        default:                return true
-        }
-    }
-
-    var fontSize: Int? {
-        switch self {
-        case .title:    return 14
-        case .subtitle: return 10
-        default:        return nil
-        }
-    }
-
-    // Index in the workbook formats list — populated at write time.
-    var formatIndex: Int { CellFormat.allCases.firstIndex(of: self) ?? 0 }
 }
 
 // MARK: - Column width / row freeze
@@ -167,6 +119,9 @@ struct ImageEmbed: Sendable {
     let filename: String
     let xScale: Double
     let yScale: Double
+    /// Set for a logo: drawn at this height with its own aspect ratio, not stretched over a
+    /// fixed block of cells as a chart is.
+    var fixedHeightEMU: Int? = nil
 }
 
 // MARK: - Merge range
@@ -186,7 +141,7 @@ struct MergeRange: Sendable {
 /// All operations are append-only; the final XML is emitted by `Workbook.finalize()`.
 ///
 /// Thread safety: `@unchecked Sendable` is declared so that dashboard structs
-/// (`CoreDashboard`, `CSVDashboard`, `SchoolDashboard`) — which hold a `Workbook` and
+/// (`CoreDashboard`, `SchoolDashboard`) — which hold a `Workbook` and
 /// must themselves be `Sendable` for Swift 6 strict concurrency — can compile without
 /// error. This class is NOT safe for concurrent mutation. All sheet writes within a
 /// single `Workbook` must be serialized on one task or actor. Generating multiple
@@ -240,6 +195,17 @@ final class Worksheet: @unchecked Sendable {
         ))
     }
 
+    /// Puts a logo in row 0, one empty column right of the title's merged range (and of any
+    /// image already in row 0), so it never covers the title or the table below it.
+    func insertLogo(data: Data, filename: String) {
+        let titleEnd = mergeRanges.filter { $0.firstRow == 0 }.map(\.lastCol).max() ?? 0
+        // An image block spans four columns.
+        let imageEnd = imageEmbeds.filter { $0.row == 0 }.map { $0.col + 3 }.max() ?? 0
+        imageEmbeds.append(ImageEmbed(
+            row: 0, col: max(titleEnd, imageEnd) + 2, data: data, filename: filename,
+            xScale: 1.0, yScale: 1.0, fixedHeightEMU: 457_200))
+    }
+
     /// Cells de-duplicated by `(row, col)`, keeping the LAST write — matching
     /// `xlsxwriter`'s last-write-wins semantics. Excel rejects a worksheet that
     /// contains two `<c>` elements with the same `r` reference inside one
@@ -276,7 +242,7 @@ final class Worksheet: @unchecked Sendable {
 /// ```
 ///
 /// Thread safety: `@unchecked Sendable` is declared so that dashboard structs
-/// (`CoreDashboard`, `CSVDashboard`, `SchoolDashboard`) — which hold a `Workbook` and
+/// (`CoreDashboard`, `SchoolDashboard`) — which hold a `Workbook` and
 /// must themselves be `Sendable` for Swift 6 strict concurrency — can compile without
 /// error. This class is NOT safe for concurrent mutation. All sheet writes within a
 /// single `Workbook` must be serialized on one task or actor. Generating multiple
@@ -297,6 +263,8 @@ final class Workbook: @unchecked Sendable {
         sheets.append(ws)
         return ws
     }
+
+    var firstSheet: Worksheet? { sheets.first }
 
     /// Return the first worksheet whose name matches `name` (exact, after sanitization).
     func sheet(named name: String) -> Worksheet? {
@@ -794,11 +762,22 @@ final class Workbook: @unchecked Sendable {
                 emuCX = Int(1200.0 / defaultDPI * emuPerInch * embed.xScale)
                 emuCY = Int(600.0 / defaultDPI * emuPerInch * embed.yScale)
             }
-            xml += "<xdr:twoCellAnchor editAs=\"oneCell\">"
-            xml += "<xdr:from><xdr:col>\(embed.col)</xdr:col><xdr:colOff>0</xdr:colOff>"
-            xml += "<xdr:row>\(embed.row)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
-            xml += "<xdr:to><xdr:col>\(embed.col+4)</xdr:col><xdr:colOff>0</xdr:colOff>"
-            xml += "<xdr:row>\(embed.row+15)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+            // A logo's anchor and picture share one size, so the picture is not scaled again.
+            let logoExt = embed.fixedHeightEMU.map {
+                (cx: Int(Double($0) * Double(emuCX) / Double(max(emuCY, 1))), cy: $0)
+            }
+            if let ext = logoExt {
+                xml += "<xdr:oneCellAnchor>"
+                xml += "<xdr:from><xdr:col>\(embed.col)</xdr:col><xdr:colOff>0</xdr:colOff>"
+                xml += "<xdr:row>\(embed.row)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+                xml += "<xdr:ext cx=\"\(ext.cx)\" cy=\"\(ext.cy)\"/>"
+            } else {
+                xml += "<xdr:twoCellAnchor editAs=\"oneCell\">"
+                xml += "<xdr:from><xdr:col>\(embed.col)</xdr:col><xdr:colOff>0</xdr:colOff>"
+                xml += "<xdr:row>\(embed.row)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
+                xml += "<xdr:to><xdr:col>\(embed.col+4)</xdr:col><xdr:colOff>0</xdr:colOff>"
+                xml += "<xdr:row>\(embed.row+15)</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+            }
             xml += "<xdr:pic><xdr:nvPicPr>"
             xml += "<xdr:cNvPr id=\"\(idx+2)\" name=\"Image \(idx+1)\"/>"
             xml += "<xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr>"
@@ -806,9 +785,10 @@ final class Workbook: @unchecked Sendable {
             xml += "<a:blip r:embed=\"rId\(idx+1)\"/>"
             xml += "<a:stretch><a:fillRect/></a:stretch>"
             xml += "</xdr:blipFill><xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/>"
-            xml += "<a:ext cx=\"\(emuCX)\" cy=\"\(emuCY)\"/>"
+            xml += "<a:ext cx=\"\(logoExt?.cx ?? emuCX)\" cy=\"\(logoExt?.cy ?? emuCY)\"/>"
             xml += "</a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr>"
-            xml += "</xdr:pic><xdr:clientData/></xdr:twoCellAnchor>"
+            xml += "</xdr:pic><xdr:clientData/>"
+            xml += embed.fixedHeightEMU == nil ? "</xdr:twoCellAnchor>" : "</xdr:oneCellAnchor>"
         }
         xml += "</xdr:wsDr>"
         return xml

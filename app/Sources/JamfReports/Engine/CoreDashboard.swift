@@ -19,6 +19,8 @@ struct CoreDashboard: Sendable {
     /// GUI-generate-only AI executive narrative (F3). nil (the default) writes
     /// no AI block on the Executive Summary sheet — headless callers never set it.
     let aiNarrative: String?
+    /// The generate run's log, for a sheet's `[warn]` line. Nil writes to stdout only.
+    let onLine: (@Sendable (CLIBridge.LogLine) -> Void)?
     /// Shared by the copies of this struct that `sheetPlan`'s closures hold.
     private let hardwareIndex = OnceCache<[String: Bool]>()
     /// The `computers` snapshot's dates, read once for every sheet that grades by the stale rule.
@@ -29,8 +31,10 @@ struct CoreDashboard: Sendable {
         dataDir: URL,
         workbook: Workbook,
         provenance: Provenance? = nil,
-        aiNarrative: String? = nil
+        aiNarrative: String? = nil,
+        onLine: (@Sendable (CLIBridge.LogLine) -> Void)? = nil
     ) {
+        self.onLine = onLine
         self.config = config
         self.dataDir = dataDir
         self.workbook = workbook
@@ -61,7 +65,7 @@ struct CoreDashboard: Sendable {
     /// range comment (e.g., "sheets 28–32"), and add a corresponding test in
     /// `SheetOrderTests.swift`.
     var sheetPlan: [(name: String, write: () throws -> Void)] {
-        [
+        let leading: [(name: String, write: () throws -> Void)] = [
             // --- Framing / exec-priority (sheets 1–8) ---
             ("Executive Summary", writeExecutiveSummary),
             ("Cover", writeCoverSheet),
@@ -89,6 +93,7 @@ struct CoreDashboard: Sendable {
             // --- Device health (sheets 22–24) ---
             ("Check-in Health", writeCheckinHealth),
             ("Active Devices", writeActiveDevices),
+            ("Fleet Drift", writeFleetDrift),
             ("Group Hygiene", writeGroupHygiene),
             // --- Update & patch details (sheets 25–28) ---
             ("Patch Failures", writePatchFailures),
@@ -102,13 +107,8 @@ struct CoreDashboard: Sendable {
             ("Blueprint Status", writeBlueprintStatus),
             ("DDM Device Status", writeDDMDeviceStatus),
             ("MDM Command Health", writeMDMCommandHealth),
-            // --- Protect (sheets 35–40, optional) ---
-            ("Protect Overview", writeProtectOverview),
-            ("Protect Alerts", writeProtectAlerts),
-            ("Protect Computers", writeProtectComputers),
-            ("Protect Insights", writeProtectInsights),
-            ("Protect Plans", writeProtectPlans),
-            ("Protect Threat Overview", writeProtectThreatOverview),
+        ]
+        let trailing: [(name: String, write: () throws -> Void)] = [
             // --- Parity / detail sheets (sheets 41–44) ---
             ("Patch Summary Dashboard", writePatchSummaryDashboard),
             ("Patch Velocity", writePatchVelocity),
@@ -120,6 +120,35 @@ struct CoreDashboard: Sendable {
             ("mSCP Compliance", writeMSCPCompliance),
             ("Compliance Trend", writeComplianceTrend),
         ]
+        // --- Protect (sheets 35–40, optional) ---
+        return leading + protectSheetPlan + trailing
+    }
+
+    /// The Protect tabs, also written into the Jamf School workbook (`SchoolDashboard`, 2.11).
+    static let protectSheetNames = [
+        "Protect Overview", "Protect Alerts", "Protect Computers", "Protect Insights",
+        "Protect Plans", "Protect Threat Overview",
+    ]
+
+    var protectSheetPlan: [(name: String, write: () throws -> Void)] {
+        [
+            ("Protect Overview", gatedOnProtect(writeProtectOverview)),
+            ("Protect Alerts", gatedOnProtect(writeProtectAlerts)),
+            ("Protect Computers", gatedOnProtect(writeProtectComputers)),
+            ("Protect Insights", gatedOnProtect(writeProtectInsights)),
+            ("Protect Plans", gatedOnProtect(writeProtectPlans)),
+            ("Protect Threat Overview", gatedOnProtect(writeProtectThreatOverview)),
+        ]
+    }
+
+    /// A Protect tab is written only while protect.enabled is on, as in the HTML report: a
+    /// workspace that turned Protect off keeps its old `protect-*` snapshots on disk.
+    private func gatedOnProtect(_ write: @escaping () throws -> Void) -> () throws -> Void {
+        let enabled = config.protect?.isEnabled == true
+        return {
+            guard enabled else { throw CoreDashboardError.protectDisabled }
+            try write()
+        }
     }
 
     // MARK: - Sheet title helper
@@ -221,7 +250,7 @@ struct CoreDashboard: Sendable {
         if let s = summaryData {
             let total = s.totalDevices ?? 0
             var fields: [(String, String)] = [
-                ("Total Devices", "\(total)"),
+                ("Total Computers", "\(total)"),
                 ("FileVault Encrypted", percentLabel(s.fileVaultEncrypted, total: total)),
                 ("Gatekeeper Enabled", percentLabel(s.gatekeeperEnabled, total: total)),
                 ("SIP Enabled", percentLabel(s.sipEnabled, total: total)),
@@ -697,7 +726,7 @@ struct CoreDashboard: Sendable {
 
     /// What a sheet's subtitle says about the rule: the window, and the dates when they are
     /// not just the check-in.
-    private func ruleSubtitle(_ rule: StaleRule, window: String = "Stale threshold") -> String {
+    func ruleSubtitle(_ rule: StaleRule, window: String = "Stale threshold") -> String {
         rule.usesDefaultBasis
             ? "\(window): \(rule.days) days"
             : "\(window): \(rule.days) days since \(rule.basisPhrase)"
@@ -1268,7 +1297,7 @@ struct CoreDashboard: Sendable {
         ws.write("Count", row: row, col: 1, format: .header)
         ws.write("% of Total", row: row, col: 2, format: .header)
         row += 1
-        ws.write("Total Devices", row: row, col: 0, format: .cell)
+        ws.write("Total Computers", row: row, col: 0, format: .cell)
         ws.write(total, row: row, col: 1, format: .cell)
         ws.write("", row: row, col: 2, format: .cell)
         row += 1
@@ -1481,7 +1510,7 @@ struct CoreDashboard: Sendable {
         ws.setColumnWidth(1, 1, 14)
 
         let pairs: [(String, Int)] = [
-            ("Total Devices", total),
+            ("Total Computers", total),
             ("Active (non-stale)", active),
             ("Stale Devices", stale),
             ("Managed", managed),
@@ -1646,7 +1675,7 @@ struct CoreDashboard: Sendable {
 
     /// The inventory rows the mobile sheets read: the newest `mobile-devices-list`, or a
     /// newer legacy `mobile-device-inventory-details` snapshot, whose rows carry sections.
-    /// Same choice the Mobile Fleet screen makes (`MobileFleetService.inventorySource`).
+    /// Same choice the Mobile Devices screen makes (`MobileFleetService.inventorySource`).
     private func loadMobileInventoryRows() -> [MobileDeviceInventoryItem] {
         let newestPerKind = [
             ["mobile-devices-list", "mobile_devices_list"],
@@ -1663,7 +1692,7 @@ struct CoreDashboard: Sendable {
 
     /// Normalize mobile device records from the inventory rows, joined to the devices-list
     /// row with the same id, or from the devices-list alone. Fields are read through
-    /// `MobileFleetService`, so the workbook and the Mobile Fleet screen agree. A blank
+    /// `MobileFleetService`, so the workbook and the Mobile Devices screen agree. A blank
     /// string means the snapshot does not report the field.
     private func normalizeMobileInventory() -> [[String: Any]] {
         let rich = loadMobileInventoryRows()
@@ -1834,23 +1863,7 @@ struct CoreDashboard: Sendable {
     }
 
     private func daysSinceDate(_ raw: String) -> Int? {
-        guard !raw.isEmpty else { return nil }
-        let fmts = [
-            ISO8601DateFormatter(),
-        ]
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        var parsed: Date?
-        for fmt in fmts {
-            if let d = fmt.date(from: raw) { parsed = d; break }
-        }
-        if parsed == nil {
-            for pattern in ["yyyy-MM-dd'T'HH:mm:ss.SSSZ", "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd"] {
-                df.dateFormat = pattern
-                if let d = df.date(from: raw) { parsed = d; break }
-            }
-        }
-        guard let date = parsed else { return nil }
+        guard let date = DateParser().parse(raw) else { return nil }
         return Calendar.current.dateComponents([.day], from: date, to: Date()).day
     }
 
@@ -1896,11 +1909,14 @@ struct CoreDashboard: Sendable {
         let ws = workbook.addSheet("Compliance Rules")
         let ts = ISO8601DateFormatter().string(from: Date())
         var row = ws.writeSheetHeader(title: t("Compliance Rules"),
-                                      subtitle: "Generated: \(ts)", ncols: 7)
+                                      subtitle: "Generated: \(ts)", ncols: 8)
         ws.setColumnWidth(0, 0, 24)
         ws.setColumnWidth(1, 1, 40)
         ws.setColumnWidth(2, 6, 12)
-        let hdrs = ["Benchmark", "Rule", "Passed", "Failed", "Unknown", "Devices", "Pass Rate"]
+        ws.setColumnWidth(7, 7, 28)
+        // Rule ID goes last so the columns Power BI already reads keep their positions and types.
+        let hdrs = ["Benchmark", "Rule", "Passed", "Failed", "Unknown", "Devices", "Pass Rate",
+                    "Rule ID"]
         for (col, h) in hdrs.enumerated() { ws.write(h, row: row, col: col, format: .header) }
         row += 1
         for item in items {
@@ -1912,6 +1928,7 @@ struct CoreDashboard: Sendable {
             ws.write(asInt(item["unknown"]), row: row, col: 4, format: .cell)
             ws.write(asInt(item["devices"]), row: row, col: 5, format: .cell)
             ws.write(pctStr, row: row, col: 6, format: colorForPctString(pctStr))
+            ws.write(item["ruleId"] as? String ?? "", row: row, col: 7, format: .cell)
             row += 1
         }
     }
@@ -1978,7 +1995,7 @@ struct CoreDashboard: Sendable {
 
     // MARK: - DDM Device Status
     // Source: `ddm-device-status` snapshot (ReportEngine+DeviceScan, jamf-cli
-    // `pro ddm-status status-items` per DDM-enabled Mac). One row per device.
+    // `pro declarative-device-management status-items` per DDM-enabled Mac). One row per device.
 
     func writeDDMDeviceStatus() throws {
         let raw = try loadLatestJSON(names: ["ddm-device-status"])
@@ -2379,8 +2396,9 @@ struct CoreDashboard: Sendable {
         // Fleet Overview section
         ws.write("FLEET OVERVIEW", row: row, col: 0, format: .header)
         row += 1
-        for (label, value) in [("Total Devices", totalEnrolled), ("Active Devices", activeCount),
-                                ("Inactive Devices", inactiveCount)] {
+        for (label, value) in [("Total Computers", totalEnrolled),
+                               ("Active Computers", activeCount),
+                               ("Inactive Computers", inactiveCount)] {
             ws.write(label, row: row, col: 0, format: .cell)
             ws.write(value, row: row, col: 1, format: .cell)
             row += 1
@@ -2961,7 +2979,7 @@ struct CoreDashboard: Sendable {
 
         var metricRows: [(String, String)] = [
             ("Security Score", scoreLabel),
-            ("Total Devices", fmtInt(m.totalDevices)),
+            ("Total Computers", fmtInt(m.totalDevices)),
             ("Managed Devices", fmtInt(m.managedCount)),
             ("Patch Fleet Compliance", fmtPct(m.patchFleetCompliancePct)),
             ("FileVault Coverage", fmtPct(m.fileVaultPct)),
@@ -3538,16 +3556,6 @@ struct CoreDashboard: Sendable {
 
     // MARK: - Value coercions
 
-    private func asInt(_ value: Any?) -> Int? {
-        switch value {
-        case let n as Int: return n
-        case let d as Double: return Int(exactly: d.rounded())
-        case let s as String: return Int(s)
-        case let n as NSNumber: return n.intValue
-        default: return nil
-        }
-    }
-
     private func asBool(_ value: Any?) -> Bool? {
         switch value {
         case let b as Bool: return b
@@ -3758,9 +3766,12 @@ struct CoreDashboard: Sendable {
 
 enum CoreDashboardError: Error, LocalizedError, SheetSkippable {
     case noCachedData(names: [String])
+    case protectDisabled
 
     var errorDescription: String? {
         switch self {
+        case .protectDisabled:
+            return "protect.enabled is off"
         case .noCachedData(let names):
             return "No cached jamf-cli snapshot found for: \(names.joined(separator: ", "))"
         }

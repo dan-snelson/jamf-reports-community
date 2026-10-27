@@ -1,94 +1,53 @@
 import Charts
 import SwiftUI
 
+/// The active workspace's fleet: its latest summary, issues and stability trend. Another
+/// workspace can be a different Jamf Pro server, so this screen never shows two; the sidebar
+/// profile switcher changes what it shows.
 struct FleetOverviewView: View {
     @Environment(WorkspaceStore.self) private var workspace
     @Environment(\.colorSchemeContrast) private var contrast
 
-    // WCAG 1.4.4: Dynamic Type scaling for KPI numerals
-    @State private var rows: [FleetProfileOverview] = []
+    @State private var overview: FleetWorkspaceOverview?
     @State private var isLoading = false
-    @State private var issuesOnly: Bool = false
-    @State private var showIssuePopover = false
-    /// State-driven drill-down instead of a NavigationStack — this view is
-    /// hosted inside ContentView.shell's own NavigationStack, and nested
-    /// stacks are unsupported (the pushed page layers over the outer stack's
-    /// root, silently swallowing tab-switch actions fired from inside it).
-    @State private var drilledProfile: String?
 
-    init(drilledProfile: String? = nil) {
-        _drilledProfile = State(initialValue: drilledProfile)
-    }
-
-    private var visibleRows: [FleetProfileOverview] {
-        issuesOnly ? rows.filter(\.hasIssue) : rows
-    }
-
-    private var profileKey: String {
-        "\(workspace.demoMode)|" + workspace.initializedProfiles.map(\.name).joined(separator: "|")
-    }
-
-    private var totalDevices: Int {
-        rows.reduce(0) { $0 + ($1.summary?.totalDevices ?? 0) }
-    }
-
-    private var averageStability: Double? {
-        let values = rows.compactMap { $0.summary?.stabilityIndex }
-        guard !values.isEmpty else { return nil }
-        return values.reduce(0, +) / Double(values.count)
-    }
-
-    private var latestRunDate: String {
-        rows.compactMap { $0.summary?.date }.max() ?? "No successful runs"
-    }
+    /// The loaded overview, only while it is the sidebar profile's.
+    private var current: FleetWorkspaceOverview? { overview?.shown(for: workspace.profile) }
 
     var body: some View {
-        Group {
-            if let profile = drilledProfile {
-                if let row = rows.first(where: { $0.profile == profile }) {
-                    profileDetail(row)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                ProvenanceBadge(
+                    asOf: current?.summary?.date,
+                    sources: current?.summary?.collectionSources
+                )
+                if let overview = current {
+                    workspaceDetail(overview)
                 } else {
-                    // Profile data not yet loaded; show placeholder.
-                    VStack(spacing: 8) {
-                        ProgressView()
-                        Text("Loading \(profile)…")
-                            .font(.body)
-                            .foregroundStyle(Theme.Colors.fg2)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        header
-                        ProvenanceBadge(
-                            asOf: rows.compactMap { $0.summary?.date }.max()
-                        )
-                        summaryStrip
-                        issuesFilter
-                        profileGrid
-                    }
-                    .padding(EdgeInsets(top: Theme.Metrics.pagePadTop,
-                                        leading: Theme.Metrics.pagePadH,
-                                        bottom: Theme.Metrics.pagePadBottom,
-                                        trailing: Theme.Metrics.pagePadH))
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 48)
                 }
             }
+            .padding(EdgeInsets(top: Theme.Metrics.pagePadTop,
+                                leading: Theme.Metrics.pagePadH,
+                                bottom: Theme.Metrics.pagePadBottom,
+                                trailing: Theme.Metrics.pagePadH))
         }
-        .task(id: profileKey) {
+        .background(Theme.Colors.winBG)
+        .task(id: workspace.fleetOverviewLoadKey) {
             await load()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .popToRootNavigation)) { _ in
-            drilledProfile = nil
         }
     }
 
     private var header: some View {
         PageHeader(
-            kicker: "Multi-Profile Fleet",
-            breadcrumbs: [Breadcrumb(label: "Overview", action: { navigateToOverview() })],
+            kicker: workspace.profile,
+            breadcrumbs: [Breadcrumb(label: "Overview", action: { navigate(to: .overview) })],
             title: "Fleet Overview",
-            subtitle: "Aggregated trend summaries across initialized profiles"
+            subtitle: current?.summary.map { "Latest summary \($0.date)" }
+                ?? "No successful summary found for this workspace"
         ) {
             AnyView(
                 HStack(spacing: 8) {
@@ -98,333 +57,104 @@ struct FleetOverviewView: View {
                     PNPButton(title: "Refresh", icon: "arrow.clockwise") {
                         Task { await load() }
                     }
-                    .help("Re-aggregate every initialized profile's latest summary snapshot.")
+                    .help("Re-read this workspace's latest summary snapshot.")
                 }
             )
         }
     }
 
-    private func navigateToOverview() {
-        NotificationCenter.default.post(
-            name: .navigateToTab,
-            object: nil,
-            userInfo: ["tab": Tab.overview.rawValue]
-        )
-    }
+    @ViewBuilder
+    private func workspaceDetail(_ row: FleetWorkspaceOverview) -> some View {
+        // #184: each flagged condition gets its explanation and a route to the
+        // screen where the operator can act on it.
+        if row.hasIssue {
+            profileIssuesCard(for: row)
+        }
 
-    private var issueCount: Int {
-        rows.filter(\.hasIssue).count
-    }
-
-    private var stabilitySpark: [Double] {
-        rows.compactMap { $0.summary?.stabilityIndex }
-    }
-
-    // DRAFT — needs visual verification at PageScaffold.minSupportedWidth.
-    // An HStack centred tiles of different heights, so the Stability tile's
-    // sparkline pushed its neighbours' tops out of line. The grid gives the row
-    // one height and wraps to two columns in a narrow window.
-    private var summaryStrip: some View {
-        EqualHeightTileGrid(minTileWidth: 200) {
-            StatTile(label: "Profiles", value: "\(rows.count)", sub: "Initialized workspaces",
-                     fillsHeight: true)
-                .overlay(alignment: .topTrailing) {
-                    if issueCount > 0 {
-                        Button {
-                            showIssuePopover = true
-                        } label: {
-                            Pill(text: "\(issueCount) Issue\(issueCount == 1 ? "" : "s")", tone: .danger)
-                        }
-                        .buttonStyle(.plain)
-                        .help("List the profiles with issues and what tripped each one.")
-                        .accessibilityLabel("\(issueCount) issue\(issueCount == 1 ? "" : "s") — show details")
-                        .popover(isPresented: $showIssuePopover, arrowEdge: .bottom) {
-                            issuePopover
-                        }
-                        .padding(8)
-                    }
-                }
-            StatTile(label: "Macs", value: "\(totalDevices)", sub: "Latest successful summaries",
-                     fillsHeight: true)
+        HStack(spacing: 12) {
+            StatTile(
+                label: "Macs",
+                value: row.summary.map { "\($0.totalDevices)" } ?? "--",
+                sub: "Latest successful summary"
+            )
             StatTile(
                 label: "Stability",
-                value: stabilityLabel(averageStability),
-                sub: "Average index",
-                sparkValues: stabilitySpark.isEmpty ? nil : stabilitySpark,
-                sparkColor: Theme.Colors.teal,
-                fillsHeight: true
+                value: stabilityLabel(row.summary?.stabilityIndex),
+                sub: "Composite index"
             )
-            latestRunTile
+            StatTile(
+                label: "Stale",
+                value: row.summary?.staleCount.map { "\($0)" } ?? "--",
+                sub: ">30d since contact"
+            )
+            StatTile(
+                label: "Patch",
+                value: row.summary?.patchPct.map { "\(String(format: "%.1f", $0))%" } ?? "--",
+                sub: "Devices on latest"
+            )
         }
+
+        stabilityTrendCard(for: row)
+        summaryDetailsCard(for: row)
     }
 
-    private var latestRunTile: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Kicker(text: "Latest Run")
-            Text(latestRunDate)
-                .font(Theme.Fonts.mono(18, weight: .semibold))
-                .foregroundStyle(Theme.Colors.fg)
-                .monospacedDigit()
-                .contentTransition(.numericText())
-            Text("Most recent summary across all profiles")
-                .font(.caption)
-                .foregroundStyle(Theme.Text.tertiary(contrast))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
-        // Fills the grid row like its StatTile neighbours.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.Colors.winBG2)
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Metrics.cardRadius, style: .continuous)
-                .strokeBorder(Theme.Colors.hairlineStrong, lineWidth: 0.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Metrics.cardRadius, style: .continuous))
-    }
-
-    /// #184: the badge answers "what is the issue" directly — one row per
-    /// flagged profile with its reasons; clicking opens that profile's
-    /// drill-down (which explains each reason and links to the fix surface).
-    private var issuePopover: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Profiles with issues")
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(Theme.Colors.fg)
-            ForEach(rows.filter(\.hasIssue)) { row in
-                Button {
-                    showIssuePopover = false
-                    drilledProfile = row.profile
-                } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(row.profile)
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(Theme.Colors.fg)
-                            Spacer(minLength: 12)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(Theme.Colors.goldBright)
-                        }
-                        Text(row.issues.map(\.reason).joined(separator: " · "))
-                            .font(.caption)
-                            .foregroundStyle(Theme.Colors.warn)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(
-                    "\(row.profile): \(row.issues.map(\.reason).joined(separator: ", "))"
-                )
-            }
-        }
-        .padding(14)
-        .frame(minWidth: 300, maxWidth: 420)
-    }
-
-    private var issuesFilter: some View {
-        HStack {
-            Toggle("Issues Only", isOn: $issuesOnly)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .font(.body.weight(.medium))
-                .foregroundStyle(Theme.Colors.fg2)
-            Spacer()
-        }
-    }
-
-    private var profileGrid: some View {
-        Group {
-            if visibleRows.isEmpty && issuesOnly {
+    private func summaryDetailsCard(for row: FleetWorkspaceOverview) -> some View {
+        Card(padding: 18) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack {
+                    SectionHeader(title: "Summary Details")
                     Spacer()
+                    let index = row.summary?.stabilityIndex
+                    Pill(
+                        text: row.summary == nil ? "No Data" : stabilityPillText(index),
+                        tone: stabilityTone(index)
+                    )
+                    .accessibilityLabel(
+                        stabilityAccessibilityLabel(index, hasSummary: row.summary != nil))
+                }
+
+                if let summary = row.summary {
                     VStack(spacing: 10) {
-                        Image(systemName: "checkmark.shield")
-                            .font(.system(size: 32, weight: .light))
-                            .foregroundStyle(Theme.Colors.teal)
-                        Text("No profiles with issues — fleet looks healthy")
-                            .font(.body)
-                            .foregroundStyle(Theme.Text.tertiary(contrast))
-                        PNPButton(title: "Show all profiles", icon: "list.bullet", size: .sm) {
-                            issuesOnly = false
-                        }
-                        .help("Disable the Issues-Only filter to see every profile.")
+                        profileMetricRow("Compliance", value: summary.compliancePct)
+                        profileMetricRow("FileVault", value: summary.fileVaultPct)
+                        profileMetricRow("Current macOS", value: summary.osCurrentPct)
+                        profileMetricRow("EDR Agent", value: summary.crowdstrikePct)
+                        profileMetricRow("Patch", value: summary.patchPct)
+                        profileMetricRow("Stale", value: stalePercent(summary), inverse: true)
                     }
-                    .padding(.vertical, 48)
+                } else {
+                    Text("Run a schedule or generate a report for this workspace to create its first summary.")
+                        .font(.callout)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Divider().background(Theme.Colors.hairline)
+
+                HStack {
+                    Text("Open the relevant surface.")
+                        .font(.callout)
+                        .foregroundStyle(Theme.Text.tertiary(contrast))
                     Spacer()
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 20) {
-                    ForEach(rowGroups) { group in
-                        VStack(alignment: .leading, spacing: 10) {
-                            if let title = group.title { SectionHeader(title: title) }
-                            profileCards(group.rows)
-                        }
+                    PNPButton(title: "Overview", icon: Tab.overview.sfSymbol, size: .sm) {
+                        navigate(to: .overview)
                     }
-                }
-            }
-        }
-    }
-
-    private struct RowGroup: Identifiable {
-        let id: String
-        /// Nil when no connection exists, so the grid keeps its one headerless list.
-        let title: String?
-        let rows: [FleetProfileOverview]
-    }
-
-    /// The visible rows under their connections, then the profiles in none. With no
-    /// connection there is a single group with no header.
-    private var rowGroups: [RowGroup] {
-        let grouping = workspace.initializedConnectionGrouping
-        guard grouping.hasConnections else {
-            return [RowGroup(id: "all", title: nil, rows: visibleRows)]
-        }
-        let byProfile = Dictionary(
-            visibleRows.map { ($0.profile, $0) }, uniquingKeysWith: { first, _ in first })
-        var groups = grouping.sections.map { section in
-            RowGroup(
-                id: section.id.uuidString, title: section.connection.name,
-                rows: section.entries.compactMap { byProfile[$0.profile.name] })
-        }
-        if !grouping.ungrouped.isEmpty {
-            groups.append(RowGroup(
-                id: "ungrouped", title: "Other workspaces",
-                rows: grouping.ungrouped.compactMap { byProfile[$0.name] }))
-        }
-        return groups.filter { !$0.rows.isEmpty }
-    }
-
-    private func profileCards(_ rows: [FleetProfileOverview]) -> some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 270), spacing: 12, alignment: .top)],
-            alignment: .leading,
-            spacing: 12
-        ) {
-            ForEach(rows) { row in
-                Button {
-                    drilledProfile = row.profile
-                } label: {
-                    FleetProfileCard(row: row)
-                        .fleetDrillDownChrome()
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Open \(row.profile) fleet details")
-                .help("Open \(row.profile) fleet details")
-            }
-        }
-    }
-
-    private func profileDetail(_ row: FleetProfileOverview) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                PageHeader(
-                    kicker: row.profile,
-                    breadcrumbs: [Breadcrumb(label: "Fleet", action: { drilledProfile = nil })],
-                    title: row.profile,
-                    subtitle: row.summary.map { "Latest summary \($0.date)" }
-                        ?? "No successful summary found for this profile"
-                )
-
-                ProvenanceBadge(
-                    asOf: row.summary?.date,
-                    sources: row.summary?.collectionSources
-                )
-
-                // #184: the issue context must survive the drill-down — each
-                // flagged condition gets its explanation and a route to the
-                // screen where the operator can act on it.
-                if row.hasIssue {
-                    profileIssuesCard(for: row)
-                }
-
-                HStack(spacing: 12) {
-                    StatTile(
-                        label: "Macs",
-                        value: row.summary.map { "\($0.totalDevices)" } ?? "--",
-                        sub: "Latest successful summary"
-                    )
-                    StatTile(
-                        label: "Stability",
-                        value: stabilityLabel(row.summary?.stabilityIndex),
-                        sub: "Composite index"
-                    )
-                    StatTile(
-                        label: "Stale",
-                        value: row.summary?.staleCount.map { "\($0)" } ?? "--",
-                        sub: ">30d since contact"
-                    )
-                    StatTile(
-                        label: "Patch",
-                        value: row.summary?.patchPct.map { "\(String(format: "%.1f", $0))%" } ?? "--",
-                        sub: "Devices on latest"
-                    )
-                }
-
-                stabilityTrendCard(for: row)
-
-                Card(padding: 18) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack {
-                            SectionHeader(title: "Summary Details")
-                            Spacer()
-                            Pill(
-                                text: row.summary == nil ? "No Data" : stabilityLabel(row.summary?.stabilityIndex),
-                                tone: stabilityTone(row.summary?.stabilityIndex)
-                            )
-                        }
-
-                        if let summary = row.summary {
-                            VStack(spacing: 10) {
-                                profileMetricRow("Compliance", value: summary.compliancePct)
-                                profileMetricRow("FileVault", value: summary.fileVaultPct)
-                                profileMetricRow("Current macOS", value: summary.osCurrentPct)
-                                // Generic label: Fleet Overview aggregates multiple
-                                // profiles, which may run different EDR products.
-                                profileMetricRow("EDR Agent", value: summary.crowdstrikePct)
-                                profileMetricRow("Patch", value: summary.patchPct)
-                                profileMetricRow("Stale", value: stalePercent(summary), inverse: true)
-                            }
-                        } else {
-                            Text("Run a schedule or generate a report for this workspace to create its first summary.")
-                                .font(.callout)
-                                .foregroundStyle(Theme.Text.tertiary(contrast))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Divider().background(Theme.Colors.hairline)
-
-                        HStack {
-                            Text("Switch to this workspace and open the relevant surface.")
-                                .font(.callout)
-                                .foregroundStyle(Theme.Text.tertiary(contrast))
-                            Spacer()
-                            PNPButton(title: "Overview", icon: Tab.overview.sfSymbol, size: .sm) {
-                                open(row.profile, tab: .overview)
-                            }
-                            .help("Switch to `\(row.profile)` and open the Overview tab.")
-                            PNPButton(title: "Devices", icon: Tab.devices.sfSymbol, size: .sm) {
-                                open(row.profile, tab: .devices)
-                            }
-                            .help("Switch to `\(row.profile)` and open the Devices tab.")
-                            PNPButton(title: "Runs", icon: Tab.runs.sfSymbol, size: .sm) {
-                                open(row.profile, tab: .runs)
-                            }
-                            .help("Switch to `\(row.profile)` and open the Runs tab.")
-                            PNPButton(title: "Schedules", icon: Tab.schedules.sfSymbol, size: .sm) {
-                                open(row.profile, tab: .schedules)
-                            }
-                            .help("Switch to `\(row.profile)` and open the Schedules tab.")
-                        }
+                    .help("Open the Overview tab.")
+                    PNPButton(title: "Computers", icon: Tab.devices.sfSymbol, size: .sm) {
+                        navigate(to: .devices)
                     }
+                    .help("Open the Computers tab.")
+                    PNPButton(title: "Runs", icon: Tab.runs.sfSymbol, size: .sm) {
+                        navigate(to: .runs)
+                    }
+                    .help("Open the Runs tab.")
+                    PNPButton(title: "Schedules", icon: Tab.schedules.sfSymbol, size: .sm) {
+                        navigate(to: .schedules)
+                    }
+                    .help("Open the Schedules tab.")
                 }
             }
-            .padding(EdgeInsets(top: Theme.Metrics.pagePadTop,
-                                leading: Theme.Metrics.pagePadH,
-                                bottom: Theme.Metrics.pagePadBottom,
-                                trailing: Theme.Metrics.pagePadH))
         }
-        .background(Theme.Colors.winBG)
     }
 
     private func stabilityTrendPoints(_ summaries: [DailySummary]) -> [StabilityTrendPoint] {
@@ -436,7 +166,7 @@ struct FleetOverviewView: View {
         }
     }
 
-    private func stabilityTrendCard(for row: FleetProfileOverview) -> some View {
+    private func stabilityTrendCard(for row: FleetWorkspaceOverview) -> some View {
         let points = stabilityTrendPoints(row.summaries)
         return Card(padding: 18) {
             VStack(alignment: .leading, spacing: 14) {
@@ -476,7 +206,8 @@ struct FleetOverviewView: View {
                     y: .value("Stability", point.value)
                 )
                 .foregroundStyle(LinearGradient(
-                    colors: [Theme.Colors.teal.opacity(0.35), Theme.Colors.teal.opacity(0)],
+                    colors: [Theme.Colors.tealBright.opacity(0.35),
+                             Theme.Colors.tealBright.opacity(0)],
                     startPoint: .top, endPoint: .bottom
                 ))
                 .interpolationMethod(.catmullRom)
@@ -485,7 +216,7 @@ struct FleetOverviewView: View {
                     x: .value("Date", point.date),
                     y: .value("Stability", point.value)
                 )
-                .foregroundStyle(Theme.Colors.teal)
+                .foregroundStyle(Theme.Colors.tealBright)
                 .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                 .interpolationMethod(.catmullRom)
             }
@@ -541,7 +272,7 @@ struct FleetOverviewView: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.06))
                     Capsule()
-                        .fill(inverse ? Theme.Colors.warn : Theme.Colors.teal)
+                        .fill(inverse ? Theme.Colors.warn : Theme.Colors.tealBright)
                         .frame(width: geo.size.width * normalized)
                 }
             }
@@ -560,14 +291,14 @@ struct FleetOverviewView: View {
         return (Double(staleCount) / Double(summary.totalDevices)) * 100
     }
 
-    private func profileIssuesCard(for row: FleetProfileOverview) -> some View {
+    private func profileIssuesCard(for row: FleetWorkspaceOverview) -> some View {
         Card(padding: 18) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(Theme.Colors.warn)
                         .accessibilityHidden(true)
-                    SectionHeader(title: "Issues on This Profile")
+                    SectionHeader(title: "Issues on This Workspace")
                 }
                 ForEach(row.issues) { issue in
                     VStack(alignment: .leading, spacing: 4) {
@@ -579,17 +310,16 @@ struct FleetOverviewView: View {
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                             .fixedSize(horizontal: false, vertical: true)
                         PNPButton(title: issue.actionLabel, icon: "arrow.right", size: .sm) {
-                            open(row.profile, tab: issue.tab)
+                            navigate(to: issue.tab)
                         }
-                        .help("Switches to \(issue.tab.label) for this profile.")
+                        .help("Opens \(issue.tab.label).")
                     }
                 }
             }
         }
     }
 
-    private func open(_ profile: String, tab: Tab) {
-        workspace.setProfile(profile)
+    private func navigate(to tab: Tab) {
         NotificationCenter.default.post(
             name: .navigateToTab,
             object: nil,
@@ -602,76 +332,10 @@ struct FleetOverviewView: View {
         // line (a running collect owns it) nor claims the data was refreshed.
         isLoading = true
         defer { isLoading = false }
-
-        if workspace.demoMode {
-            rows = demoRows()
-            clearDrillDownIfProfileMissing()
-            return
-        }
-
-        let profiles = workspace.initializedProfiles
-        rows = await Task.detached(priority: .utility) {
-            profiles.map { profile in
-                let summaries = TrendStore.readSummaries(profile: profile.name)
-                return FleetProfileOverview(
-                    profile: profile.name,
-                    summary: summaries.last,
-                    summaries: summaries,
-                    isSchool: profile.product == .school
-                )
-            }
-        }.value
-
-        clearDrillDownIfProfileMissing()
+        let loaded = await workspace.loadFleetOverview()
+        guard !Task.isCancelled, let loaded = loaded.shown(for: workspace.profile) else { return }
+        overview = loaded
     }
-
-    /// A reload can drop the profile currently drilled into (e.g. it stopped
-    /// being initialized) — without this the "Loading X…" placeholder would
-    /// persist forever with nothing to load.
-    private func clearDrillDownIfProfileMissing() {
-        guard let profile = drilledProfile, !rows.contains(where: { $0.profile == profile }) else { return }
-        drilledProfile = nil
-    }
-
-    /// The first profile is the Overview's own demo fleet, so its card reads the
-    /// Overview's numbers; each later profile is a smaller variation of it.
-    private func demoRows() -> [FleetProfileOverview] {
-        func latest(_ metric: TrendSeries.Metric) -> Double {
-            DemoData.trends[metric]?.last ?? 0
-        }
-        let baseStale = Int(latest(.stale).rounded())
-        return workspace.initializedProfiles.enumerated().map { idx, profile in
-            let offset = Double(idx * 4)
-            let dateIndex = max(DemoData.trendDates.count - 1 - idx, 0)
-            let summary = DailySummary(
-                date: DemoData.trendDates[safe: dateIndex] ?? "2026-04-20",
-                totalDevices: DemoData.deviceCount(forProfileAt: idx),
-                fileVaultPct: latest(.fileVault) - offset,
-                compliancePct: max(latest(.compliance) - offset, 0),
-                staleCount: baseStale + idx * 4,
-                osCurrentPct: latest(.osCurrent) - offset,
-                crowdstrikePct: latest(.edrAgent) - offset,
-                patchPct: latest(.patch) - offset
-            )
-            return FleetProfileOverview(
-                profile: profile.name,
-                summary: summary,
-                summaries: [summary]
-            )
-        }
-    }
-}
-
-private struct FleetProfileOverview: Identifiable, Sendable {
-    var id: String { profile }
-    let profile: String
-    let summary: DailySummary?
-    var summaries: [DailySummary] = []
-    /// A Jamf School workspace writes no daily summary, so none of the summary issues applies.
-    var isSchool = false
-
-    var issues: [FleetProfileIssue] { isSchool ? [] : fleetProfileIssues(summary) }
-    var hasIssue: Bool { !issues.isEmpty }
 }
 
 private struct StabilityTrendPoint: Identifiable, Sendable {
@@ -680,170 +344,29 @@ private struct StabilityTrendPoint: Identifiable, Sendable {
     var id: Date { date }
 }
 
-private struct FleetProfileCard: View {
-    @ScaledMetric(relativeTo: .largeTitle) private var percentSize: CGFloat = 30
-    let row: FleetProfileOverview
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    private var stability: Double? {
-        row.summary?.stabilityIndex
-    }
-
-    private var hasIssue: Bool { row.hasIssue }
-    private var hasNoSummary: Bool { row.summary == nil }
-
-    var body: some View {
-        Card(padding: 16) {
-            HStack(alignment: .top, spacing: 12) {
-                if hasIssue && !hasNoSummary {
-                    Rectangle()
-                        .fill(Theme.Colors.warn)
-                        .frame(width: 3)
-                        .clipShape(RoundedRectangle(cornerRadius: 1.5, style: .continuous))
-                }
-                cardContent
-            }
-        }
-        .overlay {
-            if hasNoSummary {
-                RoundedRectangle(cornerRadius: Theme.Metrics.cardRadius, style: .continuous)
-                    .strokeBorder(
-                        Theme.Colors.hairlineStrong,
-                        style: StrokeStyle(lineWidth: 0.8, dash: [4, 3])
-                    )
-            }
-        }
-    }
-
-    private var cardContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Kicker(text: "Profile")
-                    Text(row.profile)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(Theme.Colors.fg)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Pill(
-                    text: stability.map { stabilityLabel($0) } ?? "No Data",
-                    tone: stabilityTone(stability)
-                )
-                .contentTransition(.numericText())
-                // DRAFT — needs visual verification. `fleetDrillDownChrome`
-                // pins an always-visible chevron to the card's top-right
-                // corner; without this clearance it covered the pill's last
-                // digits ("88.6" read "88.").
-                .padding(.trailing, 26)
-            }
-
-                HStack(alignment: .firstTextBaseline, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Kicker(text: "Macs")
-                        Text(row.summary.map { "\($0.totalDevices)" } ?? "--")
-                            .font(Theme.Fonts.serif(percentSize, weight: .bold))
-                            .foregroundStyle(Theme.Colors.fg)
-                            .monospacedDigit()
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Kicker(text: "Last Run")
-                        Text(row.summary?.date ?? "No summary")
-                            .font(Theme.Fonts.mono(12, weight: .semibold))
-                            .foregroundStyle(row.summary == nil ? Theme.Text.tertiary(contrast) : Theme.Colors.fg2)
-                    }
-                    Spacer()
-                }
-
-                Divider().background(Theme.Colors.hairline)
-
-                if let summary = row.summary {
-                    VStack(spacing: 7) {
-                        metricRow("Compliance", value: summary.compliancePct)
-                        metricRow("Patch", value: summary.patchPct)
-                        metricRow("Stale", value: stalePercent(summary), inverse: true)
-                    }
-                } else {
-                    Text("Run a schedule or generate a report to create the first summary.")
-                        .font(.callout)
-                        .foregroundStyle(Theme.Text.tertiary(contrast))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if hasIssue && !hasNoSummary {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.Colors.warn)
-                            .accessibilityHidden(true)
-                        Text(issueCaption)
-                            .font(.caption)
-                            .foregroundStyle(Theme.Colors.warn)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .accessibilityLabel(
-                        "Issues: \(row.issues.map(\.reason).joined(separator: ", "))"
-                    )
-                }
-        }
-    }
-
-    private var issueCaption: String {
-        let reasons = row.issues.map(\.reason)
-        let label = reasons.count == 1 ? "Issue" : "Issues"
-        return "\(label): \(reasons.joined(separator: " · "))"
-    }
-
-    private func metricRow(_ label: String, value: Double?, inverse: Bool = false) -> some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(Theme.Text.tertiary(contrast))
-                .frame(minWidth: 72, alignment: .leading)
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.08))
-                Capsule()
-                    .fill(inverse ? Theme.Colors.warn : Theme.Colors.teal)
-                    .frame(width: max(0, min(CGFloat(value ?? 0), 100)) * 1.1)
-            }
-            .frame(width: 110, height: 6)
-            .accessibilityHidden(true)
-            Spacer()
-            Mono(text: value.map { "\(String(format: "%.1f", $0))%" } ?? "--")
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label): \(value.map { "\(String(format: "%.1f", $0))%" } ?? "no data")")
-    }
-
-    private func stalePercent(_ summary: DailySummary) -> Double? {
-        guard let staleCount = summary.staleCount, summary.totalDevices > 0 else { return nil }
-        return (Double(staleCount) / Double(summary.totalDevices)) * 100
-    }
+/// The word the tone encodes, on the tone's own thresholds.
+func stabilityWord(_ value: Double?) -> String? {
+    guard let value else { return nil }
+    if value >= 85 { return "Healthy" }
+    if value >= 70 { return "Watch" }
+    return "Low"
 }
 
-private extension View {
-    func fleetDrillDownChrome() -> some View {
-        self
-            .overlay(alignment: .topTrailing) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Theme.Colors.goldBright)
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .padding(10)
-                    .accessibilityHidden(true)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: Theme.Metrics.cardRadius, style: .continuous))
+func stabilityPillText(_ value: Double?) -> String {
+    guard let word = stabilityWord(value) else { return stabilityLabel(value) }
+    return "\(word) · \(stabilityLabel(value))"
+}
+
+func stabilityAccessibilityLabel(_ value: Double?, hasSummary: Bool) -> String {
+    guard hasSummary, let value, let word = stabilityWord(value) else {
+        return hasSummary ? "Stability unknown" : "Stability: no data"
     }
+    return "Stability \(word), \(String(format: "%.1f", value)) percent"
 }
 
 private func stabilityLabel(_ value: Double?) -> String {
     guard let value else { return "--" }
     return "\(String(format: "%.1f", value))%"
-}
-
-private func stabilityLabel(_ value: Double) -> String {
-    "\(String(format: "%.1f", value))%"
 }
 
 private func stabilityTone(_ value: Double?) -> Pill.Tone {
@@ -853,8 +376,7 @@ private func stabilityTone(_ value: Double?) -> Pill.Tone {
     return .danger
 }
 
-/// One flagged condition with the context the badge alone can't carry:
-/// what tripped, why it matters, and the screen where the operator can act.
+/// One flagged condition: what tripped, why it matters, and the screen where the operator can act.
 struct FleetProfileIssue: Identifiable {
     var id: String { reason }
     let reason: String
@@ -863,10 +385,7 @@ struct FleetProfileIssue: Identifiable {
     let tab: Tab
 }
 
-/// Why a profile is flagged (#184: the "N Issues" badge gave a count with no
-/// way to see what tripped it). Single source of truth for the badge popover,
-/// the Issues-Only filter, the per-card reason line, and the drill-down
-/// issues card — they cannot drift.
+/// Why a workspace is flagged (#184), for Fleet Overview's issues card.
 func fleetProfileIssues(_ summary: DailySummary?) -> [FleetProfileIssue] {
     guard let summary else {
         return [FleetProfileIssue(
@@ -891,8 +410,8 @@ func fleetProfileIssues(_ summary: DailySummary?) -> [FleetProfileIssue] {
     }
     if let staleCount = summary.staleCount, staleCount > 0 {
         issues.append(FleetProfileIssue(
-            reason: "\(staleCount) stale device\(staleCount == 1 ? "" : "s")",
-            explanation: "Devices that have not checked in for more than 30 days. Offline "
+            reason: "\(staleCount) stale computer\(staleCount == 1 ? "" : "s")",
+            explanation: "Computers that have not checked in for more than 30 days. Offline "
                 + "Outreach buckets them by how long they have been quiet.",
             actionLabel: "Open Offline Outreach",
             tab: .outreach
@@ -903,7 +422,7 @@ func fleetProfileIssues(_ summary: DailySummary?) -> [FleetProfileIssue] {
     if let fileVaultPct = summary.fileVaultPct, fileVaultPct < 90 {
         issues.append(FleetProfileIssue(
             reason: "FileVault \(String(format: "%.1f", fileVaultPct))% (below 90%)",
-            explanation: "Share of devices reporting FileVault encryption enabled "
+            explanation: "Share of computers reporting FileVault encryption enabled "
                 + "in the latest security snapshot.",
             actionLabel: "Open Security Posture",
             tab: .securityPosture
@@ -912,7 +431,7 @@ func fleetProfileIssues(_ summary: DailySummary?) -> [FleetProfileIssue] {
     if let patchPct = summary.patchPct, patchPct < 80 {
         issues.append(FleetProfileIssue(
             reason: "Patch \(String(format: "%.1f", patchPct))% (below 80%)",
-            explanation: "Share of devices on the latest version of their patch titles, "
+            explanation: "Share of computers on the latest version of their patch titles, "
                 + "in the latest patch snapshot.",
             actionLabel: "Open Patch Compliance",
             tab: .patch

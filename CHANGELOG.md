@@ -7,13 +7,508 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-10-27
+
+2.11.0 brings Jamf School workspaces up to Jamf Pro's: their own Devices screen, daily summaries
+and history in Trends, and, as experiments, Jamf Protect and Platform API access for blueprints.
+A Jamf Pro backup now includes Jamf Protect. Warnings you need to act on show as "Needs
+attention" until the next run's check passes, and notifications can send a daily heartbeat.
+Extension Attribute sheets come from what jamf-cli collects, so a workbook no longer needs a CSV
+export. Scheduled runs and backups now need jamf-cli 1.29.0 or later. On a shared team folder,
+the app no longer follows links or reads pipes another Mac could plant.
+
+### Added
+
+- A configuration profile can now turn AI off or limit it to on-device models with the
+  `AIPolicy` key (`off` or `onDevice`), whatever each workspace's config.yaml says. See
+  `application_management/` for every key an organization can manage. (#284)
+- Jamf Protect now works with a Jamf School workspace (experimental): connect it from Data
+  Sources and Protect is collected after each School collect, gets its own Jamf Protect screen,
+  matches Protect computers to Jamf School Macs, and adds its tabs to the School workbook. It is
+  not backed up, as a Jamf School workspace has no backups. (#284)
+- Jamf School setup can also save Platform API access for blueprints (experimental): turn on
+  "Do you also have Platform API configured for Jamf School?" and enter the region, tenant ID,
+  client ID and secret, or add them later from Data Sources. The app checks them once and says
+  if the tenant ID or a permission is wrong. Updating a School profile's credentials no longer
+  removes Platform API access it already has. (#284)
+- Warnings you have to act on no longer stay in the run log only: a webhook that rejected a card,
+  a Jamf Protect backup that was skipped or incomplete, a Jamf School collect with no devices, an
+  unreadable Extension Attribute snapshot, a large Fleet Drift change and a mobile device list
+  that could not be saved now show as "Needs attention" in the health strip, with a button to the
+  screen that fixes it. Each clears itself once the next run's check passes, and Dismiss hides it
+  on this Mac until it clears and happens again. (#284)
+- A Jamf Pro backup now also backs up Jamf Protect when Protect is connected to the workspace.
+  On shared storage it is skipped by default, since the files hold action configurations with
+  request headers and data-forwarding settings; if your organization's storage policy allows
+  it, turn on "Back up Jamf Protect in this folder" on the Backups screen
+  (`protect.backup_on_synced_storage`). On a shared folder each Mac confirms the setting once.
+  (#284)
+- Notifications can send a daily heartbeat: with `notify.heartbeat: true`, or the new "Send a
+  daily heartbeat" switch under Notifications, the background item posts one short card a day
+  per workspace saying it ran, with the newest summary's date unless detail is minimal; Run now
+  sends none. Alert on a day without a card to notice a Mac or background item that stopped.
+  Off by default. (#284)
+- **Groups & Searches** now shows how many members each group has, its description, and flags
+  empty groups and groups no policy or profile uses (from the Health Audit's **Analyze
+  Groups**), with a summary row that also counts policies with no scope. Saved mobile
+  searches spell out their criteria, and the list is no longer cut off at 30. All of it comes
+  from data the app already collects.
+- **Adopt EAs** on the Extension Attributes screen (and Data Sources) lists the Extension
+  Attributes jamf-cli already collected, with a guessed type for each, and adds the ones you
+  pick to `config.yaml` as tracked EAs or Security Agents. No CSV is needed. Importing a CSV
+  export is now a one-time option inside the same sheet: you pick the file, and it is read
+  once rather than from `csv-inbox`.
+- Custom EA sheets and the EA Warnings sheet now come from the extension attribute values
+  Jamf Reports collects, so a workbook no longer needs a CSV export for them. The EA Warnings
+  sheet says whether an EA is missing from Jamf Pro or defined with no values, and Config
+  Doctor reports the same.
+- **Protect** now shows which Protect computers match a Jamf Pro computer (by hardware UUID or
+  serial number, never by name), which have no Jamf Pro record, and which Jamf Pro Macs have no
+  Protect record.
+- **Devices** on a Jamf School workspace lists the devices Jamf School manages: name, serial,
+  model, OS, managed, supervised and last check-in, with counts by platform, filters for
+  managed, unmanaged and stale devices, and a search. Devices waiting in Automated Device
+  Enrollment are listed below them.
+- A Jamf School workspace now builds Trends history: each collect that reads its devices saves
+  a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
+  The first collect after the upgrade also fills in earlier days from the Jamf School device
+  snapshots already on disk, so Trends starts at the workspace's first collect. (#284)
+- Experimental: a Jamf School workspace whose profile also has Platform API fields collects its
+  blueprints and writes a Blueprints tab (name, state, last deployed, created, updated). Without
+  those fields Data Sources shows the source as skipped and says how to add them.
+- A Jamf School workspace now builds Trends history: each collect that reads its devices saves
+  a daily summary of Macs, mobile devices and stale Macs, and Trends charts them.
+- The workbook's Compliance Rules sheet has a Rule ID column at the end; the other columns are
+  unchanged. (#284)
+- Trends now follows mobile devices as well as Macs, on Jamf Pro and Jamf School workspaces:
+  managed, supervised, stale and on-current-OS mobile devices, plus passcode, data protection
+  and jailbreaks where Jamf Pro reports them. Macs and mobile devices are always counted apart,
+  and a figure a product does not report is left out, not shown as 0. Alerts can watch the new
+  figures. (#284)
+- A Jamf School collect now also reads the SOFA feed of current Apple OS releases, as a Jamf Pro
+  collect does, so a School workspace can say which Macs and mobile devices are on the current
+  OS. Add `sofa` to `jamf_cli.collect_skip` to leave it out on a network that must not reach
+  sofafeed.macadmins.io. (#284)
+- The Jamf School workbook has a Trends tab with one row per day, Macs and mobile devices in
+  their own columns. The other School tabs are unchanged. (#284)
+
+### Changed
+
+- The command an empty screen suggests can now be selected and has a copy button. Every empty
+  screen now suggests a `jamf-reports collect` command for the tiers that fill it; eight of them
+  suggested a `jamf-cli` command instead, which prints to the terminal and never fills the
+  screen. (#318)
+- Jamf Reports now needs jamf-cli 1.29.0 or later to collect or back up, on every run, not
+  only for full support. An older jamf-cli stops the run with a message saying to update it;
+  Settings says the same. (#226)
+- A scheduled run that fails the same way again posts its failure card once a day per schedule and
+  profile, not on every hourly retry; a different failure still posts, and a card that could not
+  be sent is tried again. (#284)
+- Setting up a workspace from the onboarding wizard now asks, on the last step, whether to run
+  automatically (on by default, same choice as when adopting existing profiles) and offers an
+  optional Teams or Slack webhook, also when setup was started from demo mode. Finishing with
+  the box ticked turns on the daily collection; before, a new workspace had no background item
+  until you opened Automation. An existing automation setup is never switched off or changed.
+- **Settings › Add connection** and the workspace menu's **Add workspace or product…** now open
+  one **Add** sheet, which replaces Add workspace, Add Jamf School workspace and the Jamf
+  Pro-only setup they started. Choose a new Jamf Pro, Platform API or Jamf School workspace, or
+  add Jamf Protect to the current Jamf Pro workspace. The sheet also lists the jamf-cli profiles
+  no workspace uses, including ones made in Terminal since the app started (**Re-check** reads
+  them again), and sets one up or adds it to this workspace with a click.
+- The Devices screen is now **Computers**, matching Jamf Pro's naming, and Mobile Fleet is now
+  **Mobile Devices**. Your saved sidebar choices and export file names are unchanged.
+- The sidebar's **Fleet** group now sits right under Reports and holds Computers, Mobile Devices,
+  Device Lookup, Jamf Protect and Groups & Searches, so computers and mobile devices sit side by side.
+- The HTML and PDF reports say **computers** where they mean Macs (the security tiles, the
+  intervention group, the non-compliant list and the computer tables) and keep **mobile devices**
+  for the mobile section. Workbook sheet names are unchanged, so tools that read them still work.
+- **Fleet Drift** now compares the collected inventory from two different days, so it no longer
+  needs a CSV export. It lists Macs that joined or left, macOS changes, and Macs that became or
+  stopped being stale under your stale settings. The "Compliance Changed" section is gone from this
+  sheet, since collected inventory carries no per-Mac compliance count. Until a second day of
+  inventory has been collected, the sheet is left out.
+- **Computers** no longer merges a CSV dropped in `csv-inbox/`; it shows what jamf-cli collected.
+  The Failed Rules line in a Mac's detail panel and the failed-rules part of the Security filter
+  are gone with it, since only a CSV supplied them.
+- A Mac's risk rating now counts it as stale by your stale settings (`stale_device_days` and
+  `stale_basis`) instead of a fixed 30 days, so Computers, the Priority filter and the risk pill
+  agree with the stale counts elsewhere.
+- `branding.logo_path` now puts the logo on the first tab of the workbook. It used to sit on the
+  CSV-based tabs only.
+- **Fleet Overview** shows the workspace selected in the sidebar, with its issues, stability
+  trend and summary details, instead of a card for every workspace. Two workspaces can be
+  different Jamf Pro servers, so their figures are no longer averaged or listed together on one
+  screen; switching the workspace in the sidebar changes what it shows. Figures across
+  workspaces stay in the report-group fleet CSV and workbook.
+- On a Jamf School workspace the Automation screen's Data Freshness card describes School's
+  daily collect and says the weekly deep scan applies to Jamf Pro workspaces only.
+- A Jamf School workspace no longer shows Jamf Pro parts it has no data for: Fleet Overview,
+  the Health Audit option and the `summary.json` line in Generate, the Agents, EAs, Platform API
+  and Scoring tabs in Config (Thresholds keeps only the stale threshold), and the Extension
+  Attributes card in Data Sources. Generate lists the School workbook's own tabs, and Settings ›
+  Sidebar Visibility lists only the tabs the workspace has.
+- The **Overview** on a Jamf School workspace now shows School's own data: device counts by
+  platform, managed, supervised and stale devices, and each count Jamf School reports (users,
+  classes, apps and the rest). It used to show the Jamf Pro cards with nothing in them. Its
+  Getting Started list ticks off the collect step after a School collect and no longer asks you
+  to track Extension Attributes.
+- A Jamf Protect backup now runs even when the Jamf Pro backup fails, so Protect is still backed
+  up. That backup is marked on the Backups screen and is not offered for a diff; the run still
+  reads as failed. (#284)
+- A backup whose Jamf Protect part failed is kept only until a newer backup's Protect part
+  completes, so a Protect failure that repeats no longer stops old backups from being removed.
+  (#284)
+- **Add workspace or product…** now says when a Jamf Pro login reaches the same server as a
+  Platform API workspace you already have (or the other way round), as adopting existing
+  profiles does, so one fleet is not set up twice. (#284)
+- Workbook sheets and screens that count Macs only (Security Posture, Executive Summary,
+  Check-in Health, Active Devices, Patch Summary Dashboard, Extension Attributes and the Fleet
+  Size Trend chart) now say **Total Computers** instead of **Total Devices**. Counts that include
+  mobile devices, such as OS Updates and Jamf School, still say devices. (#287)
+
+### Fixed
+
+- Trends' **Managed Devices** is now **Managed Computers**: its figure and chart count Macs
+  only, where before the figure counted Macs and the chart also drew mobile devices. Mobile
+  devices have their own **Managed mobile devices** series. Device-count charts now scale to
+  the data, so a small fleet no longer sits flat at the bottom of a 0–1,000 axis. (#284)
+- The `jamf-reports` command run through its `/usr/local/bin` link now reads the app's
+  settings and configuration profiles, including the workspace location. (#284)
+- Every setting a configuration profile manages is now locked in the app and says so, and
+  the app no longer writes over it; Workspace location no longer reports a change it cannot
+  make. (#284)
+- The bundled debug-logging profile now uses the layout macOS reads, and Settings › Logging
+  shows when a profile sets logging for the app. (#284)
+- Settings › Logging's two switches are gone: they wrote a per-user file macOS does not read,
+  so they never changed what was logged. The panel now shows the profile's settings, the
+  bundled profile, and the `sudo log config` commands an administrator can run on one Mac.
+  (#284)
+- Connecting Jamf Protect or Jamf School no longer changes jamf-cli's default profile: jamf-cli's
+  setup makes the new profile the default, and the app now puts the previous one back. (#284)
+- Connecting Jamf Protect or Jamf School now tries the credentials with one read before the
+  connection is saved, so a wrong client secret or API key shows at setup instead of at the
+  first collect. (#284)
+- A Platform API profile that also has Jamf Security Cloud set up on it (`security setup` run on
+  the same profile) is a Jamf Pro workspace again instead of being hidden. (#284)
+- VoiceOver can reach the Retry and action buttons on empty and error screens, and more controls
+  have names. (#284)
+- A webhook that answers with an error now shows in the log as an error with the HTTP status,
+  and the "notification failed" lines for the run digest, failure card, metric alert, overdue
+  digest and heartbeat say why. (#284)
+- A backup of a workspace whose config.yaml does not decode now says Jamf Protect was not backed
+  up, with the reason, instead of leaving Protect out silently. (#284)
+- A Jamf Protect backup that exits cleanly but exported nothing now reads as Partial, not as
+  backed up with 0 objects. Retention still prunes those backups, so a Protect tenant with
+  nothing to export does not keep every scheduled backup. (#284)
+- A Mac that is on only part of the day now gets its daily summary. A daily collect runs at
+  its scheduled time, or, after the Mac was off or asleep, at its first background check after
+  waking, and that run is the day's run, so the scheduled time does not repeat it. A failed run
+  is retried that day, until midnight. Run now never moves or cancels the scheduled run. (#284)
+- A collect that has not produced today's summary after its three retries keeps retrying
+  every hour until midnight, so a laptop that was off the VPN until the afternoon still gets its
+  day; Jamf School workspaces too. It stops after the three retries when every source failed in
+  a way another try repeats (a missing permission, a command the profile's API refuses), and the
+  weekly deep scan does not retry for the summary. A collect that stood down because another
+  Mac collected recently is retried the same way while today's summary is missing. (#284)
+- A scheduled collect whose `config.yaml` exists but does not decode now fails with the decode
+  error in Run History, instead of a Jamf School profile being skipped as "not a Jamf Pro
+  profile" with no error; a scheduled backup still runs, with a warning. The failure card and the
+  overdue digest can still be sent, because they read the `notify:` block on its own. (#284)
+- A scheduled run stopped by a jamf-cli below the supported minimum now posts a failure card, and
+  a run skipped because the profile belongs to another Jamf product posts one a day. (#284)
+- A scheduled run that outlasts the six-hour lock limit now ends the background item, instead of
+  leaving a stuck jamf-cli call running beside the next run. (#284)
+- Jamf Pro commands no longer run against a Jamf School, Jamf Protect or Jamf Security Cloud
+  login, or an organization-level Platform API profile. Collect, scheduled runs, health audit,
+  group analysis, backup, backup diff and device lookup stop with one line naming the product,
+  instead of a failed jamf-cli call. Generate with Include Health Audit ticked skips the audit
+  for the School template. A scheduled run on such a profile is skipped rather than retried or
+  counted as a failed run, posts one failure card a day when notifications are on, shows as
+  failing in Automation with the reason instead of overdue, and `schedules add` refuses it.
+- A Jamf Protect collect that fails after a successful Jamf Pro collect now marks the run Partial
+  in Run History instead of reading as a clean run.
+- A Jamf Pro collect that fails as a whole (dead credentials, every call failing) no longer
+  stops Jamf Protect from being collected; Protect runs and the run still reports the Jamf Pro
+  failure. (#284)
+- A blank `protect.profile`, or one that names a Jamf Pro, Jamf School or Jamf Security Cloud
+  login, now skips Jamf Protect with one warning line in collect, backup and the dashboard,
+  instead of a Protect failure on every run. Config Doctor warns about the second case, and Data
+  Sources lists the Protect commands as skipped. (#284)
+- The workbook no longer keeps Protect tabs from old data after Protect is turned off. (#284)
+- A schedule whose last success was recorded while the Mac's clock was set ahead is retried
+  after a partial run, instead of waiting until that date. (#284)
+- Importing a CSV in the Adopt EAs walkthrough no longer freezes the window while a large file
+  is read, and a file that cannot be read now says why (not UTF-8 text, too large, a link).
+  (#284)
+- The same-day retry of a scheduled run no longer repeats for a Jamf Protect or Jamf School
+  source that failed for a reason a retry cannot fix (a missing permission, a command the
+  profile's API does not serve), or for a Protect collect that could not start. (#284)
+- A scheduled run's same-day retry after a partial run now collects again instead of reporting
+  "already collected today" and counting as a success.
+- A Jamf Protect or Jamf School source that fails to collect now makes the run read as Partial,
+  with a failure recorded for it, instead of a clean success.
+- A collect that runs past midnight now dates its summary by the day it started, so the next
+  day's scheduled collect is no longer skipped.
+- A scheduled run that stood down because another Mac held the workspace is now retried later
+  the same day.
+- A background-item start time stamped in the future no longer stops that schedule from running.
+- The OS-current share can no longer read above 100%.
+- A damaged failure-count file no longer crashes the next collect.
+- Run now no longer ends the background item's run when the app is quit while it streams.
+- A setting in `config.yaml` written as `Don't stop # note` now reads as the text before the
+  comment, instead of keeping the comment as part of the value.
+- Saving a value that contains a line-break character other than a normal new line no longer
+  splits that setting across two lines in `config.yaml`; the character is saved as a space.
+- Saving **Config** no longer adds the report and archive folder settings to a `config.yaml`
+  that never had them, so a shared workspace does not ask you to confirm a folder you did not
+  change. A failed save no longer leaves a temporary copy of the file beside it.
+- Settings → Intelligence now keeps a dated backup copy of `config.yaml` before it removes
+  the retired `external` and `lock_on_device` settings.
+- **Check now** and the daily update check give up after 30 seconds instead of showing
+  "Checking…" for as long as GitHub keeps trickling an answer, and turning the check off with a
+  configuration profile takes effect without a relaunch.
+- The fleet report's Security Score no longer shows a change against an earlier period when the
+  score factors changed in between, since the two scores were measured differently.
+- Security Posture shows a dash, no grade and "No factor had data" when no score factor had
+  data, instead of 0.0 and a grade F.
+- The HTML report no longer shows two different stale-Mac counts. The Devices heading now
+  uses the same figure as the At a glance tile and the Needs attention list, with the same
+  note about Macs that never received the Jamf binary.
+- "Patch titles under 50%" in the HTML report is now worked out from the device counts, so a
+  title at 49.6% is no longer rounded up to 50% and missed; a title with no devices is skipped.
+- Dates are read the same way in every report. A date that cannot be read now shows as
+  Unknown or a dash instead of 0 or -1 days, and a Jamf School device with an unreadable
+  check-in is no longer listed as stale on the Stale Devices tab.
+- A Jamf School workspace no longer shows "Auth may be expired" in Generate or "Token: not
+  authenticated" in Settings. School signs in with an API key, which has no token to check.
+- `jamf-reports generate` and scheduled report runs on a Jamf School workspace now write the
+  School workbook. They used to write an empty Jamf Pro workbook. `jamf-reports html` now says a
+  School workspace has no HTML report instead of writing an empty one.
+- In `jamf-reports`, `backup` and `device` on another product's profile now print
+  the reason once and exit 1, where `backup` printed it twice and `device` added "auth, or
+  device not found". `backup` on a Jamf School workspace says so instead of "jamf-cli not found",
+  and `schedules add --mode backup` refuses one, as the scheduled run skips it.
+  `jamf-reports school-check` now refuses a workspace that is not Jamf School instead of listing
+  ten missing sources and exiting 0. `schedules list` shows the mode a schedule runs, so an old
+  csv-assisted one reads `jamf-cli-full (was csv-assisted)`. The command help and the
+  command-line guide now cover Jamf School, Jamf Protect and these refusals.
+- A new Jamf School workspace's first report now collects before it writes the workbook. It
+  used to write a workbook with no sheets.
+- On a Jamf School workspace the weekly scan schedule no longer collects School a second time,
+  and a School collect skips sources it fetched in the last 12 hours unless you click Collect
+  now, so a morning no longer leaves ten copies of each snapshot. jamf-cli's "hint:" lines no
+  longer fill School run logs, and `jamf-reports school-check` lists all ten School sources.
+- One Jamf School profile on the Mac no longer makes **Test connection**, onboarding's
+  **Validate** and **Reauthenticate** fail for your other profiles. They now judge only the
+  config file and the profile being checked. A Jamf School profile also passes **Test
+  connection** again; jamf-cli 1.33.0 reports its `apikey` sign-in method as invalid.
+- The health banner now reports Jamf Protect data that has gone stale or keeps failing in a
+  workspace with Protect connected; before, only Jamf Pro data was checked.
+- A Jamf School collect where jamf-cli cannot be started for any source now fails, as the Jamf
+  Pro collect does, instead of finishing as Partial with a success exit. (#284)
+- A Jamf School or Jamf Protect collect whose `state` folder is a link or otherwise refused now
+  logs one warning naming the folder, instead of not recording per-source results in silence.
+  (#284)
+- If the mobile device list from jamf-cli cannot be read well enough to remove the lost-mode
+  phone number, location and message, it is no longer saved with them in it. The previous
+  snapshot stays in use and the run logs a warning. (#284)
+- A Jamf School collect that gets an empty device list now logs a warning ("Jamf School returned
+  0 devices") instead of an info line, so an empty tenant or a wrong login stands out in Run
+  History. (#284)
+- When an `ea-results` or Extension Attribute definitions snapshot exists but cannot be read, the
+  report now logs a warning and lists each custom EA on the EA Warnings tab as "snapshot
+  unreadable" with the reason, instead of leaving out the EA tabs and the warnings tab with no
+  message. (#284)
+- A custom EA date tab no longer shows "Expiring (0d)" for a date that passed less than a day ago.
+  It now reads Expired, with the day count rounded down. (#284)
+- The Mobile Devices supervision chart uses a blue and orange pair that color-blind readers
+  can tell apart.
+- The Fleet Overview stability trend and the second OS version slice are easier to see on
+  the dark background, and the stability pill says Healthy, Watch or Low as well as showing
+  the number.
+- Workbook compliance charts and the app use the same color for each compliance band, and
+  the chart legend no longer cuts long labels short.
+- OS version chart colors for a macOS release without a set color no longer change between runs.
+- **Fleet Drift** still lists every Mac that joined or left when the change is large, and now
+  says so at the top of the sheet and in the run log, with the counts and the share of the fleet:
+  a planned mass enrollment or retirement is normal, but a collect that did not finish can make
+  Macs look departed. (#284)
+- **Fleet Drift** no longer lists a Mac as both a new enrollment and departed when its serial
+  number is on two Jamf Pro records and it has no Jamf ID; such Macs are counted in a note
+  instead. An inventory collected without check-in dates no longer lists every Mac as newly
+  stale: the stale sections say they were not compared. (#284)
+
+### Removed
+
+- The boot-drive risk factor ("Boot Drive >95% Full") is gone: only a CSV export supplied the
+  boot-drive figure, and jamf-cli data has none. (#281)
+- The **Columns** tab on Config, the column-mapping step in setup, the **CSV Inbox** card on
+  Data Sources and the Re-scaffold and Run check buttons are gone. Reports no longer need
+  column names mapped to a CSV: Extension Attributes and security agents are adopted from the
+  data jamf-cli collected (**Adopt EAs**), and a CSV export can still be imported once from
+  the same sheet or with `jamf-reports scaffold --csv`, which now writes only
+  `custom_eas`. New workspaces no longer get a `csv-inbox` folder; files already in one are
+  left alone.
+- `columns`, `mobile_columns` and `charts.archive_current_csv` are no longer read. Config
+  Doctor lists them as no longer read, and the next Config save removes `columns` and
+  `mobile_columns` (and the next Customize apply removes `charts.archive_current_csv`) from
+  `config.yaml` after keeping a dated copy of the file. A `config.yaml` that still has them
+  loads as before.
+- The **CSV Assisted** schedule mode is retired. A schedule that used it runs as
+  **Refresh + Generate** (`jamf-cli-full`) from now on, and Run History notes that on each run.
+  `jamf-reports schedules add --mode csv-assisted` is refused and names `jamf-cli-full`.
+- Workbooks no longer have tabs built from a CSV export. Custom EA tabs and EA Warnings come
+  from the collected extension attribute results, and `charts.archive_current_csv` has no effect.
+- `csv-inbox/` is no longer read by reports. Config Doctor suggests deleting the folder when it
+  holds files.
+- `exceptions[].control_id` is no longer read; Config Doctor says it can be deleted. (#284)
+- A workspace whose jamf-cli profile does not exist, such as one left by a setup you did not
+  finish, no longer makes every scheduled run fail. Scheduled runs skip it with one warning, the
+  health strip names the workspace whichever one is open, and collecting it says jamf-cli has no
+  profile of that name instead of "server unreachable or jamf-cli broken". (#284)
+- Teams notification cards have a colored header (green for a finished run, amber for a partial
+  run or a metric alert, red for a failure or an overdue schedule, gray for the heartbeat and the
+  test) and titles that say what happened, such as "Scheduled run failed — prod". Slack messages
+  carry the same "Jamf Reports" label above the title. Every card ends with a line naming the
+  Jamf Reports application, your organization name from Config › Output & Branding (left out
+  at minimal detail) and when the card was sent. The facts a card sends are unchanged. (#284)
+- Trends, Overview, Security Posture, Compliance Posture, Offline Outreach and Fleet Overview
+  say "computers" where a figure counts Macs only, and counts of one read in the singular
+  ("1 archived summary", "1 device"). (#287)
+- Mobile Devices says Jamf Pro reports no mobile devices when a collection found none, instead
+  of asking you to collect. (#284)
+- OS Updates calls its totals update statuses (one per device and update), since jamf-cli
+  returns one record per device per update; it no longer reads as a device count. (#284)
+- The DDM screen lists declaration identifiers by how many Macs they fail on, with a device
+  count for each, shows 15 at a time, and folds healthy identifiers that sit on one Mac each
+  into one line. Failing ones always stay listed. (#284)
+- On a Jamf School workspace, Automation hides the Jamf Pro-only deep-scan controls, Data
+  Sources describes School's archives, and Sidebar Visibility names the Devices tab and no
+  longer offers to hide it. (#284)
+- Fleet Overview and Compliance Benchmarks show accurate title-bar subtitles, and the Customize
+  Reports chart note no longer mentions the retired compliance bands. (#284)
+- The Notifications card now says when notifications are on but no webhook URL is set. Nothing,
+  the daily heartbeat included, was sent, and nothing on screen said so. (#284)
+- A scheduled Jamf School **Refresh + Generate** run now always collects first, so its workbook
+  is no longer built from data up to 12 hours old after an earlier refresh. (#284)
+- The workbook logo (`branding.logo_path`) now sits beside the first tab's title instead of
+  covering the title and the first rows, and keeps its proportions. (#284)
+- Opening **Add workspace or product…** while a setup is part way through now asks you to finish
+  it first, so a jamf-cli profile that setup already saved is no longer left unassigned. (#284)
+- The **Add** sheet's buttons now name the product or profile they act on for VoiceOver, and its
+  success and error messages are read out. (#284)
+- The sidebar no longer re-reads summary and report files each time the pointer moves over it.
+  (#284)
+- OS Updates' Failed Plans table says when it lists a sample: jamf-cli looks up a random
+  sample of failing plans, so "200 total" sat beside a Failing Plans tile of 3481. The header now
+  reads "200 sampled of 3481". (#284)
+- OS Latest Versions and the OS Currency sheet name iOS releases "iOS 27" instead of a bare
+  "27". (#284)
+- Setup's last step no longer calls a workspace fully set up when its profile did not validate;
+  it says the first run will probably fail and where to fix the connection. (#284)
+- A Jamf Pro server with no managed software updates no longer reads as two failing data
+  sources. jamf-cli answers "No managed software update data found." there, which the app counted
+  as nothing collected: a red banner, a Partial run and same-day retries. That answer now lands
+  an empty report, and OS Updates says Jamf Pro reports no managed software updates. When jamf-cli
+  printed a fetch warning first (Managed Software Update Plans turned off, a failed request), it
+  is still a failure. (#284)
+- A Jamf Protect tenant with nothing to export now counts as backed up. It used to mark every
+  backup Partial and keep a Needs attention item open. (#284)
+- When the Protect part of a backup fails, the Partial line now says how the Jamf Pro backup
+  ended. Before, it always said the Jamf Pro backup was complete, even when it had failed. (#284)
+- Backups held because their Protect part failed are capped at the number of backups you keep.
+  While Protect kept failing, every Jamf Pro backup was kept and none was ever pruned. (#284)
+
+### Security
+
+- Another Mac sharing the workspace can no longer crash this Mac's runs by planting a status
+  file with a huge Needs attention count. Counts read from status files are held to a sane range,
+  and counting up stops at the top instead of overflowing. A status file stamped past the year
+  3000 is ignored, so it can no longer hide every later update. (#284)
+- The `jamf-reports` command-line tool now shows control characters in a device lookup, a log
+  line or an error as `\u001b`-style text when it prints to a terminal, so a device name or a
+  server error can no longer clear the screen, change the window title, write the clipboard, or
+  reorder or split the line with right-to-left or line-separator characters. Output piped to a
+  file or another program is unchanged.
+- The webhook URL is now hidden as you type it, in setup's **Run automatically** step and on the
+  Notifications card in Automation and Schedules, since anyone who has the URL can post to the
+  channel. (#284)
+- Shared logs and diagnostic bundles now remove the host of every server in your own jamf-cli
+  configuration, Jamf Protect tenants included, however many labels the host has, and the Logging
+  export removes the host and tenant IDs of every workspace, not only the active one. Which hosts
+  are removed no longer depends on the workspace's config.yaml, which other Macs can edit. (#284)
+- Logs shared from the app (Run History's Copy and Export, the Logging export) now replace the
+  workspace's profile name, as diagnostic bundles already did. The webhook card's Profile line
+  still names it. (#284)
+- The Jamf School Platform API check shows jamf-cli's error text redacted and cut to 200
+  characters. (#284)
+- Settings › Logging says so when a configuration profile writes private values (server names,
+  paths, account names) to this Mac's log. (#284)
+- Config Doctor warns when the workspaces folder is on a network or synced volume, where the app
+  cannot check who owns it or who can write to it. The example configuration profile now installs
+  for the user, not the whole Mac. (#284)
+- A workspaces folder set by a configuration profile now wins over `JRC_WORKSPACES_ROOT`. (#284)
+- The Jamf School history backfill skips snapshots dated in the future instead of writing a
+  summary for a day that has not happened. (#284)
+- The SOFA cache and the mobile device, patch and Extension Attribute snapshots Trends and the
+  Mobile screen read now have a size limit; a file over it, or one that is not a regular file, is
+  named in the log instead of read. (#284)
+- A backup whose manifest says the Jamf Pro part failed is pruned only when the folder really
+  holds no Jamf Pro files; otherwise it is kept and the prune log says why. (#284)
+- A file the app reads with links refused is now also refused, and logged, when it has a second
+  hard link. (#284)
+- Protect and School secrets are cleared as soon as jamf-cli has saved them, and when the
+  jamf-cli signature check fails; a typo in the name or URL keeps what you typed. School setup
+  with the Platform API switch on is refused until a tenant ID is entered. The Add sheet checks
+  each profile once and stops checking when it closes. (#284)
+- Files the app reads from a workspace that others can write to are now opened so that a folder
+  swapped for a link after the app checked it is refused, and the daily summaries, backup manifests
+  and snapshot manifests are read with a size limit. (#284)
+- A workspace in a Desktop or Documents folder that iCloud Drive syncs
+  (iCloud Desktop & Documents) is now treated like a workspace in any other cloud folder:
+  settings other Macs could change wait for a Confirm on this Mac in Config Doctor, Jamf Protect
+  is left out of its backups so credential-bearing files do not sync, unless turned on in Backups
+  (`protect.backup_on_synced_storage`), and backup pruning removes
+  only this Mac's backups. Before, such a folder read as local disk. (#284)
+- The saved mobile device inventory no longer keeps Lost Mode text (the phone number, location,
+  message and footnote shown on a lost device). Nothing in the app read it, and the snapshot can
+  sit in a shared folder. Whether Lost Mode is on is still kept.
+- A link another Mac plants on a shared folder at `Generated Reports` or at the default
+  `archive` folder no longer redirects where reports and archived runs are written. The app
+  refuses the link, logs one warning naming the folder and writes nothing through it. (#284)
+- A log copied or exported from Run History, the Logging export and the failure alert sent to
+  Teams or Slack now lose the Jamf server address even when it is an on-premises host written
+  without `https://` (for example `jss.example.org:8443`). The address is read from the
+  profile's entry in jamf-cli's config file and is never logged. (#284)
+- Run logs, per-run summaries, schedule status files, the retention marker, the cached device
+  record and the cached audit snapshots are read with a size limit and refuse a link or a named
+  pipe at the file's name. Before, a pipe planted there could freeze the screen or a scheduled
+  run that read it. (#284)
+- Shared logs and diagnostic bundles now mask phone numbers, in free text and under phone
+  keys. (#283)
+- A report run now stops with an error that names the profile when its report folder cannot be
+  used, instead of writing to the working directory or the temporary folder. A refused
+  `archive_dir` skips archiving old runs, with one warning, instead of moving them into a folder
+  beside the reports. (#284)
+- Cached snapshots used by reports and the daily summary, Fleet Drift, Adopt EAs, group
+  inventory and backup manifests are read with a size limit and refuse a link or a named pipe at
+  the file's name. Before, a pipe planted in a shared folder could freeze a report, a scheduled
+  run or the backup prune. (#284)
+- A backup manifest with an out-of-range Jamf Protect object count no longer crashes the Backups
+  screen. A count that is not a whole number from 0 to 2,147,483,647 is ignored. (#284)
+- A diagnostic bundle now replaces the workspace (profile) name with a placeholder in every
+  file and in the file names, the zip's own name included, since the name is often the
+  organisation's. A name as short as two characters is replaced too.
+- Client secrets and API keys typed during setup are now wiped from memory when setup ends,
+  fails, starts over or is closed, instead of staying in the app's memory. (#284)
+
 ### Dependencies
 
 - Reviewed jamf-cli 1.34.0 (2026-10-23). From this version jamf-cli leaves out the hidden
   one-off policies Casper Remote and Jamf Remote created ("<date> at <time> | <user> | N
-  Computer"), so on a server that still has them the Policy Health totals and the audit's
-  policies-with-no-scope finding drop once after the upgrade. Your policies did not change.
-  Nothing else in the release changes what the app collects.
+  Computer"), so on a server that still has them the Policy Health totals, the unscoped-policy
+  count and the audit's policies-with-no-scope finding drop once after the upgrade. Your
+  policies did not change. Nothing else in the release changes what the app collects.
 
 ## [2.10.1] - 2026-10-17
 

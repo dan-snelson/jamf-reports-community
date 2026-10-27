@@ -311,7 +311,7 @@ final class CoreDashboardTests: XCTestCase {
         let sheet = try checkinSheet(rows: rows, checkinOverdueDays: 7)
 
         XCTAssertTrue(try XCTUnwrap(text(sheet, row: 1, col: 0)).hasPrefix(subtitlePrefix(7)))
-        XCTAssertEqual(count(in: sheet, label: "Total Devices"), 6)
+        XCTAssertEqual(count(in: sheet, label: "Total Computers"), 6)
         XCTAssertEqual(count(in: sheet, label: "Checked In (within 7 days)"), 3)
         XCTAssertEqual(count(in: sheet, label: "Overdue (>7 days)"), 3)
     }
@@ -411,6 +411,38 @@ final class CoreDashboardTests: XCTestCase {
 
         let dash = makeDashboard(dataDir: dataDir)
         XCTAssertNoThrow(try dash.writePackageLifecycle())
+    }
+
+    func testPackageAgeIsUnknownForADateThatDoesNotRead() throws {
+        let dataDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-test-\(UUID().uuidString)")
+        let dir = dataDir.appendingPathComponent("packages", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        createdTempDirs.append(dataDir)
+        let slash = DateFormatter()
+        slash.locale = Locale(identifier: "en_US_POSIX")
+        slash.dateFormat = "MM/dd/yyyy HH:mm:ss"
+        let recent = slash.string(from: Date().addingTimeInterval(-5 * 86_400 - 3_600))
+        let rows: [[String: Any]] = [
+            ["packageName": "Reads", "fileName": "a.pkg", "size": 1_048_576, "uploadDate": recent],
+            ["packageName": "Garbled", "fileName": "b.pkg", "size": 1_048_576,
+             "uploadDate": "sometime in May"],
+        ]
+        try JSONSerialization.data(withJSONObject: rows)
+            .write(to: dir.appendingPathComponent("packages_20261004T100000.json"))
+        let workbook = Workbook()
+        let dash = CoreDashboard(config: ReportConfig(), dataDir: dataDir, workbook: workbook)
+        try dash.writePackageLifecycle()
+        let cells = (workbook.sheet(named: "Package Lifecycle")?.dedupedCells ?? [])
+        let strings = cells.compactMap { cell -> String? in
+            if case let .string(s) = cell.value { return s } else { return nil }
+        }
+        let ints = cells.compactMap { cell -> Int? in
+            if case let .int(i) = cell.value { return i } else { return nil }
+        }
+        XCTAssertTrue(strings.contains("0-30 days"), "the slash form reads")
+        XCTAssertTrue(strings.contains("Unknown"), "a garbled date has no age bucket")
+        XCTAssertTrue(ints.contains(5))
     }
 
     // MARK: - Patch Velocity note row (2.6 Fix 2)
@@ -545,7 +577,7 @@ final class CoreDashboardTests: XCTestCase {
             "Software Installs", "Package Lifecycle",
             "EA Coverage", "EA Definitions", "Environment Stats",
             // Device health
-            "Check-in Health", "Active Devices", "Group Hygiene",
+            "Check-in Health", "Active Devices", "Fleet Drift", "Group Hygiene",
             // Update & patch details
             "Patch Failures", "Update Status", "Update Failures", "Smart Groups",
             "Patch Summary Dashboard", "Patch Velocity",
@@ -800,6 +832,35 @@ final class CoreDashboardTests: XCTestCase {
         XCTAssertEqual(rowText(ws, row: 6, columns: 3), ["Security Configuration", "Plans", "4"])
         let highlighted = ws.dedupedCells.first { $0.row == 5 && $0.col == 2 }
         XCTAssertEqual(highlighted?.format, .yellow)
+    }
+
+    /// A workspace that turned Protect off keeps its `protect-*` snapshots; the workbook writes
+    /// no Protect tab from them, and the registry skips them with the reason.
+    func testProtectTabsAreWrittenOnlyWhileProtectIsEnabled() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("jrc-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let subdir = tmp.appendingPathComponent("protect-overview", isDirectory: true)
+        try FileManager.default.createDirectory(at: subdir, withIntermediateDirectories: true)
+        try Data(#"[{"resource":"Computers","section":"Endpoints","value":"1"}]"#.utf8)
+            .write(to: subdir.appendingPathComponent("protect-overview.json"))
+        let template = CustomTemplate(includedSheets: [.protectOverview])
+
+        func run(_ yaml: String) throws -> (written: [String], skips: [String]) {
+            let dash = CoreDashboard(
+                config: try ConfigLoader.loadFromString(yaml), dataDir: tmp, workbook: Workbook())
+            let lines = ProductGuardLines()
+            let result = SheetRegistry(plan: dash.sheetPlan)
+                .writeSelected(template: template, onLine: lines.add)
+            XCTAssertTrue(result.failures.isEmpty)
+            return (result.written, lines.all)
+        }
+        for off in ["jamf_cli:\n  data_dir: x\n", "protect:\n  enabled: false\n"] {
+            let result = try run(off)
+            XCTAssertEqual(result.written, [], off)
+            XCTAssertEqual(result.skips, ["[skip] Protect Overview: protect.enabled is off"])
+        }
+        XCTAssertEqual(try run("protect:\n  enabled: true\n").written, ["Protect Overview"])
     }
 
     /// Protect writer fixture dirs contain both `*_empty.json` and `*_happy.json`.

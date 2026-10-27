@@ -75,9 +75,9 @@ final class ConfigFileSectionsTests: XCTestCase {
                 + "compliance.baselines[1].failures_count_column=Failures Two",
             "html: html.track_history=false",
         ])
-        XCTAssertEqual(
-            sections.unknown.map(\.keyPath), ["columns.frobnicate", "jamf_cli.jamf_profile"])
+        XCTAssertEqual(sections.unknown.map(\.keyPath), ["columns", "jamf_cli.jamf_profile"])
         XCTAssertEqual(sections.unknown.map(\.suggestion), [nil, "profile"])
+        XCTAssertEqual(sections.unknown.map(\.retiredSince), ["2.11", nil])
         let badLine = try XCTUnwrap(
             yaml.components(separatedBy: "\n").firstIndex { $0.contains("just some words") })
         XCTAssertEqual(sections.skipped, [
@@ -88,11 +88,6 @@ final class ConfigFileSectionsTests: XCTestCase {
 
     func testAKeyAScreenEditsIsNotListed() throws {
         let yaml = """
-        columns:
-          computer_name: Name
-          full_name: Full Name
-        mobile_columns:
-          model: Model
         security_agents:
           - name: Falcon
             column: Falcon Status
@@ -302,7 +297,7 @@ final class ConfigFileSectionsTests: XCTestCase {
     }
 
     func testAValueOfTheWrongShapeIsNotListed() throws {
-        let yaml = "thresholds: 5\ncolumns:\n  - a\n  - b\njamf_cli:\n  data_dir:\n    x: 1\n"
+        let yaml = "thresholds: 5\nsheets:\n  - a\n  - b\njamf_cli:\n  data_dir:\n    x: 1\n"
         XCTAssertEqual(summary(try build(yaml)), [])
     }
 
@@ -326,7 +321,7 @@ final class ConfigFileSectionsTests: XCTestCase {
     /// identified by it.
     func testTwoLongUnknownKeysCanShareADisplayedPath() throws {
         let stem = String(repeating: "k", count: 70)
-        let sections = try build("columns:\n  \(stem)a: 1\n  \(stem)b: 2\n")
+        let sections = try build("sheets:\n  \(stem)a: 1\n  \(stem)b: 2\n")
         XCTAssertEqual(sections.unknown.count, 2)
         XCTAssertEqual(Set(sections.unknown.map(\.keyPath)).count, 1)
     }

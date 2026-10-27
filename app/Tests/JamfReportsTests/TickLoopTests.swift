@@ -6,8 +6,8 @@ import XCTest
 ///
 /// The rules pinned here: a start the state file cannot remember never runs and
 /// never reaches disk later; no stamp failure stops the schedules after it or the
-/// overdue digest; and a run-now marker is cleared after its start is stamped and
-/// before its run, never after.
+/// overdue digest; and a run-now marker is cleared after its start is saved and
+/// before its run, never after, whichever reason the run has.
 final class TickLoopTests: XCTestCase {
 
     private func label(_ name: String) -> String {
@@ -36,10 +36,11 @@ final class TickLoopTests: XCTestCase {
     /// default exit 0 and complete. With `markerDir`, run-now markers are real files there.
     private func runDue(
         _ runs: [TickScheduler.DueRun], recorder: TickLoopRecorder, markerDir: URL? = nil,
+        runNowLabels: Set<String> = [],
         outcome: ScheduleRunOutcome = ScheduleRunOutcome(exitCode: 0, incomplete: false)
     ) async -> Int32 {
         await TickLoop.runDue(
-            runs, state: TickState(),
+            runs, state: TickState(), runNowLabels: runNowLabels,
             save: { try recorder.save($0) },
             clearRunNowMarker: { label in
                 recorder.cleared(label)
@@ -79,7 +80,7 @@ final class TickLoopTests: XCTestCase {
         let recorder = TickLoopRecorder()
         let held = HoldFlag()
         let code = await TickLoop.runDue(
-            [due("first"), due("second")], state: TickState(),
+            [due("first"), due("second")], state: TickState(), runNowLabels: [],
             save: { try recorder.save($0) },
             clearRunNowMarker: { _ in },
             perform: { run in
@@ -190,6 +191,19 @@ final class TickLoopTests: XCTestCase {
         XCTAssertNil(recorder.saved.last?.lastSucceeded[label("first")])
     }
 
+    /// A failed run whose failure a retry repeats is remembered for the hourly retries, and the
+    /// next success forgets it.
+    func testAFailureARetryRepeatsIsRecordedAndASuccessClearsIt() async {
+        let recorder = TickLoopRecorder()
+        _ = await runDue(
+            [due("first")], recorder: recorder,
+            outcome: ScheduleRunOutcome(exitCode: 1, incomplete: false, retryCouldHelp: false))
+        XCTAssertEqual(recorder.saved.last?.retryWouldRepeat, [label("first")])
+        var state = recorder.saved.last ?? TickState()
+        state.noteSucceeded(label("first"), startedAt: Date())
+        XCTAssertTrue(state.retryWouldRepeat.isEmpty)
+    }
+
     func testTheRunNowLineStillSaysIncomplete() {
         let outcome = ScheduleRunOutcome(exitCode: 0, incomplete: true, retryCouldHelp: false)
         XCTAssertEqual(
@@ -203,7 +217,9 @@ final class TickLoopTests: XCTestCase {
         let dir = markerDir()
         try TickRunner.requestRunNow(label: label("asked"), dir: dir)
         let recorder = TickLoopRecorder(failingSaves: [1])
-        let code = await runDue([due("asked", .runNow)], recorder: recorder, markerDir: dir)
+        let code = await runDue(
+            [due("asked", .runNow)], recorder: recorder, markerDir: dir,
+            runNowLabels: [label("asked")])
 
         XCTAssertEqual(code, 1)
         XCTAssertEqual(recorder.events, [.saveFailed, .digest], "an unstamped run never starts")
@@ -215,15 +231,53 @@ final class TickLoopTests: XCTestCase {
         let dir = markerDir()
         try TickRunner.requestRunNow(label: label("asked"), dir: dir)
         let recorder = TickLoopRecorder()
-        let code = await runDue([due("asked", .runNow)], recorder: recorder, markerDir: dir)
+        let code = await runDue(
+            [due("asked", .runNow)], recorder: recorder, markerDir: dir,
+            runNowLabels: [label("asked")])
 
         XCTAssertEqual(code, 0)
         XCTAssertEqual(recorder.events, [
-            .saved, .cleared(label("asked")), .ran(label("asked")), .saved, .digest,
-        ], "cleared once the start is stamped, and before the run")
+            .saved, .cleared(label("asked")), .ran(label("asked")), .digest,
+        ], "cleared once the start is saved, and before the run")
         XCTAssertEqual(recorder.markerOnDiskAtRunStart, [false],
                        "a run that crashes the process must not leave a marker to re-run it")
         XCTAssertTrue(TickRunner.pendingRunNowLabels(dir: dir).isEmpty)
+    }
+
+    /// A Run now writes nothing to the state, failed or not: it pays no day and ends no retry.
+    func testARunNowWritesNothingToTheState() async {
+        for outcome in [
+            ScheduleRunOutcome(exitCode: 0, incomplete: false),
+            ScheduleRunOutcome(exitCode: 1, incomplete: false, retryCouldHelp: false),
+        ] {
+            let recorder = TickLoopRecorder()
+            _ = await runDue(
+                [due("asked", .runNow)], recorder: recorder, runNowLabels: [label("asked")],
+                outcome: outcome)
+            XCTAssertFalse(recorder.saved.isEmpty)
+            for state in recorder.saved {
+                XCTAssertTrue(state.lastStarted.isEmpty)
+                XCTAssertTrue(state.lastSucceeded.isEmpty)
+                XCTAssertTrue(state.retryCount.isEmpty)
+                XCTAssertTrue(state.retryWouldRepeat.isEmpty)
+            }
+        }
+    }
+
+    /// A marker whose label is due anyway runs under the due reason and is cleared the same way.
+    func testAMarkerOnADueFireIsClearedBeforeTheFireRuns() async throws {
+        let dir = markerDir()
+        try TickRunner.requestRunNow(label: label("asked"), dir: dir)
+        let recorder = TickLoopRecorder()
+        _ = await runDue(
+            [due("asked", .fire)], recorder: recorder, markerDir: dir,
+            runNowLabels: [label("asked")])
+
+        XCTAssertEqual(recorder.events, [
+            .saved, .cleared(label("asked")), .ran(label("asked")), .saved, .digest,
+        ])
+        XCTAssertEqual(recorder.markerOnDiskAtRunStart, [false])
+        XCTAssertNotNil(recorder.saved.last?.lastSucceeded[label("asked")])
     }
 }
 

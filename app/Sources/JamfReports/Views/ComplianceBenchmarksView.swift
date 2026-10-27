@@ -305,7 +305,7 @@ struct ComplianceBenchmarksView: View {
 
     private static func lockReason() -> String {
         "Your active jamf-cli profile does not use auth-method: platform. Connect with a Jamf "
-            + "Account integration (Add workspace, then Platform Gateway) or switch this "
+            + "Account integration (Settings › Add connection, then Platform API) or switch this "
             + "workspace to a Platform profile."
     }
 

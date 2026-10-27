@@ -103,7 +103,7 @@ struct FirstLaunchChooserView: View {
             chooserCard(
                 icon: "network.badge.shield.half.filled",
                 title: "Connect a Jamf Pro server",
-                body: "For on-prem, GovCloud or any Jamf Pro instance, with an API client (OAuth2). Walks you through jamf-cli auth, workspace setup and an optional CSV mapping.",
+                body: "For on-prem, GovCloud or any Jamf Pro instance, with an API client (OAuth2). Walks you through jamf-cli auth and workspace setup.",
                 pills: [
                     ("OAuth2", "key.fill", Pill.Tone.teal),
                     ("Local workspace", "folder", Pill.Tone.muted),
@@ -117,7 +117,7 @@ struct FirstLaunchChooserView: View {
             chooserCard(
                 icon: "graduationcap.fill",
                 title: "Connect Jamf School",
-                body: "Sets up a Jamf School-only workspace — jamf-cli auth with your Network ID and API key, then reports from Jamf School data. Ships community-validated.",
+                body: "Sets up a Jamf School-only workspace — jamf-cli auth with your Network ID and API key, then reports from Jamf School data.",
                 pills: [
                     ("API key", "key.fill", Pill.Tone.teal),
                     ("K-12 / EDU", "building.columns", Pill.Tone.muted),
@@ -193,8 +193,8 @@ struct FirstLaunchChooserView: View {
             Image(systemName: "questionmark.circle")
                 .foregroundStyle(Theme.Colors.fgMuted)
             Text("Only Jamf Protect or Jamf Security Cloud? Jamf Reports reports on a Jamf Pro or "
-                + "Jamf School fleet. Jamf Protect is added to a Jamf Pro workspace, and Jamf "
-                + "Security Cloud is not supported yet.")
+                + "Jamf School fleet. Jamf Protect is added to a Jamf Pro or Jamf School "
+                + "workspace, and Jamf Security Cloud is not supported yet.")
                 .font(.footnote)
                 .foregroundStyle(Theme.Text.tertiary(contrast))
                 .fixedSize(horizontal: false, vertical: true)

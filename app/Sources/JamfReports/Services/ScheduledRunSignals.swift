@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - Webhook fact assembly (detail-mode reduction + egress redaction)
@@ -76,6 +77,22 @@ func alertFacts(
     return facts
 }
 
+/// Facts for the daily heartbeat card. `full` adds the newest daily summary's date, so the
+/// receiver can see data is current as well as the Mac alive; `minimal` is Profile and Status
+/// only. Never a device count or name.
+func heartbeatFacts(
+    detail: NotifyConfig.Detail, profile: String, newestSummaryDay: String?
+) -> [WebhookNotifier.Fact] {
+    var facts: [WebhookNotifier.Fact] = [
+        .init(label: "Profile", value: profile),
+        .init(label: "Status", value: "Background item ran"),
+    ]
+    if detail == .full {
+        facts.append(.init(label: "Newest summary", value: newestSummaryDay ?? "none"))
+    }
+    return facts
+}
+
 /// What a headless run prints to stdout for `line`, or nil when the line stays in the run
 /// log only (info lines unless `verbose`). Redacted like the log, since a scheduler may
 /// capture stdout somewhere less protected.
@@ -120,42 +137,144 @@ enum ScheduledRunSignals {
             detail: notify.resolvedDetail, profile: profile, mode: mode,
             artifact: artifact, sheetFailures: sheetFailures
         )
+        let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.send(
-            config: notify, title: "Jamf Report — \(profile)", facts: facts
+            config: notify, title: "Scheduled run finished — \(profile)", facts: facts,
+            tone: sheetFailures > 0 ? .warning : .good,
+            organization: WebhookNotifier.organization(from: config), failure: failure
         )
         if !sent {
-            let message = "[warn] webhook notification failed for '\(profile)'"
+            let message = "[warn] webhook notification failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
         }
+        noteWebhook(sent ? .sent : .failed, failure: failure)
     }
 
-    /// Post a failure webhook digest for a run that threw before generating a
+    /// Post a failure webhook digest for a run that failed before or while generating a
     /// report. The error text is the only free-text egress channel — a network
     /// `errorDescription` can embed the Jamf server hostname — so in `full` mode
     /// it is scrubbed through the strictest pipeline (`LogRedactor` credential
     /// patterns + `DiagnosticRedactor` full-PII pass) before it enters a fact.
     /// `minimal` mode drops the error fact entirely. Best-effort — never throws.
+    /// `fallbackNotify` is the `notify:` block read alone, for a run with no decoded config.
+    ///
+    /// With hourly retries a persistent failure would post every hour, so a `scheduleKey`
+    /// (schedule label + profile) allows one card per local day for the same failure
+    /// (`failureFingerprint`); a different failure posts, and a failed send stamps nothing so
+    /// the next pass retries. The stamp lives in `stateRoot` (this Mac's Application Support),
+    /// never in the workspace, which a refused run must leave untouched.
     static func notifyScheduledRunFailure(
         config: ReportConfig?,
         profile: String,
         mode: Schedule.RunMode,
         errorDescription: String,
-        recorder: ScheduledRunRecorder?
+        recorder: ScheduledRunRecorder?,
+        fallbackNotify: NotifyConfig? = nil,
+        scheduleKey: String,
+        stateRoot: URL = AppSupport.directory()
+            .appendingPathComponent("failure-cards", isDirectory: true),
+        now: Date = Date()
     ) async {
-        guard let notify = SharedConfigPin.effectiveNotify(config?.notify, profile: profile),
+        guard let notify = SharedConfigPin.effectiveNotify(
+                config?.notify ?? fallbackNotify, profile: profile),
               notify.isUsable else { return }
         let facts = failureFacts(
             detail: notify.resolvedDetail, profile: profile, mode: mode,
             errorDescription: errorDescription
         )
-        let sent = await WebhookNotifier.sendFailed(
-            config: notify, title: "Jamf Report — \(profile)", facts: facts
-        )
-        if !sent {
-            let message = "[warn] failure webhook notification failed for '\(profile)'"
+        let folder = stateRoot.appendingPathComponent(
+            ProfileName.labelComponent(scheduleKey), isDirectory: true)
+        let day = SummaryJSONParser.dateFormatter.string(from: now)
+        let failure = WebhookNotifier.DeliveryFailure()
+        let outcome = await DayMarker(name: "failure-card").sendOnce(
+            day: "\(day)-\(failureFingerprint(errorDescription))", in: [folder], now: now,
+            onLine: { fputs($0 + "\n", stderr) }
+        ) {
+            await WebhookNotifier.sendFailed(
+                config: notify, title: "Scheduled run failed — \(profile)", facts: facts,
+                organization: WebhookNotifier.organization(from: config), failure: failure)
+        }
+        if outcome == .failed {
+            let message = "[warn] failure webhook notification failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
+            AppLogger.webhook.error("\(message, privacy: .public)")
+        }
+        noteWebhook(outcome, failure: failure)
+    }
+
+    /// Eight hex characters naming a failure: digit runs (durations, counts, ports) are
+    /// flattened so the same failure with a different number is still the same failure.
+    /// shortcut: one stamp per schedule holds the latest failure only, so A, B, A posts A twice.
+    static func failureFingerprint(_ reason: String) -> String {
+        let flattened = LogRedactor.redact(reason)
+            .replacingOccurrences(of: "[0-9]+", with: "#", options: .regularExpression)
+        return SHA256.hash(data: Data(flattened.utf8)).prefix(4)
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Post the opt-in daily heartbeat card for each profile in `profiles` whose `notify:` is
+    /// usable with `heartbeat: true`, once per local day, after the tick's due schedules ran.
+    /// The receiver alerts on its absence, so a Mac or background item that stops is noticed.
+    /// The stamp lives in `stateRoot` (this Mac's Application Support), never in the workspace,
+    /// and is written only after a confirmed send. Tick-only: no GUI path calls this.
+    /// Best-effort — never throws.
+    static func notifyHeartbeats(
+        profiles: [String],
+        excluding excluded: Set<String> = [],
+        stateRoot: URL = AppSupport.directory()
+            .appendingPathComponent("heartbeats", isDirectory: true),
+        now: Date = Date()
+    ) async {
+        let day = SummaryJSONParser.dateFormatter.string(from: now)
+        let targets = notifyTargets(in: profiles.filter { !excluded.contains($0) }) { _ in false }
+        let marker = DayMarker(name: "heartbeat")
+        for target in targets where target.notify.sendsHeartbeat {
+            let folder = stateRoot.appendingPathComponent(
+                ProfileName.pathComponent(target.profile), isDirectory: true)
+            // Every wake gets here; skip before building anything once today's card is out.
+            guard !marker.isStamped(day, in: folder) else { continue }
+            let facts = heartbeatFacts(
+                detail: target.notify.resolvedDetail, profile: target.profile,
+                newestSummaryDay: SummaryJSONParser.newestSummaryDay(profile: target.profile))
+            let failure = WebhookNotifier.DeliveryFailure()
+            let outcome = await AttentionLog.recording(profile: target.profile) {
+                let outcome = await marker.sendOnce(
+                    day: day, in: [folder], now: now, onLine: { fputs($0 + "\n", stderr) }
+                ) {
+                    await WebhookNotifier.send(
+                        config: target.notify,
+                        title: "Daily heartbeat — \(target.profile)",
+                        facts: facts,
+                        organization: WebhookNotifier.organization(profile: target.profile),
+                        failure: failure)
+                }
+                noteWebhook(outcome, failure: failure)
+                return outcome
+            }
+            if outcome == .failed {
+                let message = "[warn] heartbeat notification failed for '\(target.profile)': "
+                    + (failure.reason ?? "unknown")
+                fputs(message + "\n", stderr)
+                AppLogger.webhook.error("\(message, privacy: .public)")
+            }
+        }
+    }
+
+    /// A confirmed send closes `webhookRejected`; a failed one opens it, naming the HTTP status
+    /// or the network error, never the URL.
+    static func noteWebhook(
+        _ outcome: DayMarker.SendOutcome, failure: WebhookNotifier.DeliveryFailure
+    ) {
+        switch outcome {
+        case .sent: AttentionLog.clear(.webhookRejected)
+        case .failed:
+            AttentionLog.raise(
+                .webhookRejected, "webhook rejected (\(failure.reason ?? "unknown"))")
+        case .skipped: break
         }
     }
 
@@ -207,7 +326,7 @@ enum ScheduledRunSignals {
     /// just wrote and post ONE attention card if any rule trips (2.6 "trust trio"
     /// #1). Gated on `alerts.isEnabled` AND a usable `notify:` webhook — alerts
     /// reuse the notify webhook and add no URL of their own. Only call after a
-    /// run that COLLECTED (snapshot-only, full, csv-assisted); jamf-cli-only
+    /// run that COLLECTED (snapshot-only, full); jamf-cli-only
     /// generates from cache and produces no fresh summary.
     ///
     /// Best-effort: a summary-load or send failure logs a warning and never
@@ -259,11 +378,16 @@ enum ScheduledRunSignals {
         let newHits = hits.filter { newKeys.contains(MetricAlertEvaluator.dedupKey(for: $0)) }
         guard !newHits.isEmpty else { return }
         let facts = alertFacts(detail: notify.resolvedDetail, profile: profile, hits: newHits)
+        let failure = WebhookNotifier.DeliveryFailure()
         let sent = await WebhookNotifier.sendAlert(
-            config: notify, title: "Jamf Reports alert — \(profile)", facts: facts
+            config: notify, title: "Metric alert — \(profile)", facts: facts,
+            organization: WebhookNotifier.organization(from: config),
+            failure: failure
         )
+        noteWebhook(sent ? .sent : .failed, failure: failure)
         guard sent else {
-            let message = "[warn] metric-alert webhook failed for '\(profile)'"
+            let message = "[warn] metric-alert webhook failed for '\(profile)': "
+                + (failure.reason ?? "unknown")
             fputs(message + "\n", stderr)
             recorder?.record(message)
             return
@@ -382,19 +506,30 @@ let deviceScanNotWrittenMarkerSuffix = "— not written"
 final class CollectHonestyWatcher: @unchecked Sendable {
     private let lock = NSLock()
     private var standDown = false
+    /// The stand-down was for a peer's recent collect, not its live claim.
+    private var freshnessStandDown = false
     private var summaryFailed = false
     private var partial = false
     /// Sources the `[partial]` lines named as not landed.
     private var unlanded: Set<String> = []
     /// A `[partial]` line that names no source, so no failure record can explain it.
     private var unexplainedPartial = false
+    /// A `[partial]` line for a failure a retry repeats and no failure record can explain.
+    private var permanentPartial = false
 
     init() {}
 
     /// Feed one log line. Cheap enough to call on every line of a collect.
     func observe(_ line: String) {
         if line.hasPrefix(ReportEngine.standDownMarker) {
-            lock.withLock { standDown = true }
+            // A peer's live claim may end before the same-day retry; "collected recently" won't.
+            let liveClaim = line.hasSuffix(ReportEngine.liveClaimStandDownSuffix)
+            lock.withLock {
+                standDown = true
+                if liveClaim { partial = true; unexplainedPartial = true } else {
+                    freshnessStandDown = true
+                }
+            }
             return
         }
         guard line.hasPrefix("[partial]"),
@@ -402,13 +537,16 @@ final class CollectHonestyWatcher: @unchecked Sendable {
               !line.hasSuffix(deviceScanGapsMarkerSuffix) else { return }
         let summary = line.hasPrefix(ReportEngine.summaryNotWrittenMarker)
         let kinds = Self.unlandedKinds(in: line)
+        let protectThrew = line.hasPrefix(ReportEngine.protectCollectFailedMarker)
         // Follows from the sources line before it, which names them.
         let noSourceLanded = line.hasPrefix(
             "\(ReportEngine.summaryNotWrittenMarker) \(ReportEngine.noSourceLandedReason)")
         lock.withLock {
             partial = true
             if summary { summaryFailed = true }
-            if let kinds { unlanded.formUnion(kinds) } else if !noSourceLanded {
+            if let kinds { unlanded.formUnion(kinds) } else if protectThrew {
+                permanentPartial = true
+            } else if !noSourceLanded {
                 unexplainedPartial = true
             }
         }
@@ -435,28 +573,56 @@ final class CollectHonestyWatcher: @unchecked Sendable {
     /// The summary write failed, so the trend chart did not advance.
     var summaryWriteFailed: Bool { lock.withLock { summaryFailed } }
 
-    /// A source or the summary did not land. A stand-down, a report's sheet failures and a
-    /// device scan that landed with gaps are not missing data a retry would fetch, and never
-    /// set it. Whether a same-day retry is worth it is `retryCouldHelp`.
+    /// A source or the summary did not land, or the run stood down for a peer's live claim. A
+    /// stand-down because a peer collected recently, a report's sheet failures and a device
+    /// scan that landed with gaps are not missing data a retry would fetch, and never set it. Whether a same-day retry is worth it is `retryCouldHelp`.
     var incomplete: Bool { lock.withLock { partial } }
 
     /// `incomplete` for the background item's same-day retry: false when the `[partial]`
     /// lines only name sources whose last failure a retry would repeat. Run History still
     /// reads such a run as Partial from its log.
     func retryCouldHelp(lastFailureRepeats: (String) -> Bool) -> Bool {
-        let (partial, unexplained, kinds) = lock.withLock {
-            (self.partial, unexplainedPartial, unlanded)
+        let (partial, unexplained, permanent, kinds) = lock.withLock {
+            (self.partial, unexplainedPartial, permanentPartial, unlanded)
         }
         guard partial else { return false }
-        return unexplained || kinds.isEmpty || !kinds.allSatisfy(lastFailureRepeats)
+        if unexplained { return true }
+        if kinds.isEmpty { return !permanent }
+        return !kinds.allSatisfy(lastFailureRepeats)
     }
 
     /// The rule self-remediation uses (`WorkspaceStore.lastFailureRepeatsOnRetry`), read from
     /// `profile`'s state files, except that exit 3 still retries (#226 5a).
-    func retryCouldHelp(profile: String) -> Bool {
+    ///
+    /// A stand-down because a peer collected recently is also worth a retry while `profile` has
+    /// no summary for today: if that peer is off, a later wake finds its data older than the
+    /// window and collects.
+    func retryCouldHelp(profile: String, now: Date = Date()) -> Bool {
+        if lock.withLock({ freshnessStandDown }),
+           !SummaryJSONParser.hasSummary(profile: profile, on: now) { return true }
         guard let stateDir = try? WorkspacePaths.stateDir(for: profile) else { return incomplete }
         let store = StateFileStore(directory: stateDir)
         return retryCouldHelp {
+            WorkspaceStore.lastFailureRepeatsOnRetry($0, in: store, countingUnauthorized: false)
+        }
+    }
+
+    /// `retryCouldHelp(profile:)` for a run that exited `exitCode` after starting at `start`. A
+    /// run that failed outright (a dead collect prints no `[partial]` line) is also worth a retry
+    /// unless every source that failed since `start` failed in a way a retry repeats; one that
+    /// recorded no failure (no workspace, a config that does not decode) still retries.
+    func retryCouldHelp(profile: String, exitCode: Int32, since start: Date) -> Bool {
+        if retryCouldHelp(profile: profile) { return true }
+        guard exitCode != 0, let stateDir = try? WorkspacePaths.stateDir(for: profile) else {
+            return exitCode != 0
+        }
+        let store = StateFileStore(directory: stateDir)
+        let floor = Date(timeIntervalSince1970: start.timeIntervalSince1970.rounded(.down))
+        let failed = ((try? FileManager.default.contentsOfDirectory(atPath: stateDir.path)) ?? [])
+            .filter { $0.hasSuffix(".fail") }.map { String($0.dropLast(".fail".count)) }
+            .filter { (store.failures(report: $0)?.last ?? .distantPast) >= floor }
+        guard !failed.isEmpty else { return true }
+        return !failed.allSatisfy {
             WorkspaceStore.lastFailureRepeatsOnRetry($0, in: store, countingUnauthorized: false)
         }
     }
@@ -609,7 +775,7 @@ struct CLIRunSignals: Sendable {
         recorder?.finish(exitCode: 1)
         await ScheduledRunSignals.notifyScheduledRunFailure(
             config: config, profile: profile, mode: mode,
-            errorDescription: desc, recorder: nil
+            errorDescription: desc, recorder: nil, scheduleKey: "cli.\(kind).\(profile)"
         )
     }
 }

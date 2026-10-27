@@ -48,22 +48,6 @@ struct TrendsView: View {
         return trendStore.chartDomain
     }
 
-    /// Values driving `chartYDomain`. `.managedDevices` renders TWO series
-    /// (Computers, Mobile devices) — the domain must bound both, not just the
-    /// single headline value `value(for:in:)` returns for the pill/hero
-    /// display, or a larger mobile-device line could clip off the chart.
-    private var chartYDomainValues: [Double] {
-        guard metric == .managedDevices else { return values }
-        return managedDeviceSeries.flatMap { $0.points.map(\.value) }
-    }
-
-    /// Computers and mobile devices for the Managed Devices chart.
-    private var managedDeviceSeries: [ChartSeries] {
-        workspaceStore.demoMode
-            ? TrendDemoSeries.managedDeviceSeries(range: range)
-            : trendStore.managedDeviceSeries()
-    }
-
     /// The mSCP band series the hero chart stacks. In demo mode it is the demo
     /// fleet's, never the tenant's the shared store may still hold.
     private var mscpStackedSeries: [ChartSeries] {
@@ -75,14 +59,18 @@ struct TrendsView: View {
     /// A metric's name as the pills show it: the configured compliance
     /// benchmark and EDR agent in place of the generic names.
     private func metricLabel(_ m: TrendSeries.Metric) -> String {
-        m.displayLabel(
+        return m.displayLabel(
             benchmarkLabel: workspaceStore.complianceBenchmarkLabel,
             edrAgentName: workspaceStore.edrAgentName
         )
     }
 
+    private static func archivedSummaries(_ count: Int) -> String {
+        "\(count) archived summar\(count == 1 ? "y" : "ies")"
+    }
+
     private var chartYDomain: ClosedRange<Double> {
-        Self.chartYDomain(metric: metric, values: chartYDomainValues)
+        Self.chartYDomain(metric: metric, values: values)
     }
 
     /// Y-axis domain that respects the metric's preferred "good frame" but
@@ -90,7 +78,7 @@ struct TrendsView: View {
     /// 0% disappears below `metric.minY = 40`, and a Stale count of 100+
     /// clips off the top of `metric.maxY = 60`. Floor at 0 — values are
     /// non-negative by construction (validated in the data layer).
-    /// Device counts have no good frame: a fixed 0–1,000 flattened a small
+    /// Device counts (`isDeviceCount`) have no good frame: a fixed 0–1,000 flattened a small
     /// fleet, so their top follows the data.
     nonisolated static func chartYDomain(
         metric: TrendSeries.Metric,
@@ -98,7 +86,7 @@ struct TrendsView: View {
     ) -> ClosedRange<Double> {
         let dataMin = values.min()
         let dataMax = values.max()
-        if metric == .managedDevices || metric == .activeDevices, let dataMax {
+        if metric.isDeviceCount, let dataMax {
             return 0...deviceCountAxisTop(dataMax)
         }
         let lo = max(0, min(metric.minY, dataMin ?? metric.minY))
@@ -304,15 +292,20 @@ struct TrendsView: View {
             if let preferred = TrendRange(rawValue: defaultTrendRangeRaw), preferred != range {
                 range = preferred
             }
+            ensureOfferedMetric()
             // Off-main scan so entering Trends never freezes the UI.
             Task { await loadTrendsOffMain() }
         }
         .onChange(of: workspaceStore.profile) { _, _ in
+            ensureOfferedMetric()
             Task { await loadTrendsOffMain() }
         }
         .onChange(of: range) { _, newValue in
             selectedDate = nil
-            defaultTrendRangeRaw = newValue.rawValue
+            // A managed default stays as the profile sets it; the picker changes this view only.
+            if !ManagedPreference.isForced("defaultTrendRange") {
+                defaultTrendRangeRaw = newValue.rawValue
+            }
             // Range change only re-filters cached data — no disk read.
             if !workspaceStore.demoMode {
                 withAnimation(.snappy) { trendStore.setRange(newValue) }
@@ -320,6 +313,14 @@ struct TrendsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .refreshActiveTab)) { _ in
             Task { await loadTrendsOffMain() }
+        }
+    }
+
+    /// A workspace whose summary lacks the selected metric (School has no Mac figures) shows
+    /// its first pill as the hero instead.
+    private func ensureOfferedMetric() {
+        if !availableMetrics.contains(metric), let first = availableMetrics.first {
+            metric = first
         }
     }
 
@@ -338,7 +339,7 @@ struct TrendsView: View {
             TrendStore.computeSnapshot(profile: profile)
         }.value
         trendStore.apply(snapshot, profile: profile, range: r, generation: generation)
-        await trendStore.backfillAgentCoverage(profile: profile)
+        await trendStore.backfillHistory(profile: profile)
     }
 
     /// First-load placeholder: shown only while the initial scan runs with no
@@ -433,17 +434,19 @@ struct TrendsView: View {
     /// .securityScore only appears when security score data exists.
     /// The demo fleet has both series, and they show in demo mode even when
     /// the shared store holds no live history.
-    /// .managedDevices shows in demo mode too, from the demo fleet's
-    /// computer and mobile series.
     private var availableMetrics: [TrendSeries.Metric] {
         workspaceStore.availableMetrics.filter { metric in
+            // The demo history has no mobile series; a live one offers by device type.
+            if metric.isMobile { return !workspaceStore.demoMode && trendStore.offers(metric) }
+            guard workspaceStore.demoMode || trendStore.offers(metric) else { return false }
             switch metric {
             case .mscpBandTrend:
                 return workspaceStore.demoMode || trendStore.hasMSCPBandHistory
             case .securityScore:
                 return !points(for: .securityScore).isEmpty
-            case .managedDevices:
-                return true
+            case .stale, .osCurrent:
+                // School records these only for Macs, and OS currency only with a feed.
+                return !workspaceStore.isSchoolWorkspace || !points(for: metric).isEmpty
             default:
                 return true
             }
@@ -648,31 +651,6 @@ struct TrendsView: View {
                                     .accessibilityLabel("\(series.label): \(Int(point.value)) devices")
                                 }
                             }
-                        } else if metric == .managedDevices {
-                            // Two-line chart: Computers vs. Mobile devices.
-                            // Series identity (`by:`) is what lets Charts render
-                            // and legend them distinctly — a constant
-                            // foregroundStyle would collapse both into one line.
-                            let deviceSeries = managedDeviceSeries
-                            ForEach(deviceSeries, id: \.label) { series in
-                                ForEach(Array(series.points.enumerated()), id: \.offset) { _, point in
-                                    LineMark(
-                                        x: .value("Date", point.date),
-                                        y: .value("Count", point.value)
-                                    )
-                                    .foregroundStyle(by: .value("Type", series.label))
-                                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                                    .interpolationMethod(.monotone)
-
-                                    PointMark(
-                                        x: .value("Date", point.date),
-                                        y: .value("Count", point.value)
-                                    )
-                                    .foregroundStyle(by: .value("Type", series.label))
-                                    .symbolSize(30)
-                                    .accessibilityLabel("\(series.label): \(Int(point.value)) on \(SummaryJSONParser.dateFormatter.string(from: point.date))")
-                                }
-                            }
                         } else {
                             // Standard line + area chart for other metrics
                             // The area starts at the axis floor, not 0: Charts does not clip marks
@@ -714,9 +692,9 @@ struct TrendsView: View {
                         }
 
                         // Selection indicator (single-series metrics only —
-                        // .mscpBandTrend and .managedDevices render multiple
-                        // series and have no one "the" value to highlight)
-                        if metric != .mscpBandTrend, metric != .managedDevices {
+                        // .mscpBandTrend renders multiple series and has no one
+                        // "the" value to highlight)
+                        if metric != .mscpBandTrend {
                             if let selectedPoint {
                                 RuleMark(x: .value("Selected", selectedPoint.date))
                                     .foregroundStyle(Theme.Colors.hairlineStrong)
@@ -764,13 +742,12 @@ struct TrendsView: View {
                         }
                     }
                     .chartForegroundStyleScale(
-                        domain: heroChartForegroundScale.labels,
-                        range: heroChartForegroundScale.colors
+                        domain: mscpBandChartScale.labels,
+                        range: mscpBandChartScale.colors
                     )
                     .chartLegend(heroLegendVisibility)
                     .overlay {
-                        if trendPoints.isEmpty, metric != .mscpBandTrend,
-                           metric != .managedDevices {
+                        if trendPoints.isEmpty, metric != .mscpBandTrend {
                             Text("No snapshot in this range records \(metricLabel(metric)).")
                                 .font(.callout)
                                 .foregroundStyle(Theme.Text.tertiary(contrast))
@@ -800,7 +777,7 @@ struct TrendsView: View {
                     }
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle").font(.system(size: 11))
-                        Text("\(trendDates.count) archived summaries").font(.caption)
+                        Text("\(Self.archivedSummaries(trendDates.count))").font(.caption)
                             .foregroundStyle(Theme.Text.tertiary(contrast))
                     }
                     Spacer()
@@ -852,7 +829,7 @@ struct TrendsView: View {
                         securityPostureCard
                     }
                 }
-            } else {
+            } else if !workspaceStore.isSchoolWorkspace {
                 securityPostureCard
             }
         }
@@ -1066,18 +1043,6 @@ struct TrendsView: View {
         return (series.map(\.label), series.map { Color(cgColor: $0.color) })
     }
 
-    /// Label/color scale for the `.managedDevices` two-line chart, same
-    /// derivation as `mscpBandChartScale`.
-    private var managedDevicesChartScale: (labels: [String], colors: [Color]) {
-        let series = managedDeviceSeries
-        guard !series.isEmpty else { return (["Computers"], [Theme.Colors.info]) }
-        return (series.map(\.label), series.map { Color(cgColor: $0.color) })
-    }
-
-    /// The `.chartForegroundStyleScale` the hero chart applies. Only
-    /// `.mscpBandTrend` and `.managedDevices` marks use `.foregroundStyle(by:)`
-    /// — every other metric styles its mark directly, so the scale is inert
-    /// for them and picking the right one here only matters for those two.
     /// Under the Security Score chart when its inputs changed inside the visible range.
     @ViewBuilder
     private var scoreDefinitionCaption: some View {
@@ -1091,14 +1056,10 @@ struct TrendsView: View {
         }
     }
 
-    private var heroChartForegroundScale: (labels: [String], colors: [Color]) {
-        metric == .managedDevices ? managedDevicesChartScale : mscpBandChartScale
-    }
-
-    /// The scale above is applied to every metric, so Charts would list its domain (the band
-    /// fallback "Band") under single-line charts. Only the two multi-series charts get a legend.
+    /// The band scale is applied to every metric, so Charts would list its domain (the band
+    /// fallback "Band") under single-line charts. Only the band chart gets a legend.
     private var heroLegendVisibility: Visibility {
-        metric == .managedDevices || metric == .mscpBandTrend ? .automatic : .hidden
+        metric == .mscpBandTrend ? .automatic : .hidden
     }
 
     /// Band legend for the live stacked-area chart.
@@ -1300,7 +1261,7 @@ struct TrendsView: View {
                         HStack(spacing: 4) {
                             Text("snapshots/summaries/")
                                 .font(Theme.Fonts.mono(11.5))
-                            Text("· \(trendDates.count) archived summaries · one per day, "
+                            Text("· \(Self.archivedSummaries(trendDates.count)) · one per day, "
                                  + "written by collect")
                         }
                         .font(.caption)
@@ -1453,7 +1414,7 @@ struct TrendsView: View {
         workspaceStore.globalStatus = "collect + generate · profile=\(profile)"
         // Status-bar race guard — see AuditView.runAudit comment.
         do {
-            let exit = try await bridge.collectThenGenerate(profile: profile, csvPath: nil) { [weak workspaceStore] line in
+            let exit = try await bridge.collectThenGenerate(profile: profile) { [weak workspaceStore] line in
                 Task { @MainActor in
                     guard let workspaceStore, self.isArchiving else { return }
                     workspaceStore.globalStatus = line.text
@@ -1566,19 +1527,6 @@ enum TrendDemoSeries {
         guard let latest = allPoints.last?.date else { return [] }
         guard let start = startDate(for: range, latest: latest) else { return allPoints }
         return allPoints.filter { $0.date >= start }
-    }
-
-    /// Computers and mobile devices for the Managed Devices chart, shaped like
-    /// `TrendStore.managedDeviceSeries()` so the chart code needs no demo branch.
-    static func managedDeviceSeries(range: TrendRange) -> [ChartSeries] {
-        let computers = points(dates: dates, values: DemoData.totalDevicesTrend, range: range)
-        let mobile = points(dates: dates, values: DemoData.mobileDevicesTrend, range: range)
-        return [
-            ChartSeries(label: "Computers", color: ChartPalette.seriesColors[0],
-                        points: computers.map { (date: $0.date, value: $0.value) }),
-            ChartSeries(label: "Mobile devices", color: ChartPalette.seriesColors[4],
-                        points: mobile.map { (date: $0.date, value: $0.value) }),
-        ]
     }
 
     /// The demo fleet's weekly mSCP band counts, Pass through High, by absolute

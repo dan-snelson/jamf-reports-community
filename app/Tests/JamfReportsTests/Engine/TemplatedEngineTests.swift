@@ -159,7 +159,7 @@ final class TemplatedEngineTests: XCTestCase {
         let engine = ReportEngine(config: ReportConfig(), dataDir: tmpDir)
         let outURL = tmpDir.appendingPathComponent("default.xlsx")
         // No data directory → should produce a workbook (graceful Cover-sheet path).
-        try await engine.generate(csvURL: nil, outputURL: outURL, locateJamfCLI: { nil })
+        try await engine.generate(outputURL: outURL, locateJamfCLI: { nil })
         XCTAssertTrue(FileManager.default.fileExists(atPath: outURL.path))
     }
 
@@ -169,7 +169,7 @@ final class TemplatedEngineTests: XCTestCase {
         let engine = ReportEngine(config: ReportConfig(), dataDir: tmpDir)
         let outURL = tmpDir.appendingPathComponent("operational.xlsx")
         do {
-            try await engine.generate(csvURL: nil, outputURL: outURL,
+            try await engine.generate(outputURL: outURL,
                                       template: OperationalTemplate(), locateJamfCLI: { nil })
             XCTFail("Expected noCachedData when empty dataDir + no CSV + non-cover template")
         } catch ReportEngineError.noCachedData {
@@ -184,7 +184,6 @@ final class TemplatedEngineTests: XCTestCase {
         let engine = ReportEngine(config: ReportConfig(), dataDir: tmpDir)
         let outURL = tmpDir.appendingPathComponent("compliance.xlsx")
         try await engine.generate(
-            csvURL: nil,
             outputURL: outURL,
             template: ComplianceTemplate(),
             locateJamfCLI: { nil }
@@ -200,7 +199,7 @@ final class TemplatedEngineTests: XCTestCase {
         let engine = ReportEngine(config: ReportConfig(), dataDir: tmpDir)
         let outURL = tmpDir.appendingPathComponent("asset.xlsx")
         do {
-            try await engine.generate(csvURL: nil, outputURL: outURL,
+            try await engine.generate(outputURL: outURL,
                                       template: AssetTemplate(), locateJamfCLI: { nil })
             XCTFail("Expected noCachedData when empty dataDir + no CSV + non-cover template")
         } catch ReportEngineError.noCachedData {
@@ -215,7 +214,6 @@ final class TemplatedEngineTests: XCTestCase {
         let engine = ReportEngine(config: ReportConfig(), dataDir: tmpDir)
         let outURL = tmpDir.appendingPathComponent("security.xlsx")
         try await engine.generate(
-            csvURL: nil,
             outputURL: outURL,
             template: SecurityPostureTemplate(),
             locateJamfCLI: { nil }
@@ -233,7 +231,7 @@ final class TemplatedEngineTests: XCTestCase {
         }
         let asked = Asked()
         try await ReportEngine(config: ReportConfig(), dataDir: tmpDir).generate(
-            csvURL: nil, outputURL: tmpDir.appendingPathComponent("seam.xlsx"),
+            outputURL: tmpDir.appendingPathComponent("seam.xlsx"),
             template: ComplianceTemplate(), locateJamfCLI: { asked.record(); return nil })
         XCTAssertEqual(asked.value, 1)
     }

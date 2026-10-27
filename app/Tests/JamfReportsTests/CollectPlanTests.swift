@@ -21,7 +21,7 @@ final class CollectPlanTests: XCTestCase {
     }
 
     private var matrix: [(args: [String], kind: String)] {
-        ReportEngine.collectCommandMatrix(profile: profile, specNames: true, staleDays: 30)
+        ReportEngine.collectCommandMatrix(profile: profile, staleDays: 30)
     }
 
     private func skip(
@@ -241,7 +241,7 @@ final class CollectPlanTests: XCTestCase {
         }
         let calls = root.appendingPathComponent("calls.log")
         let stub = bin.appendingPathComponent("stub-cli")
-        try "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"\(calls.path)\"\nprintf '[]'\nexit 0\n"
+        try "#!/bin/sh\n[ \"$1 $2\" = \"config list\" ] && { printf '%s' '[{\"name\":\"\(profile)\"}]'; exit 0; }\nprintf '%s\\n' \"$*\" >> \"\(calls.path)\"\nprintf '[]'\nexit 0\n"
             .write(to: stub, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
         let workspace = try XCTUnwrap(ProfileService.workspaceURL(for: profile))
@@ -313,7 +313,7 @@ final class CollectPlanTests: XCTestCase {
 
         XCTAssertTrue(planLines.contains("[plan] device scan: due"), "\(planLines)")
         let matrix = ReportEngine.collectCommandMatrix(
-            profile: profile, specNames: false, staleDays: 30)
+            profile: profile, staleDays: 30)
         let asked = ((try? String(contentsOf: calls, encoding: .utf8)) ?? "")
             .split(separator: "\n").map(String.init)
         // jamf-cli is given the matrix's arguments, then `--no-hints --no-version-check`.

@@ -8,8 +8,6 @@ final class ConfigEditedKeysTests: XCTestCase {
     func testEveryEditorsKeysAreIncluded() {
         let paths = ConfigEditedKeys.paths
         let expected: [[String]] = [
-            ["columns", "computer_name"], ["columns", "full_name"],
-            ["mobile_columns", "device_family"],
             ["security_agents", "connected_value"],
             ["custom_eas", "type"], ["custom_eas", "true_value"],
             ["custom_eas", "warning_threshold"], ["custom_eas", "critical_threshold"],

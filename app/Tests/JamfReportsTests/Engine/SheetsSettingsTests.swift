@@ -23,21 +23,22 @@ final class SheetsSettingsTests: XCTestCase {
         }
     }
 
-    func testOrderMovesACSVTabAheadOfTheJamfCLITabs() async throws {
+    func testOrderMovesAnEATabAheadOfTheJamfCLITabs() async throws {
         try await withScratch { scratch in
+            let dataDir = try fixtureData([], in: scratch)
+            let eaDir = dataDir.appendingPathComponent("ea-results", isDirectory: true)
+            try FileManager.default.createDirectory(at: eaDir, withIntermediateDirectories: true)
+            try JSONSerialization.data(withJSONObject: [
+                ["definition_id": "1", "device": "Mac-1", "ea_name": "FV", "value": "Encrypted"],
+            ]).write(to: eaDir.appendingPathComponent("ea-results_20261004T100000.json"))
             let config = try ConfigLoader.loadFromString("""
-            columns:
-              computer_name: Computer Name
-              serial_number: Serial Number
-              operating_system: Operating System
-              last_checkin: Last Check-in
+            custom_eas:
+              - {name: FileVault, column: FV, type: boolean, true_value: Encrypted}
             sheets:
-              order: ["Device Inventory", "Cover"]
+              order: ["FileVault", "Cover"]
             """)
-            let tabs = try await generate(
-                config, dataDir: try fixtureData([], in: scratch), in: scratch,
-                csv: TestFixtures.dir("csv/dummy_all_macs.csv"))
-            XCTAssertEqual(Array(tabs.prefix(2)), ["Device Inventory", "Cover"], "\(tabs)")
+            let tabs = try await generate(config, dataDir: dataDir, in: scratch)
+            XCTAssertEqual(Array(tabs.prefix(2)), ["FileVault", "Cover"], "\(tabs)")
         }
     }
 
@@ -63,7 +64,7 @@ final class SheetsSettingsTests: XCTestCase {
             func school(_ yaml: String) async throws -> [String] {
                 let out = scratch.appendingPathComponent("school-\(UUID().uuidString).xlsx")
                 try await ReportEngine.schoolGenerate(
-                    config: try ConfigLoader.loadFromString(yaml), csvURL: nil,
+                    config: try ConfigLoader.loadFromString(yaml),
                     dataDir: dataDir, outputURL: out, onLine: { lines.add($0.text) })
                 return try Self.tabs(of: out)
             }
@@ -85,20 +86,11 @@ final class SheetsSettingsTests: XCTestCase {
 
     // MARK: - An only list that names no tab
 
-    private static let csvColumns = """
-    columns:
-      computer_name: Computer Name
-      serial_number: Serial Number
-      operating_system: Operating System
-      last_checkin: Last Check-in
-
-    """
-
     func testAnOnlyListThatNamesNoJamfCLITabIsIgnoredWithAWarning() async throws {
         try await withScratch { scratch in
             let dataDir = try fixtureData(["overview"], in: scratch)
             let plain = try await generate(ReportConfig(), dataDir: dataDir, in: scratch)
-            // A typo, and a CSV tab on a run with no CSV: neither is a tab of this workbook.
+            // A typo, and a tab no writer has: neither is a tab of this workbook.
             for typed in ["[Fleet Overveiw, Cover Page]", "[Device Inventory]"] {
                 let lines = Lines()
                 let tabs = try await generate(
@@ -107,25 +99,6 @@ final class SheetsSettingsTests: XCTestCase {
                 XCTAssertEqual(tabs, plain, typed)
                 XCTAssertEqual(lines.warnings.count, 1, "\(typed): \(lines.warnings)")
             }
-        }
-    }
-
-    func testAnOnlyListThatNamesNoCSVTabIsIgnoredWithAWarning() async throws {
-        try await withScratch { scratch in
-            let dataDir = try fixtureData([], in: scratch)
-            let csv = TestFixtures.dir("csv/dummy_all_macs.csv")
-            let plain = try await generate(
-                try ConfigLoader.loadFromString(Self.csvColumns), dataDir: dataDir,
-                in: scratch, csv: csv)
-            let lines = Lines()
-            let tabs = try await generate(
-                try ConfigLoader.loadFromString(Self.csvColumns + "sheets:\n  only: [Nonsense]\n"),
-                dataDir: dataDir, in: scratch, csv: csv, lines: lines)
-            XCTAssertEqual(tabs, plain)
-            XCTAssertEqual(lines.warnings, [
-                "[warn] sheets.only names no tab of this workbook (\"Nonsense\"), so the app "
-                    + "ignores it.",
-            ])
         }
     }
 
@@ -206,7 +179,7 @@ final class SheetsSettingsTests: XCTestCase {
         sheets: \(sheets)
         """)
         try await ReportEngine(config: config, dataDir: dataDir).generate(
-            csvURL: nil, outputURL: out, locateJamfCLI: { nil })
+            outputURL: out, locateJamfCLI: { nil })
         let folder = try FileManager.default.contentsOfDirectory(
             atPath: out.deletingLastPathComponent().path)
         return (try Self.tabs(of: out), folder.filter { $0.hasSuffix(".png") }.count)
@@ -266,12 +239,12 @@ final class SheetsSettingsTests: XCTestCase {
     }
 
     private func generate(
-        _ config: ReportConfig, dataDir: URL, in scratch: URL, csv: URL? = nil,
+        _ config: ReportConfig, dataDir: URL, in scratch: URL,
         template: any ReportTemplate = FullInstanceTemplate(), lines: Lines = Lines()
     ) async throws -> [String] {
         let out = scratch.appendingPathComponent("out-\(UUID().uuidString)/report.xlsx")
         try await ReportEngine(config: config, dataDir: dataDir)
-            .generate(csvURL: csv, outputURL: out, template: template, locateJamfCLI: { nil },
+            .generate(outputURL: out, template: template, locateJamfCLI: { nil },
                       onLine: { lines.add($0.text) })
         return try Self.tabs(of: out)
     }

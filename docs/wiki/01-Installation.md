@@ -7,13 +7,12 @@ This page covers installing the macOS app and `jamf-cli`.
 | Component | Requirement |
 |---|---|
 | macOS | macOS Sequoia 15 or later — to run the app |
-| jamf-cli | v1.29.0 or later — optional; powers live collection (v1.18.0 to v1.28 still run, with a warning; the project tracks v1.33.0) |
+| jamf-cli | v1.29.0 or later — optional; powers live collection (collect, backup and scheduled runs stop on an older one; the project tracks v1.34.0) |
 | Xcode | 16 or later — only needed to build the app from source |
 | Architecture | Apple silicon (arm64) — the prebuilt `.pkg`/`.dmg` are arm64-only; Intel Macs build from source |
 
-`jamf-cli` is optional. The app works from a Jamf Pro CSV export
-and cached snapshots with no jamf-cli installed — jamf-cli adds live collection and the
-API-driven dashboards.
+`jamf-cli` is optional. Without it the app works only from cached snapshots — jamf-cli adds
+live collection and the API-driven dashboards.
 
 ## Install the macOS app
 
@@ -56,7 +55,7 @@ jamf-cli platform setup --profile-name <your profile>
 Create the integration in Jamf Account first, at the **environment** level (tenant level is
 the legacy choice; an organization-level integration reaches only Jamf Account and cannot
 report). The setup creates a Platform Gateway profile that enables both the Pro and Platform
-API command sets. Credentials are stored in the macOS keychain, not in shell history.
+API command sets. Setup stores the credentials in the macOS keychain through `jamf-cli`, not in shell history.
 
 For an on-premises or GovCloud server, or when you have no Jamf Account integration, use a
 direct Jamf Pro profile:
@@ -102,7 +101,7 @@ jamf-cli config validate -p <profile>
 ```
 
 A clean exit means the app and CLI can collect live data. If `jamf-cli` is missing or
-unauthenticated, both still run from CSV exports and cached snapshots — the live
+unauthenticated, both still run from cached snapshots — the live
 dashboards are simply skipped.
 
 ## Next

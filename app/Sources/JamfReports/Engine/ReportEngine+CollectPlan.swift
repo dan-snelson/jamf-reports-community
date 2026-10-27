@@ -11,6 +11,7 @@ extension ReportEngine {
         case settingsSkipExpensive
         case platformOnly(authMethod: String)
         case environmentLevel
+        case schoolNoPlatform
         case collectSkip
         case dashboardUnsupported(installedVersion: String?)
         case tierNotSelected(CollectionTier)
@@ -25,6 +26,9 @@ extension ReportEngine {
                 return "requires a Platform API profile (auth-method is \(authMethod))"
             case .environmentLevel:
                 return "needs a platform environment integration (this profile is tenant level)"
+            case .schoolNoPlatform:
+                return "the Jamf School profile has no Platform API fields "
+                    + "(Data Sources › Add Platform API)"
             case .collectSkip:
                 return "listed in jamf_cli.collect_skip"
             case .dashboardUnsupported(let installed):
@@ -44,6 +48,7 @@ extension ReportEngine {
             case .platformOnly(let authMethod):
                 return "requires a Platform API profile, auth-method is \(authMethod)"
             case .environmentLevel: return "needs a platform environment integration"
+            case .schoolNoPlatform: return "the School profile has no Platform API fields"
             case .collectSkip: return "jamf_cli.collect_skip"
             case .dashboardUnsupported:
                 return "needs jamf-cli \(JamfCLIInstaller.dashboardVersion) or later"
@@ -234,6 +239,55 @@ extension ReportEngine {
             profile: profile, running: plan.filter { $0.skip == nil }.map(\.kind) + afterMatrix,
             skipped: groups
         ) + ["[plan] \(deviceScan.planText)"]
+    }
+
+    /// The School matrix with this run's skips. School has no per-device scan, so its sources
+    /// go with the refresh or inventory tier (a scan-only run collects nothing) at the refresh
+    /// cadence; `force` (Collect now) ignores the cadence. `platformFieldsMissing` skips the
+    /// blueprints kind, the one School source that needs the profile's Platform fields.
+    static func planSchoolCollect(
+        profile: String, tiers: Set<CollectionTier>, force: Bool, now: Date = Date(),
+        platformFieldsMissing: Bool = false, lastRun: (String) -> Date?
+    ) -> [PlannedKind] {
+        let cadence = Cadence.seconds(CollectionTier.refresh.intervalSeconds)
+        return schoolCommandMatrix(profile: profile).map { args, kind in
+            let skip: CollectSkipReason?
+            if tiers.isDisjoint(with: [.refresh, .inventory]) {
+                skip = .tierNotSelected(.inventory)
+            } else if kind == schoolBlueprintsKind, platformFieldsMissing {
+                skip = .schoolNoPlatform
+            } else if !force, !CadenceResolver.isDue(
+                lastRun: lastRun(kind), cadence: cadence, now: now) {
+                skip = .notDue(lastRun: lastRun(kind), cadence: cadence)
+            } else {
+                skip = nil
+            }
+            return PlannedKind(args: args, kind: kind, skip: skip)
+        }
+    }
+
+    /// The `[plan]` lines for a fixed-list plan (Jamf School): what runs, then what is skipped
+    /// under its reason. `afterMatrix` and `afterMatrixSkipped` are the sources fetched after
+    /// the commands (`sofa`), listed like the Pro plan lists them.
+    static func collectPlanLines(
+        profile: String, fixedPlan plan: [PlannedKind], afterMatrix: [String] = [],
+        afterMatrixSkipped: [String] = []
+    ) -> [String] {
+        var groups: [(label: String, kinds: [String])] = []
+        for item in plan {
+            guard let skip = item.skip else { continue }
+            if let index = groups.firstIndex(where: { $0.label == skip.planLabel }) {
+                groups[index].kinds.append(item.kind)
+            } else {
+                groups.append((skip.planLabel, [item.kind]))
+            }
+        }
+        if !afterMatrixSkipped.isEmpty {
+            groups.append((CollectSkipReason.collectSkip.planLabel, afterMatrixSkipped))
+        }
+        return collectPlanLines(
+            profile: profile, running: plan.filter { $0.skip == nil }.map(\.kind) + afterMatrix,
+            skipped: groups)
     }
 
     /// The `[plan]` lines for a collect with a fixed list (Jamf School, Protect): `running`

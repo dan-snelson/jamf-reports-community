@@ -12,6 +12,7 @@ struct DDMBlueprintView: View {
     @State private var snapshot: DDMBlueprintService.Snapshot = .empty
     @State private var deviceSnapshot: DDMDeviceStatusService.Snapshot = .empty
     @State private var fleetCounts: (enabled: Int, total: Int) = (0, 0)
+    @State private var showAllIdentifiers = false
     /// A Platform API profile, as profile discovery read it from jamf-cli.
     private var platformAvailable: Bool {
         !workspace.demoMode && workspace.activeCLIProfile?.auth?.isPlatform == true
@@ -171,7 +172,9 @@ struct DDMBlueprintView: View {
                         message: "Run a collect with the Scan tier (or wait for the weekly "
                             + "managed scan) to populate per-device DDM status. Platform "
                             + "profiles can also run the blueprint reports.",
-                        commands: [UpdatesView.collectCommand(profile: workspace.profile)]
+                        // The scan walks the computers snapshot, so inventory comes too.
+                        commands: [EmptyStateView.collectCommand(
+                            profile: workspace.profile, kinds: ["computers", "ddm-device-status"])]
                     )
                 }
             }
@@ -185,7 +188,7 @@ struct DDMBlueprintView: View {
         return Card {
             VStack(alignment: .leading, spacing: 14) {
                 SectionHeader(title: "Blueprint Adoption",
-                              trailing: "\(snapshot.totalBlueprints) blueprints")
+                              trailing: HtmlSectionFormatters.plural(snapshot.totalBlueprints, "blueprint"))
                 HStack(alignment: .top, spacing: 28) {
                     DDMBlueprintView.adoptionDonut(deployed: agg.deployed,
                                                    notDeployed: agg.notDeployed)
@@ -227,7 +230,7 @@ struct DDMBlueprintView: View {
         return Card {
             VStack(alignment: .leading, spacing: 12) {
                 SectionHeader(title: "Declaration Sources",
-                              trailing: "\(snapshot.totalDeclarationSources) sources")
+                              trailing: HtmlSectionFormatters.plural(snapshot.totalDeclarationSources, "source"))
                 HStack(spacing: 10) {
                     DDMBlueprintView.declarationCounter(label: "Sources w/ Issues",
                                                         value: agg.sourcesWithIssues,
@@ -265,7 +268,7 @@ struct DDMBlueprintView: View {
                     label: "Reported", value: deviceSnapshot.ddmReportedCount,
                     color: Theme.Colors.ok)
                 DDMBlueprintView.declarationCounter(
-                    label: "Failing declarations",
+                    label: "Declaration failures",
                     value: deviceSnapshot.failingDeclarationCount,
                     color: deviceSnapshot.failingDeclarationCount > 0
                         ? Theme.Colors.danger : Theme.Colors.ok)
@@ -273,38 +276,101 @@ struct DDMBlueprintView: View {
         }
     }
 
+    /// Identifiers shown before "Show all N".
+    private static let identifierPreview = 15
+    /// Quiet single-device identifiers listed when their group is opened.
+    private static let quietListCap = 50
+
     private var deviceDeclarationsCard: some View {
-        Card {
+        let overview = deviceSnapshot.identifierOverview
+        let shown = showAllIdentifiers
+            ? overview.notable : Array(overview.notable.prefix(Self.identifierPreview))
+        return Card {
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Declarations by identifier",
-                              trailing: "\(deviceSnapshot.byIdentifier.count) identifiers")
-                if deviceSnapshot.byIdentifier.isEmpty {
+                SectionHeader(
+                    title: "Declarations by identifier",
+                    trailing: Self.identifiersSummary(
+                        total: overview.totalCount, withIssues: overview.withIssuesCount))
+                if overview.totalCount == 0 {
                     Text("No declarations reported by any DDM-enabled Mac yet.")
                         .font(.footnote).foregroundStyle(Theme.Text.tertiary(contrast))
                 }
-                ForEach(deviceSnapshot.byIdentifier.prefix(30)) { entry in
+                ForEach(shown) { entry in
                     DisclosureGroup {
                         DDMBlueprintView.deviceList(entry.devices)
                     } label: {
-                        HStack(spacing: 8) {
-                            // Blueprint names cannot be joined: the blueprint-status
-                            // snapshot carries no identifier field to join on.
-                            Mono(text: entry.identifier)
-                                .lineLimit(1)
-                            Spacer()
-                            Pill(text: "\(entry.active) active", tone: .teal)
-                            if entry.inactive > 0 {
-                                Pill(text: "\(entry.inactive) inactive", tone: .warn)
-                            }
-                            if entry.invalid > 0 {
-                                Pill(text: "\(entry.invalid) invalid", tone: .danger)
-                            }
-                            if entry.mixed > 0 { Pill(text: "\(entry.mixed) mixed", tone: .danger) }
-                        }
+                        identifierLabel(entry)
                     }
+                }
+                if overview.notable.count > Self.identifierPreview {
+                    Button(showAllIdentifiers ? "Show fewer"
+                           : "Show all \(overview.notable.count)") {
+                        showAllIdentifiers.toggle()
+                    }
+                    .buttonStyle(.link)
+                    .font(.footnote)
+                }
+                if !overview.quietSingles.isEmpty {
+                    quietSinglesGroup(overview.quietSingles)
                 }
             }
         }
+    }
+
+    private func identifierLabel(_ entry: DDMDeviceStatusService.IdentifierSummary) -> some View {
+        HStack(spacing: 8) {
+            // Blueprint names cannot be joined: the blueprint-status snapshot carries no
+            // identifier field to join on, and the device snapshot holds only the identifier.
+            Mono(text: entry.identifier)
+                .lineLimit(1)
+            Spacer()
+            Pill(text: HtmlSectionFormatters.plural(entry.deviceCount, "device"), tone: .muted)
+            if entry.active > 0 { Pill(text: "\(entry.active) active", tone: .teal) }
+            if entry.inactive > 0 { Pill(text: "\(entry.inactive) inactive", tone: .warn) }
+            if entry.invalid > 0 { Pill(text: "\(entry.invalid) invalid", tone: .danger) }
+            if entry.mixed > 0 { Pill(text: "\(entry.mixed) mixed", tone: .danger) }
+        }
+    }
+
+    /// The healthy one-device tail, collapsed: on a 583-Mac fleet it was ~2,200 rows.
+    private func quietSinglesGroup(
+        _ quiet: [DDMDeviceStatusService.IdentifierSummary]
+    ) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 4) {
+                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
+                    ForEach(quiet.prefix(Self.quietListCap)) { entry in
+                        GridRow {
+                            Mono(text: entry.identifier, size: 10.5)
+                            Text(entry.devices.first?.name ?? "").font(.caption)
+                        }
+                    }
+                }
+                if quiet.count > Self.quietListCap {
+                    Text("+ \(quiet.count - Self.quietListCap) more \u{2014} full list in the "
+                         + "workbook's DDM Device Status sheet.")
+                        .font(.caption).foregroundStyle(Theme.Colors.fgMuted)
+                }
+            }
+            .padding(.leading, 12)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Text(Self.quietSinglesText(quiet.count))
+                .font(.footnote.weight(.semibold))
+        }
+    }
+
+    /// "2,204 identifiers, 29 with issues" (the card's count, not the header tile's).
+    nonisolated static func identifiersSummary(total: Int, withIssues: Int) -> String {
+        "\(HtmlSectionFormatters.plural(total, "identifier")), \(withIssues) with issues"
+    }
+
+    nonisolated static func quietSinglesText(_ count: Int) -> String {
+        let noun = HtmlSectionFormatters.plural(count, "identifier")
+        return count == 1
+            ? "\(noun) appears on one device and is healthy"
+            : "\(noun) appear on one device each and are healthy"
     }
 
     private var softwareUpdatesCard: some View {
@@ -322,7 +388,7 @@ struct DDMBlueprintView: View {
                         HStack {
                             Text("Pending \(bucket.version)").font(.footnote.weight(.semibold))
                             Spacer()
-                            Pill(text: "\(bucket.devices.count) devices", tone: .gold)
+                            Pill(text: HtmlSectionFormatters.plural(bucket.devices.count, "device"), tone: .gold)
                         }
                     }
                 }
@@ -333,7 +399,7 @@ struct DDMBlueprintView: View {
                         HStack {
                             Text(bucket.reason).font(.footnote.weight(.semibold)).lineLimit(2)
                             Spacer()
-                            Pill(text: "\(bucket.devices.count) devices", tone: .danger)
+                            Pill(text: HtmlSectionFormatters.plural(bucket.devices.count, "device"), tone: .danger)
                         }
                     }
                 }
@@ -386,7 +452,7 @@ struct DDMBlueprintView: View {
 
     private static func lockReason() -> String {
         "Your active jamf-cli profile does not use auth-method: platform. Connect with a Jamf "
-            + "Account integration (Add workspace, then Platform Gateway) or switch this "
+            + "Account integration (Settings › Add connection, then Platform API) or switch this "
             + "workspace to a Platform profile."
     }
 
@@ -564,7 +630,7 @@ struct DDMBlueprintView: View {
                 .font(Theme.Fonts.mono(11))
                 .foregroundStyle(Theme.Text.tertiary(contrast))
                 .frame(width: 100, alignment: .trailing)
-            Text("\(entry.devices) devices")
+            Text(HtmlSectionFormatters.plural(entry.devices, "device"))
                 .font(Theme.Fonts.mono(11))
                 .foregroundStyle(Theme.Colors.fg2)
                 .frame(width: 90, alignment: .trailing)
@@ -593,7 +659,7 @@ struct DDMBlueprintView: View {
     private static func declarationA11y(_ entry: DDMBlueprintService.Snapshot.Declaration) -> String {
         let source = entry.source.isEmpty ? "Unnamed source" : entry.source
         let type = entry.type.isEmpty ? "unknown type" : entry.type
-        return "\(source), \(type), \(entry.devices) devices, "
+        return "\(source), \(type), \(HtmlSectionFormatters.plural(entry.devices, "device")), "
             + "\(entry.successful) successful, \(entry.unsuccessful) unsuccessful"
     }
 }

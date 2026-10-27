@@ -155,7 +155,8 @@ final class DemoDataOperationsTests: XCTestCase {
     func testDemoPolicyFindingsMatchTheSummaryTiles() {
         let snapshot = DemoData.policyHealth
         let summary = snapshot.summary
-        let bySeverity = snapshot.findingsBySeverity
+        let bySeverity = Dictionary(grouping: snapshot.findings) { $0.severity.lowercased() }
+            .mapValues(\.count)
         let checks = ["no_scope": "No targets in scope", "no_category": "Uncategorised"]
 
         XCTAssertEqual(summary?.configFindings, snapshot.findings.count)
@@ -182,7 +183,7 @@ final class DemoDataOperationsTests: XCTestCase {
         XCTAssertEqual(snapshot.snapshotDate, DemoData.referenceDate)
     }
 
-    // MARK: - Mobile Fleet
+    // MARK: - Mobile Devices
 
     /// Supervised devices are the ADE ones, each with its prestage; the
     /// personal devices are user-enrolled and never supervised.
@@ -244,9 +245,9 @@ final class DemoDataOperationsTests: XCTestCase {
         let snapshot = DemoData.groupInventory
 
         XCTAssertTrue(snapshot.isDetected)
-        XCTAssertEqual(snapshot.classicComputerGroupCount, 14)
-        XCTAssertEqual(snapshot.classicComputerSmartGroupCount, 9)
-        XCTAssertEqual(snapshot.classicComputerStaticGroupCount, 5)
+        XCTAssertEqual(snapshot.classicComputerGroupCount, 18)
+        XCTAssertEqual(snapshot.classicComputerSmartGroupCount, 11)
+        XCTAssertEqual(snapshot.classicComputerStaticGroupCount, 7)
         XCTAssertEqual(snapshot.classicMobileGroupCount, 4)
         XCTAssertEqual(snapshot.advancedSearchCount, 2)
         for groups in [snapshot.classicComputerGroups, snapshot.classicMobileGroups] {
@@ -255,6 +256,31 @@ final class DemoDataOperationsTests: XCTestCase {
         }
         XCTAssertTrue(snapshot.advancedMobileSearches.allSatisfy { !($0.criteria ?? []).isEmpty })
         XCTAssertEqual(snapshot.snapshotDate, DemoData.referenceDate)
+    }
+
+    /// The Groups tiles agree with the Health Audit's analysis and the policy screen.
+    func testDemoGroupInventoryMatchesAnalysisAndPolicyFacts() {
+        let snapshot = DemoData.groupInventory
+
+        XCTAssertEqual(snapshot.unusedGroupCount, DemoData.unusedGroups.count)
+        XCTAssertEqual(snapshot.analysisDate, DemoData.groupAnalysisRunDate)
+        for unused in DemoData.unusedGroups {
+            let group = snapshot.classicComputerGroups.first { String($0.id ?? -1) == unused.id }
+            XCTAssertEqual(group?.name, unused.name)
+            XCTAssertEqual(
+                snapshot.detail(for: group ?? snapshot.classicComputerGroups[0], .computer)
+                    .memberCount, unused.memberCount, unused.name)
+        }
+        XCTAssertEqual(snapshot.emptyGroupCount, 3)
+        XCTAssertEqual(snapshot.unscopedPolicyCount, 8)
+        for group in snapshot.classicComputerGroups {
+            let members = snapshot.detail(for: group, .computer).memberCount ?? -1
+            XCTAssertTrue((0...DemoData.totalDevices).contains(members), group.name ?? "")
+        }
+        for group in snapshot.classicMobileGroups {
+            let members = snapshot.detail(for: group, .mobile).memberCount ?? -1
+            XCTAssertTrue((0...DemoData.mobileDeviceCount).contains(members), group.name ?? "")
+        }
     }
 
     // MARK: - Trends

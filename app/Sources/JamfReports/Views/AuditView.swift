@@ -1647,10 +1647,10 @@ func auditActionDestination(for finding: AuditFinding) -> (label: String, tab: T
     }
     if name.contains("extension attribute") { return ("Extension Attributes", .extensionAttributes) }
     if name.contains("group") { return ("Groups & Searches", .groupInventory) }
-    if name.contains("mdm command") { return ("Devices", .devices) }
+    if name.contains("mdm command") { return ("Computers", .devices) }
     switch finding.category.lowercased() {
     case "security": return ("Security Posture", .securityPosture)
-    case "contact gap": return ("Devices", .devices)
+    case "contact gap": return ("Computers", .devices)
     case "compliance": return ("Compliance Posture", .compliancePosture)
     case "hygiene": return ("Policies & Profiles", .policyProfile)
     default: return nil

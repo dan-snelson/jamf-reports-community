@@ -48,8 +48,8 @@ final class MSCPDenominatorTests: XCTestCase {
         XCTAssertEqual(a.passCount, 2)
         XCTAssertEqual(try XCTUnwrap(a.compliancePct), 50.0, accuracy: 0.0001)
         XCTAssertEqual(a.complianceRateBasisText, "2 of 4 evaluated")
-        XCTAssertEqual(a.evaluatedBasisText, "of 6 devices, 2 No Data")
-        XCTAssertEqual(a.shareBasisText, "Share of all 6 devices, No Data included")
+        XCTAssertEqual(a.evaluatedBasisText, "of 6 computers, 2 No Data")
+        XCTAssertEqual(a.shareBasisText, "Share of all 6 computers, No Data included")
         // The donut divides by all six: the Pass slice reads 2 of 6, not 2 of 4.
         let pass = try XCTUnwrap(
             MSCPChartDataBuilder.toDonutSlices(result: a).first { $0.label.hasPrefix("Pass") })
@@ -59,7 +59,7 @@ final class MSCPDenominatorTests: XCTestCase {
     func testSubtitleGivesTheRangeWhenBaselinesEvaluateDifferentCounts() {
         XCTAssertEqual(
             MSCPComplianceService.evaluatedSummary(results()),
-            "6 devices across 2 mSCP baselines; each evaluates the devices that report its "
+            "6 computers across 2 mSCP baselines; each evaluates the computers that report its "
                 + "column (4 to 6).")
     }
 
@@ -67,10 +67,10 @@ final class MSCPDenominatorTests: XCTestCase {
         let b = results(columns: ["Count B"])
         XCTAssertEqual(
             MSCPComplianceService.evaluatedSummary(b),
-            "6 of 6 devices evaluated across 1 mSCP baseline.")
+            "6 of 6 computers evaluated across 1 mSCP baseline.")
         XCTAssertEqual(
             MSCPComplianceService.evaluatedSummary(b + b),
-            "6 of 6 devices evaluated across 2 mSCP baselines.")
+            "6 of 6 computers evaluated across 2 mSCP baselines.")
     }
 
     func testSubtitleDoesNotBorrowTheFirstBaselinesCount() {

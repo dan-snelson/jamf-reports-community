@@ -2082,6 +2082,7 @@ final class CLIBridge {
         let protectResult = await backupProtect(
             profile: profile, workspace: workspace, staging: validatedTemp, executable: bin,
             timeout: protectTimeout,
+            proState: proFailed ? .failed : (isPartial ? .partial : .ok),
             sharedStorage: {
                 BackupMaintenance.sharedStorageDescription(
                     backupsRoot, profile: profile, volumeIsLocal: CloudStorage.isOnLocalVolume)

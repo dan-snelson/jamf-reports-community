@@ -402,19 +402,25 @@ versions in this repository map to git tags.
   an empty report, and OS Updates says Jamf Pro reports no managed software updates. When jamf-cli
   printed a fetch warning first (Managed Software Update Plans turned off, a failed request), it
   is still a failure. (#284)
+- A Jamf Protect tenant with nothing to export now counts as backed up. It used to mark every
+  backup Partial and keep a Needs attention item open. (#284)
+- When the Protect part of a backup fails, the Partial line now says how the Jamf Pro backup
+  ended. Before, it always said the Jamf Pro backup was complete, even when it had failed. (#284)
+- Backups held because their Protect part failed are capped at the number of backups you keep.
+  While Protect kept failing, every Jamf Pro backup was kept and none was ever pruned. (#284)
 
 ### Security
 
+- Another Mac sharing the workspace can no longer crash this Mac's runs by planting a status
+  file with a huge Needs attention count. Counts read from status files are held to a sane range,
+  and counting up stops at the top instead of overflowing. A status file stamped past the year
+  3000 is ignored, so it can no longer hide every later update. (#284)
 - The `jamf-reports` command-line tool now shows control characters in a device lookup, a log
   line or an error as `\u001b`-style text when it prints to a terminal, so a device name or a
   server error can no longer clear the screen, change the window title, write the clipboard, or
   reorder or split the line with right-to-left or line-separator characters. Output piped to a
   file or another program is unchanged.
 - The webhook URL is now hidden as you type it, in setup's **Run automatically** step and on the
-- Another Mac sharing the workspace can no longer crash this Mac's runs by planting a status
-  file with a huge Needs attention count. Counts read from status files are held to a sane range,
-  and counting up stops at the top instead of overflowing. A status file stamped past the year
-  3000 is ignored, so it can no longer hide every later update. (#284)
   Notifications card in Automation and Schedules, since anyone who has the URL can post to the
   channel. (#284)
 - Shared logs and diagnostic bundles now remove the host of every server in your own jamf-cli

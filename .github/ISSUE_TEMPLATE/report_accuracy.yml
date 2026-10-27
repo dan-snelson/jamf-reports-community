@@ -25,7 +25,7 @@ body:
     id: app-version
     attributes:
       label: Jamf Reports version
-      placeholder: "e.g. 2.10.1"
+      placeholder: "e.g. 2.11.0"
     validations:
       required: true
 

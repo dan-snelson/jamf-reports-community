@@ -7,6 +7,16 @@ versions in this repository map to git tags.
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-10-27
+
+2.11.0 brings Jamf School workspaces up to Jamf Pro's: their own Devices screen, daily summaries
+and history in Trends, and, as experiments, Jamf Protect and Platform API access for blueprints.
+A Jamf Pro backup now includes Jamf Protect. Warnings you need to act on show as "Needs
+attention" until the next run's check passes, and notifications can send a daily heartbeat.
+Extension Attribute sheets come from what jamf-cli collects, so a workbook no longer needs a CSV
+export. Scheduled runs and backups now need jamf-cli 1.29.0 or later. On a shared team folder,
+the app no longer follows links or reads pipes another Mac could plant.
+
 ### Added
 
 - A configuration profile can now turn AI off or limit it to on-device models with the

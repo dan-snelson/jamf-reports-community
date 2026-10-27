@@ -40,6 +40,9 @@ struct UpdateStatusService: Sendable {
                 && lhs.scanFailuresAvailable == rhs.scanFailuresAvailable
         }
 
+        /// A snapshot was read and Jamf Pro reported no update statuses and no plans.
+        var collectedWithNoData: Bool { sourceFile != nil && total == 0 && planTotal == 0 }
+
         /// Failed/exception plan count derived from `plan_state_summary`,
         /// which every update-status snapshot carries. This is the number the
         /// plan-state donut shows — the "Failing Plans" KPI uses it so the two

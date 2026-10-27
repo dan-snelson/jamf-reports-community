@@ -119,6 +119,10 @@ final class AttentionLog: Sendable {
         return json.filter { [attentionKey, attentionAtKey].contains($0.key) }
     }
 
+    /// The latest `attention_at` a record may carry (the year 3000). A peer that planted a
+    /// later one would otherwise stay newest for good: no later commit could pass it.
+    static let maxAttentionAt: Double = 32_503_680_000
+
     private static let attentionKey = "attention"
     private static let attentionAtKey = "attention_at"
 
@@ -145,8 +149,9 @@ final class AttentionLog: Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let stored = try? decoder.decode(Stored.self, from: data),
-              let at = stored.attentionAt, let items = stored.attention else { return nil }
-        return (at, items.compactMap(\.item))
+              let at = stored.attentionAt, at <= maxAttentionAt, let items = stored.attention
+        else { return nil }
+        return (at, items.compactMap { $0.item?.clampingCount() })
     }
 
     // MARK: - Writing

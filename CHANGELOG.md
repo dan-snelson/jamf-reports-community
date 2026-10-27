@@ -411,6 +411,10 @@ versions in this repository map to git tags.
   reorder or split the line with right-to-left or line-separator characters. Output piped to a
   file or another program is unchanged.
 - The webhook URL is now hidden as you type it, in setup's **Run automatically** step and on the
+- Another Mac sharing the workspace can no longer crash this Mac's runs by planting a status
+  file with a huge Needs attention count. Counts read from status files are held to a sane range,
+  and counting up stops at the top instead of overflowing. A status file stamped past the year
+  3000 is ignored, so it can no longer hide every later update. (#284)
   Notifications card in Automation and Schedules, since anyone who has the URL can post to the
   channel. (#284)
 - Shared logs and diagnostic bundles now remove the host of every server in your own jamf-cli

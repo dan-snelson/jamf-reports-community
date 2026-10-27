@@ -1077,7 +1077,9 @@ run. A commit merges the run's changes into the workspace's open set (the `atten
 and counts up, a cleared one is removed; the result goes into the run's status file, else the app
 record (`appCollectRunLabel`'s), stamped `max(now, newest attention_at + 1 ms)` so a peer whose
 clock runs ahead cannot make this Mac's later commit read as older. It never creates `automation/`. Items decode leniently: a file
-without the keys is no record, an unknown code is skipped. The banner entry ranks below failing
+without the keys is no record, an unknown code is skipped. A peer can write these files, so a
+record stamped past `AttentionLog.maxAttentionAt` (the year 3000) is not read, a decoded `count`
+is held to 1...`AttentionItem.maxCount`, and counting up stops there instead of overflowing. The banner entry ranks below failing
 collects and the Doctor-driven entries, above stale data ("2 things need attention: …"); its
 button follows the newest item's code (`AttentionCode.destination`: Automation for the webhook,
 Backups for Protect, Run History on that run's log, `openRunLogRequested`, for the rest), and
